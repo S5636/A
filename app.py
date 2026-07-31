@@ -14,7 +14,7 @@ import calc_engine as ce
 import parsers
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, '이유상점_데이터.db')
+DB_PATH = os.path.join(BASE_DIR, 'shop_data.db')
 FEES_PATH = os.path.join(BASE_DIR, 'fees_config.json')
 SETTINGS_PATH = os.path.join(BASE_DIR, 'settings.json')
 
