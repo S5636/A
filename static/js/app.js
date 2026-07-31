@@ -664,6 +664,101 @@
     renderFeeTable(fees);
   }
 
+  // ================= TAB 3: 부가세 통합 =================
+  const vatState = { selectedMonth: '전체' };
+
+  async function loadVatMarkets() {
+    const markets = await api('/api/vat/markets');
+    const sel = document.getElementById('vat-market-select');
+    for (const m of markets) {
+      const opt = document.createElement('option');
+      opt.value = m; opt.textContent = m;
+      sel.appendChild(opt);
+    }
+  }
+
+  function renderVatMonthFilter(availableMonths) {
+    const el = document.getElementById('vat-month-filter');
+    el.innerHTML = '';
+    el.appendChild(renderChip('전체', vatState.selectedMonth === '전체', () => {
+      vatState.selectedMonth = '전체'; renderVatMonthFilter(availableMonths); loadVatTable();
+    }));
+    for (const ym of availableMonths) {
+      el.appendChild(renderChip(ym, vatState.selectedMonth === ym, () => {
+        vatState.selectedMonth = ym; renderVatMonthFilter(availableMonths); loadVatTable();
+      }));
+    }
+  }
+
+  async function loadVatTable() {
+    let url = '/api/vat/table';
+    if (vatState.selectedMonth !== '전체') {
+      const [y, m] = vatState.selectedMonth.split('-');
+      url += `?${qs({ year: parseInt(y, 10), month: parseInt(m, 10) })}`;
+    }
+    const data = await api(url);
+    renderVatMonthFilter(data.available_months);
+
+    const tbody = document.querySelector('#vat-table tbody');
+    const tfoot = document.querySelector('#vat-table tfoot');
+    const emptyHint = document.getElementById('vat-empty-hint');
+    tbody.innerHTML = ''; tfoot.innerHTML = '';
+
+    if (data.available_months.length === 0) {
+      emptyHint.style.display = '';
+      return;
+    }
+    emptyHint.style.display = 'none';
+
+    for (const row of data.rows) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${row.market}</td><td>${num(row.credit)}</td><td>${num(row.cash)}</td>
+        <td>${num(row.mobile)}</td><td>${num(row.other)}</td><td style="font-weight:700;">${num(row.total)}</td>`;
+      tbody.appendChild(tr);
+    }
+    const t = data.total;
+    const totalTr = document.createElement('tr');
+    totalTr.style.borderTop = '2px solid var(--border-strong)';
+    totalTr.innerHTML = `<td style="font-weight:700;">합계</td><td style="font-weight:700;">${num(t.credit)}</td>
+      <td style="font-weight:700;">${num(t.cash)}</td><td style="font-weight:700;">${num(t.mobile)}</td>
+      <td style="font-weight:700;">${num(t.other)}</td><td style="font-weight:700; color:var(--good);">${num(t.total)}</td>`;
+    tfoot.appendChild(totalTr);
+  }
+
+  async function uploadVatFiles(fileList) {
+    const market = document.getElementById('vat-market-select').value;
+    if (!market) { toast('마켓을 먼저 선택해주세요.', 'err'); return; }
+    const fd = new FormData();
+    fd.append('market', market);
+    for (const f of fileList) fd.append('files', f);
+    const log = document.getElementById('vat-upload-log');
+    log.innerHTML = '<div class="hint">업로드 처리 중...</div>';
+    try {
+      const data = await api('/api/vat/upload', { method: 'POST', body: fd });
+      log.innerHTML = '';
+      for (const r of data.results) {
+        const item = document.createElement('div');
+        item.className = `upload-log-item ${r.error ? 'err' : ''}`;
+        item.innerHTML = r.error
+          ? `<span>${r.filename}</span><span>${r.error}</span>`
+          : `<span>${r.filename} <span class="tag">(${market})</span></span><span>인식: ${r.months.join(', ')}</span>`;
+        log.appendChild(item);
+      }
+      toast('부가세 자료가 반영되었습니다.', 'ok');
+      loadVatTable();
+    } catch (err) {
+      log.innerHTML = `<div class="upload-log-item err">${err.message}</div>`;
+    }
+  }
+
+  document.getElementById('vat-file-btn').addEventListener('click', () => {
+    document.getElementById('vat-file-input').click();
+  });
+  document.getElementById('vat-file-input').addEventListener('change', (e) => {
+    if (e.target.files.length) uploadVatFiles(e.target.files);
+    e.target.value = '';
+  });
+
   // ================= TAB SWITCHING =================
   function activateTab(name) {
     state.tab = name;
@@ -674,6 +769,7 @@
     state.loadedTabs.add(name);
     if (name === 'summary') { loadSummaryAll(); loadCalendar(); }
     if (name === 'dashboard') { renderDashFilters(); renderDashTableHead(); loadDashOrders(); }
+    if (name === 'vat') { loadVatMarkets(); loadVatTable(); }
     if (name === 'upload') { loadSettingsLinks(); }
     if (name === 'fees') { loadFees(); }
   }

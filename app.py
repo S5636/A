@@ -12,6 +12,7 @@ from flask import Flask, request, jsonify, render_template, send_from_directory
 
 import calc_engine as ce
 import parsers
+import vat_parser as vat
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'shop_data.db')
@@ -20,6 +21,9 @@ SETTINGS_PATH = os.path.join(BASE_DIR, 'settings.json')
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
+# 로컬 1인용 앱이라 static 파일(CSS/JS) 캐시를 꺼서, 업데이트 zip으로 갈아끼운 뒤
+# 브라우저가 옛날 버전을 계속 보여주는 문제를 원천 차단한다.
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 
 def init_db():
@@ -38,6 +42,9 @@ def init_db():
         원장주문코드 TEXT, 주문코드 TEXT, 주문일자 TEXT, 상품코드 TEXT, 상품명 TEXT, 배송상태 TEXT,
         주문수량 TEXT, 택배회사 TEXT, 송장번호 TEXT, 받는사람 TEXT, 보내는사람 TEXT, 총결제금액 TEXT,
         상품가격 TEXT, 배송비 TEXT, 택배송장메모 TEXT, 주문관리메모 TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS vat_summary (
+        market TEXT, year INTEGER, month INTEGER, category TEXT, amount INTEGER,
+        PRIMARY KEY (market, year, month, category))""")
     conn.commit()
     conn.close()
     if not os.path.exists(FEES_PATH):
@@ -181,6 +188,47 @@ def api_upload():
             res['filename'] = f.filename
             results.append(res)
     return jsonify({'results': results})
+
+
+# ---------------------------------------------------------------------------
+# 부가세 통합
+# ---------------------------------------------------------------------------
+
+VAT_MARKETS = ['쿠팡', '네이버', '11번가', '지마켓', '옥션', 'TOSS', '카카오', '위메프', '기타']
+
+
+@app.route('/api/vat/markets')
+def api_vat_markets():
+    return jsonify(VAT_MARKETS)
+
+
+@app.route('/api/vat/upload', methods=['POST'])
+def api_vat_upload():
+    market = request.form.get('market', '').strip()
+    if not market:
+        return jsonify({'error': '마켓을 선택해주세요.'}), 400
+    files = request.files.getlist('files')
+    if not files:
+        return jsonify({'error': '파일이 없습니다.'}), 400
+    results = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for f in files:
+            fp = os.path.join(tmp, f.filename)
+            f.save(fp)
+            try:
+                res = vat.process_vat_upload(DB_PATH, fp, f.filename, market)
+            except Exception as e:
+                res = {'error': str(e)}
+            res['filename'] = f.filename
+            results.append(res)
+    return jsonify({'results': results})
+
+
+@app.route('/api/vat/table')
+def api_vat_table():
+    year = request.args.get('year', type=int)
+    month = request.args.get('month', type=int)
+    return jsonify(vat.get_vat_table(DB_PATH, year, month))
 
 
 # ---------------------------------------------------------------------------
