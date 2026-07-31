@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>이유마켓 CEO Margin Pro</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="app-shell">
+
+  <header class="app-header">
+    <div class="app-title">
+      <h1>이유마켓 CEO Margin Pro</h1>
+      <span class="sub">마진율 대시보드</span>
+    </div>
+    <nav class="tab-bar">
+      <button class="tab-btn active" data-tab="summary">👑 요약 리포트</button>
+      <button class="tab-btn" data-tab="dashboard">📊 통합 마진 대시보드</button>
+      <button class="tab-btn" data-tab="upload">📥 데이터 업로드</button>
+      <button class="tab-btn" data-tab="fees">⚙️ 수수료 설정</button>
+    </nav>
+  </header>
+
+  <!-- ======================= TAB 1: 요약 리포트 ======================= -->
+  <section class="tab-panel active" id="tab-summary">
+    <div class="grid-row" id="summary-kpi-all"></div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title"><span class="dot"></span>필터</div>
+      <div class="filter-row" id="summary-filters"></div>
+      <div class="hint" id="summary-filter-title">현재 [전체 보기] 상태입니다.</div>
+      <div class="grid-row" id="summary-kpi-filtered" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="grid-2" style="margin-top:16px;">
+      <div class="card">
+        <div class="card-title"><span class="dot"></span>마켓별 요약</div>
+        <table class="summary-table" id="market-summary-table">
+          <thead><tr><th>마켓</th><th>매출</th><th>수수료</th><th>매입</th><th>순수익</th><th>마진율</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="dot"></span>마켓별 순수익 비중</div>
+        <div class="donut-wrap" id="donut-wrap"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="calendar-head">
+        <div class="card-title" style="margin:0;"><span class="dot"></span>일별 매출 / 마진 캘린더</div>
+        <div class="hint" id="calendar-month-label"></div>
+      </div>
+      <div class="calendar-grid" id="calendar-grid"></div>
+    </div>
+  </section>
+
+  <!-- ======================= TAB 2: 통합 마진 대시보드 ======================= -->
+  <section class="tab-panel" id="tab-dashboard">
+    <div class="card">
+      <div class="filter-row" style="justify-content:space-between;">
+        <div class="card-title" style="margin:0;"><span class="dot"></span>필터 및 실시간 요약</div>
+        <input type="text" class="search-input" id="dash-search" placeholder="상품명·주문번호·상품ID·판매사상품코드 검색" style="width:280px;">
+      </div>
+      <div class="filter-row" id="dash-filters" style="margin-top:12px;"></div>
+      <div class="grid-row" id="dash-kpi" style="margin-top:14px;"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="filter-row" style="justify-content:space-between; margin-bottom:10px;">
+        <div class="card-title" style="margin:0;"><span class="dot"></span>주문 목록</div>
+        <span class="count-badge" id="dash-count"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="dash-table">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= TAB 3: 데이터 업로드 ======================= -->
+  <section class="tab-panel" id="tab-upload">
+    <div class="card">
+      <div class="card-title"><span class="dot"></span>빠른 이동 - 엑셀 다운로드</div>
+      <div class="hint">아래 버튼으로 판매채널(다팔자)과 매입처(오너클랜) 사이트를 새 탭에서 열고, 주문/발주내역 엑셀을 다운로드한 뒤 아래 업로드 영역에 끌어다 놓으세요.</div>
+      <div class="quick-links" style="margin-top:12px;">
+        <a class="quick-link-btn" id="link-dapalza" href="#" target="_blank" rel="noopener"><span class="ico">🛒</span> 다팔자 주문 다운로드 열기</a>
+        <a class="quick-link-btn" id="link-ownerclan" href="#" target="_blank" rel="noopener"><span class="ico">📦</span> 오너클랜 발주내역 열기</a>
+        <button class="btn secondary" id="btn-edit-links">🔗 바로가기 주소 설정</button>
+      </div>
+      <div class="settings-row" id="settings-row" style="display:none;">
+        <input class="text-input" id="input-dapalza-url" placeholder="다팔자 주문 다운로드 페이지 URL">
+        <input class="text-input" id="input-ownerclan-url" placeholder="오너클랜 발주내역 페이지 URL">
+        <button class="btn" id="btn-save-links">저장</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title"><span class="dot"></span>엑셀 일괄 업로드</div>
+      <div class="hint">다팔자 주문 엑셀 / TOSS 정산 엑셀 / 오너클랜 발주내역 엑셀을 자동으로 판별해서 반영합니다. 여러 파일을 한 번에 올릴 수 있어요.</div>
+      <div class="dropzone" id="dropzone" style="margin-top:12px;">
+        <div><strong>클릭</strong>하거나 파일을 이곳에 <strong>끌어다 놓으세요</strong></div>
+        <div class="hint">.xlsx · .csv</div>
+        <input type="file" id="file-input" multiple accept=".xlsx,.csv" style="display:none;">
+      </div>
+      <div class="upload-log" id="upload-log"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title"><span class="dot"></span>HL(수기 매입처) 텍스트 붙여넣기 매칭</div>
+      <div class="hint">HL측에서 받은 텍스트를 그대로 붙여넣고 변환하세요. 변환된 표의 <b>상품주문번호</b> 칸에 실제 판매 주문번호를 입력한 뒤 저장하면 매입 데이터로 반영됩니다.</div>
+      <textarea class="text-input hl-textarea" id="hl-textarea" style="margin-top:10px;" placeholder="2026.07.10&#10;2026071012345678&#10;텀블러 캠핑용 무선 보온병 15,900원&#10;입금완료"></textarea>
+      <div style="margin-top:10px;"><button class="btn" id="btn-hl-parse">텍스트를 데이터로 변환</button></div>
+      <div class="table-wrap" style="max-height:none; margin-top:6px;">
+        <table class="hl-table" id="hl-table">
+          <thead><tr><th>주문일자</th><th>HL주문번호</th><th>상품명</th><th>매입상태</th><th>매입가</th><th>배송비</th><th>상품주문번호(직접입력)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div style="margin-top:10px;"><button class="btn" id="btn-hl-save">저장 / 매칭</button></div>
+    </div>
+  </section>
+
+  <!-- ======================= TAB 4: 수수료 설정 ======================= -->
+  <section class="tab-panel" id="tab-fees">
+    <div class="card">
+      <div class="filter-row" style="justify-content:space-between;">
+        <div class="card-title" style="margin:0;"><span class="dot"></span>마켓별 수수료 설정</div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn secondary" id="btn-fee-reset">🔄 팩트체크된 기본값으로 강제 초기화</button>
+          <button class="btn" id="btn-fee-save">💾 수수료 영구 저장하기</button>
+        </div>
+      </div>
+      <table class="fee-table" id="fee-table" style="margin-top:14px;">
+        <thead><tr><th style="text-align:left;">마켓</th><th>판매수수료(%)</th><th>결제/제휴(%)</th><th>배송비수수료(%)</th><th>영세환급(%)</th><th>구간기준금액(원)</th><th>구간초과 추가수수료(%)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="fee-note">
+        ※ 쿠팡 판매수수료에 "자동매칭(11.55)"처럼 "자동" 글자가 들어가면 상품명 키워드로 카테고리별 수수료가 자동 판별됩니다.<br>
+        ※ 광고비 할인은 기본 판매수수료에만 적용되며, 결제/제휴·배송비수수료·영세환급·구간가산분은 영향받지 않습니다.
+      </div>
+      <div class="fee-links">
+        <a href="https://www.coupang.com" target="_blank" rel="noopener">쿠팡 수수료 안내 ↗</a>
+        <a href="https://sell.smartstore.naver.com" target="_blank" rel="noopener">네이버 스마트스토어 수수료 안내 ↗</a>
+        <a href="https://www.11st.co.kr" target="_blank" rel="noopener">11번가 수수료 안내 ↗</a>
+        <a href="https://www.gmarket.co.kr" target="_blank" rel="noopener">G마켓·옥션 수수료 안내 ↗</a>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
