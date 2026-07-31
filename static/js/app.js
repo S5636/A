@@ -12,16 +12,16 @@
     "지마켓": "#c98500", "옥션": "#d55181", "TOSS": "#2fbf3f", "카카오": "#9085e9",
   };
 
-  // [key, label, align('l'=left/'r'=right/'c'=center-checkbox), default width(%)]
+  // [key, label(줄바꿈은 \n), align('l'=left/'r'=right/'c'=center-checkbox), default width(%)]
   const COLS = [
-    ['bundle_no', '합배송코드', 'l', 4.7], ['order_id', '원장주문코드', 'l', 5.8], ['source', '공급사', 'l', 3.3],
-    ['market', '마켓', 'l', 3.3], ['sell_status', '주문상태', 'l', 3.6], ['buy_status', '매입상태', 'l', 4.3],
-    ['order_date', '주문일시', 'l', 6.5], ['prod_id', '상품ID', 'l', 4.3], ['prod_name', '상품명', 'l', 9.4],
-    ['qty', '수량', 'r', 2.5], ['order_amt', '주문금액', 'r', 4.3], ['ship_fee', '배송비', 'r', 3.3],
-    ['add_ship_fee', '추가배송비', 'r', 3.6], ['fee_rate_display', '수수료율', 'r', 4.0], ['fee_amt', '마켓수수료', 'r', 4.0],
-    ['settle_amt', '정산예정액', 'r', 4.3], ['vendor_prod_id', '판매사상품코드', 'l', 4.7], ['buy_cost', '매입가', 'r', 3.6],
-    ['buy_ship_fee', '매입배송비', 'r', 3.6], ['buy_total', '매입합계', 'r', 3.6], ['margin_amt', '최종마진', 'r', 4.0],
-    ['margin_rate', '마진율', 'r', 3.3], ['margin_chk', '마진포함', 'c', 3.3], ['ad_chk', '광고', 'c', 2.9],
+    ['bundle_no', '합배송\n코드', 'l', 4.7], ['order_id', '원장\n주문코드', 'l', 5.8], ['source', '공급사', 'l', 3.3],
+    ['market', '마켓', 'l', 3.3], ['sell_status', '주문\n상태', 'l', 3.6], ['buy_status', '매입\n상태', 'l', 4.3],
+    ['order_date', '주문\n일시', 'l', 6.5], ['prod_id', '상품ID', 'l', 4.3], ['prod_name', '상품명', 'l', 9.4],
+    ['qty', '수량', 'r', 2.5], ['order_amt', '주문\n금액', 'r', 4.3], ['ship_fee', '배송비', 'r', 3.3],
+    ['add_ship_fee', '추가\n배송비', 'r', 3.6], ['fee_rate_display', '수수료율', 'r', 4.0], ['fee_amt', '마켓\n수수료', 'r', 4.0],
+    ['settle_amt', '정산\n예정액', 'r', 4.3], ['vendor_prod_id', '판매사\n상품코드', 'l', 4.7], ['buy_cost', '매입가', 'r', 3.6],
+    ['buy_ship_fee', '매입\n배송비', 'r', 3.6], ['buy_total', '매입\n합계', 'r', 3.6], ['margin_amt', '최종\n마진', 'r', 4.0],
+    ['margin_rate', '마진율', 'r', 3.3], ['margin_chk', '마진\n포함', 'c', 3.3], ['ad_chk', '광고', 'c', 2.9],
   ];
 
   const COL_WIDTH_STORAGE_KEY = 'marginboard_dash_col_widths_v1';
@@ -37,9 +37,10 @@
   }
   const colWidths = loadColWidths();
 
+  const NOW = new Date();
   const state = {
     tab: 'summary',
-    summaryFilters: { year: '전체', month: '전체', market: '전체' },
+    calState: { year: NOW.getFullYear(), month: NOW.getMonth() + 1 },
     dashFilters: { year: '전체', month: '전체', market: '전체', search: '', hl_only: false, unpurchased_only: false, bundle_only: false },
     dashRows: [],
     dashSort: { col: 'order_date', dir: -1 },
@@ -109,42 +110,6 @@
   }
 
   // ================= SUMMARY TAB =================
-  function renderSummaryFilters() {
-    const el = document.getElementById('summary-filters');
-    el.innerHTML = '';
-    const yearGroup = document.createElement('div'); yearGroup.className = 'filter-group';
-    for (const y of YEAR_OPTIONS) {
-      yearGroup.appendChild(renderChip(y.label, state.summaryFilters.year === y.value, () => {
-        state.summaryFilters.year = (state.summaryFilters.year === y.value) ? '전체' : y.value;
-        loadSummaryFiltered(); renderSummaryFilters();
-      }));
-    }
-    el.appendChild(yearGroup); el.appendChild(sep());
-
-    const monthGroup = document.createElement('div'); monthGroup.className = 'filter-group';
-    for (let m = 1; m <= 12; m++) {
-      const v = String(m);
-      monthGroup.appendChild(renderChip(`${m}월`, state.summaryFilters.month === v, () => {
-        state.summaryFilters.month = (state.summaryFilters.month === v) ? '전체' : v;
-        loadSummaryFiltered(); renderSummaryFilters();
-      }));
-    }
-    el.appendChild(monthGroup); el.appendChild(sep());
-
-    const marketGroup = document.createElement('div'); marketGroup.className = 'filter-group';
-    for (const mk of MARKETS) {
-      marketGroup.appendChild(renderChip(mk, state.summaryFilters.market === mk, () => {
-        state.summaryFilters.market = (state.summaryFilters.market === mk) ? '전체' : mk;
-        loadSummaryFiltered(); renderSummaryFilters();
-      }));
-    }
-    el.appendChild(marketGroup); el.appendChild(sep());
-    el.appendChild(renderChip('초기화', false, () => {
-      state.summaryFilters = { year: '전체', month: '전체', market: '전체' };
-      loadSummaryFiltered(); renderSummaryFilters();
-    }, 'ghost'));
-  }
-
   async function loadSummaryAll() {
     const s = await api('/api/summary/all');
     renderKPIRow(document.getElementById('summary-kpi-all'), s, true);
@@ -211,19 +176,13 @@
     wrap.appendChild(legend);
   }
 
-  async function loadSummaryFiltered() {
-    const f = state.summaryFilters;
-    const s = await api(`/api/summary/filtered?${qs(f)}`);
-    renderKPIRow(document.getElementById('summary-kpi-filtered'), s, false);
-    const title = (f.year !== '전체' || f.month !== '전체' || f.market !== '전체')
-      ? `조건: [${f.year}]-[${f.month}]-[${f.market}]` : '현재 [전체 보기] 상태입니다.';
-    document.getElementById('summary-filter-title').textContent = title;
-    renderCalendar(s.daily, f);
+  async function loadCalendar() {
+    const { year, month } = state.calState;
+    const s = await api(`/api/summary/filtered?${qs({ year: String(year), month: String(month), market: '전체' })}`);
+    renderCalendar(s.daily, year, month);
   }
 
-  function renderCalendar(daily, f) {
-    const year = f.year !== '전체' ? parseInt(f.year, 10) : new Date().getFullYear();
-    const month = f.month !== '전체' ? parseInt(f.month, 10) : (new Date().getMonth() + 1);
+  function renderCalendar(daily, year, month) {
     document.getElementById('calendar-month-label').textContent = `${year}년 ${month}월`;
 
     const grid = document.getElementById('calendar-grid');
@@ -253,15 +212,12 @@
   }
 
   function navigateCalendarMonth(delta) {
-    const f = state.summaryFilters;
-    let year = f.year !== '전체' ? parseInt(f.year, 10) : new Date().getFullYear();
-    let month = (f.month !== '전체' ? parseInt(f.month, 10) : (new Date().getMonth() + 1)) + delta;
+    let { year, month } = state.calState;
+    month += delta;
     if (month < 1) { month = 12; year -= 1; }
     else if (month > 12) { month = 1; year += 1; }
-    f.year = String(year);
-    f.month = String(month);
-    renderSummaryFilters();
-    loadSummaryFiltered();
+    state.calState = { year, month };
+    loadCalendar();
   }
   document.getElementById('cal-prev').addEventListener('click', () => navigateCalendarMonth(-1));
   document.getElementById('cal-next').addEventListener('click', () => navigateCalendarMonth(1));
@@ -305,7 +261,7 @@
       renderDashFilters(); loadDashOrders();
     };
     toggleGroup.appendChild(renderChip('HL주문건', f.hl_only, () => selectExclusive('hl_only'), 'toggle'));
-    toggleGroup.appendChild(renderChip('미매입(취소제외)', f.unpurchased_only, () => selectExclusive('unpurchased_only'), 'toggle'));
+    toggleGroup.appendChild(renderChip('미매입', f.unpurchased_only, () => selectExclusive('unpurchased_only'), 'toggle'));
     toggleGroup.appendChild(renderChip('합배송', f.bundle_only, () => selectExclusive('bundle_only'), 'toggle'));
     el.appendChild(toggleGroup); el.appendChild(sep());
 
@@ -394,8 +350,7 @@
     COLS.forEach(([key, label, align], i) => {
       const th = document.createElement('th');
       th.className = align === 'l' ? 'al-l' : '';
-      th.title = label;
-      th.textContent = label;
+      th.innerHTML = label.replace('\n', '<br>');
       if (key !== 'margin_chk' && key !== 'ad_chk') {
         th.addEventListener('click', (e) => {
           if (e.target.classList.contains('col-resize-handle')) return;
@@ -567,7 +522,7 @@
       toast('업로드 처리가 완료되었습니다.', 'ok');
       state.loadedTabs.delete('dashboard'); state.loadedTabs.delete('summary');
       if (state.tab === 'dashboard') loadDashOrders();
-      if (state.tab === 'summary') { loadSummaryAll(); loadSummaryFiltered(); }
+      if (state.tab === 'summary') { loadSummaryAll(); loadCalendar(); }
     } catch (err) {
       log.innerHTML = `<div class="upload-log-item err">${err.message}</div>`;
     }
@@ -667,7 +622,7 @@
 
     if (state.loadedTabs.has(name)) return;
     state.loadedTabs.add(name);
-    if (name === 'summary') { renderSummaryFilters(); loadSummaryAll(); loadSummaryFiltered(); }
+    if (name === 'summary') { loadSummaryAll(); loadCalendar(); }
     if (name === 'dashboard') { renderDashFilters(); renderDashTableHead(); loadDashOrders(); }
     if (name === 'upload') { loadSettingsLinks(); }
     if (name === 'fees') { loadFees(); }

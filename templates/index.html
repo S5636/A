@@ -12,7 +12,6 @@
   <header class="app-header">
     <div class="app-title">
       <h1>이유상점 Margin Board</h1>
-      <span class="sub">마진율 대시보드</span>
     </div>
     <nav class="tab-bar">
       <button class="tab-btn active" data-tab="summary">👑 요약 리포트</button>
@@ -24,19 +23,9 @@
 
   <!-- ======================= TAB 1: 요약 리포트 ======================= -->
   <section class="tab-panel active" id="tab-summary">
-    <div class="card compact">
-      <div class="kpi-strip" id="summary-kpi-all"></div>
-    </div>
+    <div class="grid-row" id="summary-kpi-all"></div>
 
-    <div class="card compact" style="margin-top:10px;">
-      <div class="filter-bar">
-        <div class="filter-row" id="summary-filters"></div>
-        <div class="kpi-strip mini" id="summary-kpi-filtered"></div>
-      </div>
-      <div class="hint" id="summary-filter-title">현재 [전체 보기] 상태입니다.</div>
-    </div>
-
-    <div class="grid-3" style="margin-top:10px;">
+    <div class="grid-3" style="margin-top:16px;">
       <div class="card compact">
         <div class="card-title"><span class="dot"></span>마켓별 요약</div>
         <table class="summary-table" id="market-summary-table">
