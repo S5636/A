@@ -128,26 +128,26 @@
     const wrap = document.getElementById('donut-wrap');
     wrap.innerHTML = '';
     const total = donutData.reduce((a, d) => a + d.value, 0);
-    const size = 120, r = 44, cx = size / 2, cy = size / 2, circ = 2 * Math.PI * r;
+    const size = 220, r = 82, cx = size / 2, cy = size / 2, circ = 2 * Math.PI * r;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('width', size); svg.setAttribute('height', size);
     svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
 
     const bg = document.createElementNS(svg.namespaceURI, 'circle');
     bg.setAttribute('cx', cx); bg.setAttribute('cy', cy); bg.setAttribute('r', r);
-    bg.setAttribute('fill', 'none'); bg.setAttribute('stroke', 'rgba(255,255,255,0.06)'); bg.setAttribute('stroke-width', 15);
+    bg.setAttribute('fill', 'none'); bg.setAttribute('stroke', 'rgba(255,255,255,0.06)'); bg.setAttribute('stroke-width', 27);
     svg.appendChild(bg);
 
     let offset = 0;
     if (total > 0) {
       for (const d of donutData) {
         const frac = d.value / total;
-        const len = Math.max(frac * circ - 1.5, 0);
+        const len = Math.max(frac * circ - 2, 0);
         const circle = document.createElementNS(svg.namespaceURI, 'circle');
         circle.setAttribute('cx', cx); circle.setAttribute('cy', cy); circle.setAttribute('r', r);
         circle.setAttribute('fill', 'none');
         circle.setAttribute('stroke', MARKET_COLOR_HEX[d.market] || '#888');
-        circle.setAttribute('stroke-width', 15);
+        circle.setAttribute('stroke-width', 27);
         circle.setAttribute('stroke-dasharray', `${len} ${circ - len}`);
         circle.setAttribute('stroke-dashoffset', -offset);
         circle.setAttribute('transform', `rotate(-90 ${cx} ${cy})`);
@@ -155,11 +155,17 @@
         offset += frac * circ;
       }
     }
+    const label = document.createElementNS(svg.namespaceURI, 'text');
+    label.setAttribute('x', cx); label.setAttribute('y', cy - 6);
+    label.setAttribute('text-anchor', 'middle'); label.setAttribute('fill', 'var(--text-secondary)');
+    label.setAttribute('font-size', '12'); label.setAttribute('font-weight', '700');
+    label.textContent = '순수익';
+    svg.appendChild(label);
     const label2 = document.createElementNS(svg.namespaceURI, 'text');
-    label2.setAttribute('x', cx); label2.setAttribute('y', cy + 4);
+    label2.setAttribute('x', cx); label2.setAttribute('y', cy + 16);
     label2.setAttribute('text-anchor', 'middle'); label2.setAttribute('fill', 'var(--text-primary)');
-    label2.setAttribute('font-size', '10'); label2.setAttribute('font-weight', '700');
-    label2.textContent = total >= 10000 ? `${Math.round(total / 10000)}만` : num(total);
+    label2.setAttribute('font-size', '17'); label2.setAttribute('font-weight', '700');
+    label2.textContent = total >= 10000 ? `${Math.round(total / 10000)}만원` : `${num(total)}원`;
     svg.appendChild(label2);
 
     wrap.appendChild(svg);
@@ -272,15 +278,14 @@
     }, 'ghost'));
   }
 
-  function rowClass(row) {
+  // bundleCls: 화면에 표시된 순서상 합배송 그룹이 바뀔 때마다 번갈아 계산된
+  // row-bundle-a/row-bundle-b (renderDashTableBody에서 계산해 row._bundleCls에 저장).
+  function rowClass(row, bundleCls) {
     if (row.margin_chk === 'Y') return '';
     if (row.is_returned) return 'row-return';
     if (row.is_cancelled) return 'row-cancel';
     if (row.is_included && row.margin_amt !== null && row.margin_amt < 0) return 'row-neg';
-    if (row.is_bundled) {
-      let h = 0; for (const c of row.group_id) h = (h * 31 + c.charCodeAt(0)) % 1000;
-      return (h % 2 === 0) ? 'row-bundle-a' : 'row-bundle-b';
-    }
+    if (row.is_bundled) return bundleCls || row._bundleCls || '';
     return '';
   }
 
@@ -319,28 +324,53 @@
     applyColWidths();
   }
 
-  function startColResize(e, index) {
+  // 리사이즈 직후 발생하는 합성 click(정렬 오발동) 억제용 타임스탬프
+  let resizeJustEndedAt = 0;
+
+  // pointer capture를 써서 핸들 자신에게만 이벤트를 묶는다 - 예전 document
+  // 레벨 mousemove/mouseup 리스너 방식은 mouseup을 놓치면(창 밖에서 놓거나,
+  // 다른 엘리먼트가 가로채는 경우) 리스너가 정리되지 않고 계속 쌓여서,
+  // 이후 스크롤/마우스 이동만 해도 매번 재계산이 실행되며 페이지가 멈추는
+  // 원인이 됐다. pointer capture는 pointerup/cancel 시 자동 해제되고
+  // 리스너도 핸들 엘리먼트에만 붙어 있어 이런 누수가 구조적으로 불가능하다.
+  function startColResize(e, index, handleEl) {
     e.preventDefault();
+    handleEl.setPointerCapture(e.pointerId);
     const table = document.getElementById('dash-table');
     const tableWidth = table.getBoundingClientRect().width;
     const startX = e.clientX;
     const startA = colWidths[index], startB = colWidths[index + 1];
     const MIN = 2.2;
-    function onMove(ev) {
-      const deltaPct = ((ev.clientX - startX) / tableWidth) * 100;
+    let pendingDx = null;
+    let rafId = null;
+
+    function apply() {
+      rafId = null;
+      if (pendingDx === null) return;
+      const deltaPct = (pendingDx / tableWidth) * 100;
       let a = startA + deltaPct, b = startB - deltaPct;
       if (a < MIN) { b -= (MIN - a); a = MIN; }
       if (b < MIN) { a -= (MIN - b); b = MIN; }
       colWidths[index] = a; colWidths[index + 1] = b;
       applyColWidths();
     }
-    function onUp() {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      saveColWidths(colWidths);
+    function onMove(ev) {
+      if (ev.pointerId !== e.pointerId) return;
+      pendingDx = ev.clientX - startX;
+      if (rafId === null) rafId = requestAnimationFrame(apply);
     }
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    function onUp(ev) {
+      if (ev.pointerId !== e.pointerId) return;
+      handleEl.removeEventListener('pointermove', onMove);
+      handleEl.removeEventListener('pointerup', onUp);
+      handleEl.removeEventListener('pointercancel', onUp);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      saveColWidths(colWidths);
+      resizeJustEndedAt = Date.now();
+    }
+    handleEl.addEventListener('pointermove', onMove);
+    handleEl.addEventListener('pointerup', onUp);
+    handleEl.addEventListener('pointercancel', onUp);
   }
 
   function renderDashTableHead() {
@@ -354,6 +384,7 @@
       if (key !== 'margin_chk' && key !== 'ad_chk') {
         th.addEventListener('click', (e) => {
           if (e.target.classList.contains('col-resize-handle')) return;
+          if (Date.now() - resizeJustEndedAt < 250) return; // 리사이즈 직후 합성 click 무시
           if (state.dashSort.col === key) state.dashSort.dir *= -1;
           else { state.dashSort.col = key; state.dashSort.dir = 1; }
           renderDashTableBody();
@@ -362,7 +393,7 @@
       if (i < COLS.length - 1) {
         const handle = document.createElement('span');
         handle.className = 'col-resize-handle';
-        handle.addEventListener('mousedown', (e) => { e.stopPropagation(); startColResize(e, i); });
+        handle.addEventListener('pointerdown', (e) => { e.stopPropagation(); startColResize(e, i, handle); });
         th.appendChild(handle);
       }
       tr.appendChild(th);
@@ -393,9 +424,18 @@
     tbody.innerHTML = '';
     const rows = sortedDashRows();
     const frag = document.createDocumentFragment();
+    let lastGroupId = null, bundleToggle = 0;
     for (const row of rows) {
+      let bundleCls = '';
+      if (row.is_bundled) {
+        if (row.group_id !== lastGroupId) { bundleToggle = 1 - bundleToggle; lastGroupId = row.group_id; }
+        bundleCls = bundleToggle === 0 ? 'row-bundle-a' : 'row-bundle-b';
+      } else {
+        lastGroupId = null;
+      }
+      row._bundleCls = bundleCls;
       const tr = document.createElement('tr');
-      tr.className = rowClass(row);
+      tr.className = rowClass(row, bundleCls);
       tr.dataset.orderId = row.order_id;
       for (const [key, , align] of COLS) {
         const td = document.createElement('td');
@@ -423,12 +463,15 @@
       body: JSON.stringify({ field, value }),
     });
     const idx = state.dashRows.findIndex(r => r.order_id === orderId);
-    if (idx >= 0 && data.row) state.dashRows[idx] = data.row;
+    if (idx >= 0 && data.row) {
+      data.row._bundleCls = state.dashRows[idx]._bundleCls; // 그룹 소속은 안 바뀌므로 이전 값 유지
+      state.dashRows[idx] = data.row;
+    }
     renderKPIRow(document.getElementById('dash-kpi'), data.live_summary, false);
     // update the single row in place
     const tr = document.querySelector(`#dash-table tbody tr[data-order-id="${CSS.escape(orderId)}"]`);
     if (tr && data.row) {
-      tr.className = rowClass(data.row);
+      tr.className = rowClass(data.row, data.row._bundleCls);
       COLS.forEach(([key, , align], i) => {
         const td = tr.children[i];
         if (key === 'margin_chk') { td.innerHTML = `<input type="checkbox" class="chk-box margin" ${data.row.is_included ? 'checked' : ''}>`; }
