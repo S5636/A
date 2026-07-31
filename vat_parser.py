@@ -17,7 +17,8 @@ import pandas as pd
 CATEGORIES = ['credit', 'cash', 'mobile', 'other']
 CATEGORY_LABEL = {'credit': '신용카드', 'cash': '현금', 'mobile': '휴대폰', 'other': '기타'}
 
-HEADER_SIGNATURE_KEYWORDS = ['신용카드(판매)', '신용카드결제금액', '결제방법', '신용카드매출전표', '신용카드 매출전표']
+HEADER_SIGNATURE_KEYWORDS = ['신용카드(판매)', '신용카드결제금액', '결제방법', '결제수단',
+                              '신용카드매출전표', '신용카드 매출전표']
 
 
 def _norm(s):
@@ -32,6 +33,14 @@ def _find_col(columns, *keywords_all_required):
     return None
 
 
+def _find_exact_col(columns, *names):
+    normed = {_norm(name) for name in names}
+    for c in columns:
+        if _norm(c) in normed:
+            return c
+    return None
+
+
 def _num(v):
     try:
         s = re.sub(r'[^\d.\-]', '', str(v))
@@ -41,7 +50,8 @@ def _num(v):
 
 
 def _year_month(val):
-    m = re.match(r'\s*(\d{4})[.\-/](\d{1,2})', str(val))
+    # "2026-05-01" / "2026.06.05" / "2026/03/21" / "2026. 05. 19. 21:16:32"(마침표 뒤 공백 포함) 전부 대응
+    m = re.match(r'\s*(\d{4})[.\-/]\s*(\d{1,2})', str(val))
     if not m:
         return None
     y, mo = int(m.group(1)), int(m.group(2))
@@ -122,12 +132,17 @@ def _parse_format_b(df):
 
 
 def _parse_format_c(df):
-    """G마켓형: 행마다 '결제방법'(카드/현금/휴대폰/기타)에 금액 1개"""
-    method_col = _find_col(df.columns, '결제방법')
+    """행마다 결제수단 컬럼(카드/현금/휴대폰/기타/토스머니 등)에 금액 1개인 서식.
+    G마켓형('결제방법'), TOSS 주문상세형('결제수단'+'결제수단 결제 금액'), 옥션 등
+    오픈마켓형('결제수단'+'매출금액')을 전부 이 하나로 처리."""
+    method_col = _find_exact_col(df.columns, '결제방법', '결제수단')
     if method_col is None:
         return None
-    date_col = _find_col(df.columns, '입금', '환불일') or _find_col(df.columns, '결제일')
-    amount_col = _find_col(df.columns, '구매자결제금') or _find_col(df.columns, '매출액')
+    date_col = (_find_col(df.columns, '입금', '환불일') or _find_col(df.columns, '매출기준일')
+                or _find_col(df.columns, '결제일시') or _find_col(df.columns, '결제완료일')
+                or _find_col(df.columns, '결제일'))
+    amount_col = (_find_col(df.columns, '구매자결제금') or _find_col(df.columns, '결제금액')
+                  or _find_col(df.columns, '매출금액') or _find_col(df.columns, '매출액'))
     if date_col is None or amount_col is None:
         return None
 
@@ -180,7 +195,7 @@ def _parse_format_d(df):
 
 
 PARSERS = [_parse_format_a, _parse_format_b, _parse_format_c, _parse_format_d]
-FORMAT_NAMES = ['쿠팡·TOSS형', '11번가형', 'G마켓형', '네이버 등 결제수단형']
+FORMAT_NAMES = ['쿠팡·TOSS형', '11번가형', '결제수단별(G마켓·TOSS주문상세·옥션 등)', '네이버 등 결제수단형']
 
 
 def parse_sheet(raw_df):
@@ -197,15 +212,25 @@ def parse_sheet(raw_df):
     return None, None
 
 
+def _read_raw_sheets(fp, filename):
+    """(시트이름, header=None 원본 DataFrame) 리스트. csv는 시트 1개짜리로 취급."""
+    if filename.lower().endswith('.csv'):
+        try:
+            raw_df = pd.read_csv(fp, header=None, dtype=str, encoding='utf-8-sig')
+        except UnicodeDecodeError:
+            raw_df = pd.read_csv(fp, header=None, dtype=str, encoding='cp949')
+        return [('CSV', raw_df)]
+    xl = pd.ExcelFile(fp)
+    return [(sheet, pd.read_excel(fp, sheet_name=sheet, header=None, dtype=str)) for sheet in xl.sheet_names]
+
+
 def process_vat_upload(db_path, fp, filename, market):
-    """엑셀 파일 하나(여러 시트 가능)를 파싱해서 vat_summary에 반영.
+    """엑셀/CSV 파일 하나(엑셀은 여러 시트 가능)를 파싱해서 vat_summary에 반영.
     같은 market의 (연,월)에 데이터가 있으면 그 (연,월)만 통째로 덮어쓴다
     (재업로드 시 중복 합산 방지)."""
-    xl = pd.ExcelFile(fp)
     merged = {}
     matched_sheets = []
-    for sheet in xl.sheet_names:
-        raw_df = pd.read_excel(fp, sheet_name=sheet, header=None, dtype=str)
+    for sheet, raw_df in _read_raw_sheets(fp, filename):
         result, fmt_name = parse_sheet(raw_df)
         if result:
             matched_sheets.append(f"{sheet}({fmt_name})")
