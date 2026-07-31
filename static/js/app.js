@@ -215,6 +215,11 @@
         (agg ? `<div class="cal-count">${agg.count}건</div><div class="cal-sales">${num(agg.sales)}</div><div class="cal-margin">${num(agg.margin)}</div>` : '');
       grid.appendChild(cell);
     }
+    // 달마다 주 수가 달라 카드 높이가 흔들리지 않도록 항상 6주(42칸)로 고정
+    const totalCells = firstDow + lastDate;
+    for (let i = totalCells; i < 42; i++) {
+      const c = document.createElement('div'); c.className = 'cal-cell empty'; grid.appendChild(c);
+    }
   }
 
   function navigateCalendarMonth(delta) {
@@ -280,12 +285,14 @@
 
   // bundleCls: 화면에 표시된 순서상 합배송 그룹이 바뀔 때마다 번갈아 계산된
   // row-bundle-a/row-bundle-b (renderDashTableBody에서 계산해 row._bundleCls에 저장).
+  // 합배송 행은 같은 묶음이면 무조건 같은 색이 나와야 하므로, 취소/반품/마진
+  // 음수 같은 상태보다 우선한다(상태는 매입상태·최종마진 텍스트로 이미 표시됨).
   function rowClass(row, bundleCls) {
+    if (row.is_bundled) return bundleCls || row._bundleCls || '';
     if (row.margin_chk === 'Y') return '';
     if (row.is_returned) return 'row-return';
     if (row.is_cancelled) return 'row-cancel';
     if (row.is_included && row.margin_amt !== null && row.margin_amt < 0) return 'row-neg';
-    if (row.is_bundled) return bundleCls || row._bundleCls || '';
     return '';
   }
 
