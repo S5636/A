@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-title CEO Margin Pro
+title Margin Board
 
 where python >nul 2>nul
 if errorlevel 1 (

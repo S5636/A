@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>이유마켓 CEO Margin Pro</title>
+<title>이유상점 Margin Board</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
@@ -11,7 +11,7 @@
 
   <header class="app-header">
     <div class="app-title">
-      <h1>이유마켓 CEO Margin Pro</h1>
+      <h1>이유상점 Margin Board</h1>
       <span class="sub">마진율 대시보드</span>
     </div>
     <nav class="tab-bar">
@@ -24,35 +24,41 @@
 
   <!-- ======================= TAB 1: 요약 리포트 ======================= -->
   <section class="tab-panel active" id="tab-summary">
-    <div class="grid-row" id="summary-kpi-all"></div>
-
-    <div class="card" style="margin-top:16px;">
-      <div class="card-title"><span class="dot"></span>필터</div>
-      <div class="filter-row" id="summary-filters"></div>
-      <div class="hint" id="summary-filter-title">현재 [전체 보기] 상태입니다.</div>
-      <div class="grid-row" id="summary-kpi-filtered" style="margin-top:12px;"></div>
+    <div class="card compact">
+      <div class="kpi-strip" id="summary-kpi-all"></div>
     </div>
 
-    <div class="grid-2" style="margin-top:16px;">
-      <div class="card">
+    <div class="card compact" style="margin-top:10px;">
+      <div class="filter-bar">
+        <div class="filter-row" id="summary-filters"></div>
+        <div class="kpi-strip mini" id="summary-kpi-filtered"></div>
+      </div>
+      <div class="hint" id="summary-filter-title">현재 [전체 보기] 상태입니다.</div>
+    </div>
+
+    <div class="grid-3" style="margin-top:10px;">
+      <div class="card compact">
         <div class="card-title"><span class="dot"></span>마켓별 요약</div>
         <table class="summary-table" id="market-summary-table">
           <thead><tr><th>마켓</th><th>매출</th><th>수수료</th><th>매입</th><th>순수익</th><th>마진율</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
-      <div class="card">
-        <div class="card-title"><span class="dot"></span>마켓별 순수익 비중</div>
+      <div class="card compact">
+        <div class="card-title"><span class="dot"></span>순수익 비중</div>
         <div class="donut-wrap" id="donut-wrap"></div>
       </div>
-    </div>
-
-    <div class="card" style="margin-top:16px;">
-      <div class="calendar-head">
-        <div class="card-title" style="margin:0;"><span class="dot"></span>일별 매출 / 마진 캘린더</div>
-        <div class="hint" id="calendar-month-label"></div>
+      <div class="card compact">
+        <div class="calendar-head">
+          <div class="card-title" style="margin:0;"><span class="dot"></span>일별 매출/마진</div>
+          <div class="cal-nav">
+            <button type="button" id="cal-prev" class="cal-nav-btn">◀</button>
+            <span id="calendar-month-label"></span>
+            <button type="button" id="cal-next" class="cal-nav-btn">▶</button>
+          </div>
+        </div>
+        <div class="calendar-grid" id="calendar-grid"></div>
       </div>
-      <div class="calendar-grid" id="calendar-grid"></div>
     </div>
   </section>
 

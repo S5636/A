@@ -20,7 +20,7 @@ def open_browser_later():
 
 def main():
     print("============================================")
-    print("  이유마켓 CEO Margin Pro")
+    print("  이유상점 Margin Board")
     print("============================================")
     print()
     print("필요한 프로그램을 확인/설치하는 중입니다... (처음 실행할 때만 시간이 걸려요)")

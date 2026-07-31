@@ -1,4 +1,4 @@
-/* 이유마켓 CEO Margin Pro - frontend */
+/* 이유상점 Margin Board - frontend */
 (() => {
   'use strict';
 
@@ -12,16 +12,30 @@
     "지마켓": "#c98500", "옥션": "#d55181", "TOSS": "#2fbf3f", "카카오": "#9085e9",
   };
 
+  // [key, label, align('l'=left/'r'=right/'c'=center-checkbox), default width(%)]
   const COLS = [
-    ['bundle_no', '합배송\n코드', 'l'], ['order_id', '원장\n주문코드', 'l'], ['source', '공급사', 'l'],
-    ['market', '마켓', 'l'], ['sell_status', '주문\n상태', 'l'], ['buy_status', '매입\n상태', 'l'],
-    ['order_date', '주문\n일시', 'l'], ['prod_id', '상품ID', 'l'], ['prod_name', '상품명', 'l'],
-    ['qty', '수량', 'r'], ['order_amt', '주문\n금액', 'r'], ['ship_fee', '배송비', 'r'],
-    ['add_ship_fee', '추가\n배송비', 'r'], ['fee_rate_display', '수수료율', 'r'], ['fee_amt', '마켓\n수수료', 'r'],
-    ['settle_amt', '정산\n예정액', 'r'], ['vendor_prod_id', '판매사\n상품코드', 'l'], ['buy_cost', '매입가', 'r'],
-    ['buy_ship_fee', '매입\n배송비', 'r'], ['buy_total', '매입\n합계', 'r'], ['margin_amt', '최종\n마진', 'r'],
-    ['margin_rate', '마진율', 'r'], ['margin_chk', '마진\n포함', 'c'], ['ad_chk', '광고', 'c'],
+    ['bundle_no', '합배송코드', 'l', 4.7], ['order_id', '원장주문코드', 'l', 5.8], ['source', '공급사', 'l', 3.3],
+    ['market', '마켓', 'l', 3.3], ['sell_status', '주문상태', 'l', 3.6], ['buy_status', '매입상태', 'l', 4.3],
+    ['order_date', '주문일시', 'l', 6.5], ['prod_id', '상품ID', 'l', 4.3], ['prod_name', '상품명', 'l', 9.4],
+    ['qty', '수량', 'r', 2.5], ['order_amt', '주문금액', 'r', 4.3], ['ship_fee', '배송비', 'r', 3.3],
+    ['add_ship_fee', '추가배송비', 'r', 3.6], ['fee_rate_display', '수수료율', 'r', 4.0], ['fee_amt', '마켓수수료', 'r', 4.0],
+    ['settle_amt', '정산예정액', 'r', 4.3], ['vendor_prod_id', '판매사상품코드', 'l', 4.7], ['buy_cost', '매입가', 'r', 3.6],
+    ['buy_ship_fee', '매입배송비', 'r', 3.6], ['buy_total', '매입합계', 'r', 3.6], ['margin_amt', '최종마진', 'r', 4.0],
+    ['margin_rate', '마진율', 'r', 3.3], ['margin_chk', '마진포함', 'c', 3.3], ['ad_chk', '광고', 'c', 2.9],
   ];
+
+  const COL_WIDTH_STORAGE_KEY = 'marginboard_dash_col_widths_v1';
+  function loadColWidths() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COL_WIDTH_STORAGE_KEY) || 'null');
+      if (saved && saved.length === COLS.length) return saved;
+    } catch (_) {}
+    return COLS.map(c => c[3]);
+  }
+  function saveColWidths(widths) {
+    try { localStorage.setItem(COL_WIDTH_STORAGE_KEY, JSON.stringify(widths)); } catch (_) {}
+  }
+  const colWidths = loadColWidths();
 
   const state = {
     tab: 'summary',
@@ -149,26 +163,26 @@
     const wrap = document.getElementById('donut-wrap');
     wrap.innerHTML = '';
     const total = donutData.reduce((a, d) => a + d.value, 0);
-    const size = 200, r = 74, cx = size / 2, cy = size / 2, circ = 2 * Math.PI * r;
+    const size = 120, r = 44, cx = size / 2, cy = size / 2, circ = 2 * Math.PI * r;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('width', size); svg.setAttribute('height', size);
     svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
 
     const bg = document.createElementNS(svg.namespaceURI, 'circle');
     bg.setAttribute('cx', cx); bg.setAttribute('cy', cy); bg.setAttribute('r', r);
-    bg.setAttribute('fill', 'none'); bg.setAttribute('stroke', 'rgba(255,255,255,0.06)'); bg.setAttribute('stroke-width', 24);
+    bg.setAttribute('fill', 'none'); bg.setAttribute('stroke', 'rgba(255,255,255,0.06)'); bg.setAttribute('stroke-width', 15);
     svg.appendChild(bg);
 
     let offset = 0;
     if (total > 0) {
       for (const d of donutData) {
         const frac = d.value / total;
-        const len = Math.max(frac * circ - 2, 0);
+        const len = Math.max(frac * circ - 1.5, 0);
         const circle = document.createElementNS(svg.namespaceURI, 'circle');
         circle.setAttribute('cx', cx); circle.setAttribute('cy', cy); circle.setAttribute('r', r);
         circle.setAttribute('fill', 'none');
         circle.setAttribute('stroke', MARKET_COLOR_HEX[d.market] || '#888');
-        circle.setAttribute('stroke-width', 24);
+        circle.setAttribute('stroke-width', 15);
         circle.setAttribute('stroke-dasharray', `${len} ${circ - len}`);
         circle.setAttribute('stroke-dashoffset', -offset);
         circle.setAttribute('transform', `rotate(-90 ${cx} ${cy})`);
@@ -176,17 +190,11 @@
         offset += frac * circ;
       }
     }
-    const label = document.createElementNS(svg.namespaceURI, 'text');
-    label.setAttribute('x', cx); label.setAttribute('y', cy - 3);
-    label.setAttribute('text-anchor', 'middle'); label.setAttribute('fill', 'var(--text-primary)');
-    label.setAttribute('font-size', '13'); label.setAttribute('font-weight', '700');
-    label.textContent = '순수익';
-    svg.appendChild(label);
     const label2 = document.createElementNS(svg.namespaceURI, 'text');
-    label2.setAttribute('x', cx); label2.setAttribute('y', cy + 16);
-    label2.setAttribute('text-anchor', 'middle'); label2.setAttribute('fill', 'var(--text-secondary)');
-    label2.setAttribute('font-size', '11');
-    label2.textContent = `${num(total)}원`;
+    label2.setAttribute('x', cx); label2.setAttribute('y', cy + 4);
+    label2.setAttribute('text-anchor', 'middle'); label2.setAttribute('fill', 'var(--text-primary)');
+    label2.setAttribute('font-size', '10'); label2.setAttribute('font-weight', '700');
+    label2.textContent = total >= 10000 ? `${Math.round(total / 10000)}만` : num(total);
     svg.appendChild(label2);
 
     wrap.appendChild(svg);
@@ -244,6 +252,20 @@
     }
   }
 
+  function navigateCalendarMonth(delta) {
+    const f = state.summaryFilters;
+    let year = f.year !== '전체' ? parseInt(f.year, 10) : new Date().getFullYear();
+    let month = (f.month !== '전체' ? parseInt(f.month, 10) : (new Date().getMonth() + 1)) + delta;
+    if (month < 1) { month = 12; year -= 1; }
+    else if (month > 12) { month = 1; year += 1; }
+    f.year = String(year);
+    f.month = String(month);
+    renderSummaryFilters();
+    loadSummaryFiltered();
+  }
+  document.getElementById('cal-prev').addEventListener('click', () => navigateCalendarMonth(-1));
+  document.getElementById('cal-next').addEventListener('click', () => navigateCalendarMonth(1));
+
   // ================= DASHBOARD TAB =================
   function renderDashFilters() {
     const el = document.getElementById('dash-filters');
@@ -276,15 +298,15 @@
     el.appendChild(marketGroup); el.appendChild(sep());
 
     const toggleGroup = document.createElement('div'); toggleGroup.className = 'filter-group';
-    toggleGroup.appendChild(renderChip('HL주문건', f.hl_only, () => {
-      f.hl_only = !f.hl_only; renderDashFilters(); loadDashOrders();
-    }, 'toggle'));
-    toggleGroup.appendChild(renderChip('미매입(취소제외)', f.unpurchased_only, () => {
-      f.unpurchased_only = !f.unpurchased_only; renderDashFilters(); loadDashOrders();
-    }, 'toggle'));
-    toggleGroup.appendChild(renderChip('합배송', f.bundle_only, () => {
-      f.bundle_only = !f.bundle_only; renderDashFilters(); loadDashOrders();
-    }, 'toggle'));
+    const selectExclusive = (name) => {
+      f.hl_only = name === 'hl_only' ? !f.hl_only : false;
+      f.unpurchased_only = name === 'unpurchased_only' ? !f.unpurchased_only : false;
+      f.bundle_only = name === 'bundle_only' ? !f.bundle_only : false;
+      renderDashFilters(); loadDashOrders();
+    };
+    toggleGroup.appendChild(renderChip('HL주문건', f.hl_only, () => selectExclusive('hl_only'), 'toggle'));
+    toggleGroup.appendChild(renderChip('미매입(취소제외)', f.unpurchased_only, () => selectExclusive('unpurchased_only'), 'toggle'));
+    toggleGroup.appendChild(renderChip('합배송', f.bundle_only, () => selectExclusive('bundle_only'), 'toggle'));
     el.appendChild(toggleGroup); el.appendChild(sep());
 
     el.appendChild(renderChip('필터 초기화', false, () => {
@@ -324,22 +346,72 @@
     }
   }
 
+  function applyColWidths() {
+    const cols = document.querySelectorAll('#dash-table colgroup col');
+    cols.forEach((c, i) => { c.style.width = `${colWidths[i]}%`; });
+  }
+
+  function renderDashColgroup() {
+    const table = document.getElementById('dash-table');
+    let colgroup = table.querySelector('colgroup');
+    if (!colgroup) {
+      colgroup = document.createElement('colgroup');
+      table.insertBefore(colgroup, table.firstChild);
+    }
+    colgroup.innerHTML = '';
+    COLS.forEach(() => colgroup.appendChild(document.createElement('col')));
+    applyColWidths();
+  }
+
+  function startColResize(e, index) {
+    e.preventDefault();
+    const table = document.getElementById('dash-table');
+    const tableWidth = table.getBoundingClientRect().width;
+    const startX = e.clientX;
+    const startA = colWidths[index], startB = colWidths[index + 1];
+    const MIN = 2.2;
+    function onMove(ev) {
+      const deltaPct = ((ev.clientX - startX) / tableWidth) * 100;
+      let a = startA + deltaPct, b = startB - deltaPct;
+      if (a < MIN) { b -= (MIN - a); a = MIN; }
+      if (b < MIN) { a -= (MIN - b); b = MIN; }
+      colWidths[index] = a; colWidths[index + 1] = b;
+      applyColWidths();
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      saveColWidths(colWidths);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
   function renderDashTableHead() {
+    renderDashColgroup();
     const thead = document.querySelector('#dash-table thead');
     const tr = document.createElement('tr');
-    for (const [key, label, align] of COLS) {
+    COLS.forEach(([key, label, align], i) => {
       const th = document.createElement('th');
       th.className = align === 'l' ? 'al-l' : '';
-      th.innerHTML = label.replace('\n', '<br>');
+      th.title = label;
+      th.textContent = label;
       if (key !== 'margin_chk' && key !== 'ad_chk') {
-        th.addEventListener('click', () => {
+        th.addEventListener('click', (e) => {
+          if (e.target.classList.contains('col-resize-handle')) return;
           if (state.dashSort.col === key) state.dashSort.dir *= -1;
           else { state.dashSort.col = key; state.dashSort.dir = 1; }
           renderDashTableBody();
         });
       }
+      if (i < COLS.length - 1) {
+        const handle = document.createElement('span');
+        handle.className = 'col-resize-handle';
+        handle.addEventListener('mousedown', (e) => { e.stopPropagation(); startColResize(e, i); });
+        th.appendChild(handle);
+      }
       tr.appendChild(th);
-    }
+    });
     thead.innerHTML = ''; thead.appendChild(tr);
   }
 
@@ -379,6 +451,7 @@
           td.innerHTML = row.is_toss ? `<input type="checkbox" class="chk-box ad" ${row.ad_chk === 'Y' ? 'checked' : ''}>` : '-';
         } else {
           td.innerHTML = cellValue(row, key);
+          if (align === 'l' && row[key]) td.title = String(row[key]);
         }
         tr.appendChild(td);
       }

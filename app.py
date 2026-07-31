@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""이유마켓 CEO Margin Pro - 웹 대시보드 (Flask)
+"""이유상점 Margin Board - 웹 대시보드 (Flask)
 
 실행: python app.py  →  http://127.0.0.1:5000
 """
