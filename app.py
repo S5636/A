@@ -242,7 +242,10 @@ def api_upload():
 
 @app.route('/api/dapalza/collect', methods=['POST'])
 def api_dapalza_collect():
-    result = dapalza_auto.collect_and_upload()
+    result = dapalza_auto.collect_and_upload(
+        save_folder=r'C:\Users\SEONG\Desktop\이유상점_정산\정산_업로드_대기',
+        save_filename='다팔자.xlsx',
+    )
     if not result.get('ok'):
         return jsonify(result)
     try:

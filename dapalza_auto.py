@@ -318,10 +318,28 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         _click(win, '엑셀', 'Button', L)
         time.sleep(1)
 
-        L("'엑셀 다운로드' 창에서 '전체 다운로드' 클릭...")
-        dl_win = Desktop(backend='uia').window(title='엑셀 다운로드')
-        dl_win.wait('visible', timeout=30)
-        _click(dl_win, '전체 다운로드', 'Button', L)
+        # '수집 완료'와 마찬가지로 '엑셀 다운로드' 패널도 별도 창이 아니라
+        # 메인 창 안에 겹쳐 뜨는 내부 패널일 가능성이 높아서, 먼저 메인 창
+        # 안에서 '전체 다운로드'를 찾아보고, 그래도 없을 때만 별도 창을 확인한다.
+        L("'전체 다운로드' 버튼을 찾는 중...")
+        dl_ctrl = None
+        for i in range(15):
+            try:
+                descendants = win.descendants()
+            except Exception:
+                descendants = None
+            dl_ctrl = _find_smallest_text_match(win, '전체 다운로드', None, descendants=descendants)
+            if dl_ctrl is not None:
+                break
+            time.sleep(1)
+        if dl_ctrl is not None:
+            L("메인 창 안에서 '전체 다운로드' 버튼 발견 - 클릭...")
+            dl_ctrl.click_input()
+        else:
+            L("메인 창 안에서 못 찾아서 별도 '엑셀 다운로드' 창을 확인합니다...")
+            dl_win = Desktop(backend='uia').window(title='엑셀 다운로드')
+            dl_win.wait('visible', timeout=15)
+            _click(dl_win, '전체 다운로드', 'Button', L)
         time.sleep(2)
 
         L('파일 저장 대화상자를 찾는 중...')
