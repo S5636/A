@@ -16,22 +16,25 @@ import time
 
 
 def _find_control(win, title, control_type=None):
-    """정확한 title+control_type 매칭을 먼저 시도하고, 안 되면 점점 느슨하게 찾는다."""
+    """정확한 title+control_type 매칭을 먼저 시도하고, 안 되면 점점 느슨하게 찾는다.
+    같은 이름의 컨트롤이 여러 개면 pywinauto가 ElementAmbiguousError를 던지는데,
+    found_index=0으로 '여러 개 중 첫 번째'를 명시해서 그런 경우도 못 찾은 걸로
+    처리되지 않게 한다."""
     if control_type:
         try:
-            ctrl = win.child_window(title=title, control_type=control_type)
+            ctrl = win.child_window(title=title, control_type=control_type, found_index=0)
             if ctrl.exists(timeout=1):
                 return ctrl
         except Exception:
             pass
     try:
-        ctrl = win.child_window(title=title)
+        ctrl = win.child_window(title=title, found_index=0)
         if ctrl.exists(timeout=1):
             return ctrl
     except Exception:
         pass
     try:
-        ctrl = win.child_window(title_re=f'.*{re.escape(title)}.*')
+        ctrl = win.child_window(title_re=f'.*{re.escape(title)}.*', found_index=0)
         if ctrl.exists(timeout=1):
             return ctrl
     except Exception:
