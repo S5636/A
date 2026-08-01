@@ -115,7 +115,8 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                 titles = [f'(창 목록 조회 실패: {e})']
             L(f"다팔자 창을 찾지 못했습니다. 지금 열려있는 창 제목들: {titles}")
             return {'ok': False, 'log': log}
-        win.wait('visible', timeout=15)
+        # desktop.windows()가 돌려주는 건 WindowSpecification이 아니라 UIAWrapper라서
+        # .wait()가 없다 - 이미 존재가 확인된 요소이니 포커스만 주면 된다.
         win.set_focus()
         time.sleep(1.5)
         L('다팔자 창을 찾았습니다.')
