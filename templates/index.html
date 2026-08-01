@@ -80,31 +80,38 @@
   <section class="tab-panel" id="tab-vat">
     <div class="card">
       <div class="card-title"><span class="dot"></span>부가세 신고자료 업로드</div>
-      <div class="hint">마켓별 '부가세 신고자료' 엑셀을 마켓 선택 후 올리면 월별로 자동 집계됩니다. (쿠팡·TOSS형 / 11번가형 / G마켓형 / 네이버 등 결제수단형 서식 자동 인식)</div>
-      <div class="settings-row" style="margin-top:12px;">
-        <select class="text-input" id="vat-market-select" style="max-width:180px;">
-          <option value="">마켓 선택</option>
-        </select>
-        <button class="btn secondary" id="vat-file-btn">📁 파일 선택</button>
+      <div class="hint">마켓별 '부가세 신고자료' 엑셀을 올리면 월별로 자동 집계됩니다. 마켓이 서로 다른 파일을 한 번에 여러 개 올려도 되고, 파일마다 마켓을 따로 지정할 수 있어요. (쿠팡·TOSS형 / 11번가형 / G마켓·TOSS주문상세·옥션형 / 네이버 등 결제수단형 서식 자동 인식)</div>
+      <div class="dropzone" id="vat-dropzone" style="margin-top:12px;">
+        <div><strong>클릭</strong>하거나 파일을 이곳에 <strong>끌어다 놓으세요</strong> (여러 개 선택 가능)</div>
+        <div class="hint">.xlsx · .xls · .csv</div>
         <input type="file" id="vat-file-input" multiple accept=".xlsx,.xls,.csv" style="display:none;">
       </div>
+
+      <div id="vat-stage-wrap" style="display:none; margin-top:14px;">
+        <table class="hl-table" id="vat-stage-table">
+          <thead><tr><th>파일명</th><th style="width:170px;">마켓</th><th style="width:40px;"></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div style="margin-top:10px; display:flex; gap:8px;">
+          <button class="btn" id="vat-stage-upload-btn">전체 업로드</button>
+          <button class="btn secondary" id="vat-stage-clear-btn">취소</button>
+        </div>
+      </div>
+
       <div class="upload-log" id="vat-upload-log"></div>
     </div>
 
     <div class="card" style="margin-top:16px;">
-      <div class="filter-row" style="justify-content:space-between;">
-        <div class="card-title" style="margin:0;"><span class="dot"></span>마켓별 · 결제수단별 집계</div>
-        <div class="filter-group" id="vat-view-mode"></div>
+      <div class="calendar-head">
+        <div class="card-title" style="margin:0;"><span class="dot"></span>마켓별 · 월별 집계</div>
+        <div class="cal-nav">
+          <button type="button" id="vat-half-prev" class="cal-nav-btn">◀</button>
+          <span id="vat-half-label"></span>
+          <button type="button" id="vat-half-next" class="cal-nav-btn">▶</button>
+        </div>
       </div>
-      <div class="filter-row" id="vat-sub-filter" style="margin-top:8px;"></div>
 
-      <table class="summary-table" id="vat-table" style="margin-top:14px;">
-        <thead><tr><th>마켓</th><th>신용카드</th><th>현금</th><th>휴대폰</th><th>기타</th><th>합계</th></tr></thead>
-        <tbody></tbody>
-        <tfoot></tfoot>
-      </table>
-
-      <table class="summary-table" id="vat-monthly-table" style="margin-top:14px; display:none;">
+      <table class="summary-table" id="vat-half-table" style="margin-top:14px;">
         <thead><tr><th>월</th><th>마켓</th><th>신용카드</th><th>현금</th><th>휴대폰</th><th>기타</th><th>합계</th></tr></thead>
         <tbody></tbody>
       </table>

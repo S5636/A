@@ -665,83 +665,97 @@
   }
 
   // ================= TAB 3: 부가세 통합 =================
-  const vatState = { viewMode: '전체', halfYear: NOW.getFullYear(), half: (NOW.getMonth() + 1) <= 6 ? 1 : 2 };
+  const vatState = { year: NOW.getFullYear(), half: (NOW.getMonth() + 1) <= 6 ? 1 : 2 };
+  let vatMarkets = [];
+  let vatStagedFiles = []; // File[]
 
   async function loadVatMarkets() {
-    const markets = await api('/api/vat/markets');
-    const sel = document.getElementById('vat-market-select');
-    for (const m of markets) {
-      const opt = document.createElement('option');
-      opt.value = m; opt.textContent = m;
-      sel.appendChild(opt);
-    }
+    vatMarkets = await api('/api/vat/markets');
   }
 
-  function renderVatViewMode() {
-    const el = document.getElementById('vat-view-mode');
-    el.innerHTML = '';
-    for (const mode of ['전체', '반기별', '월별']) {
-      el.appendChild(renderChip(mode, vatState.viewMode === mode, () => {
-        vatState.viewMode = mode; renderVatViewMode(); loadVatView();
-      }));
+  function guessVatMarket(filename) {
+    for (const m of vatMarkets) {
+      if (filename.includes(m)) return m;
     }
+    if (filename.includes('지마켓') || filename.toUpperCase().includes('G마켓') || filename.toUpperCase().includes('GMARKET')) return '지마켓';
+    return '';
   }
 
-  function renderVatSubFilter(availableYears) {
-    const el = document.getElementById('vat-sub-filter');
-    el.innerHTML = '';
-    if (vatState.viewMode !== '반기별') return;
-    const years = availableYears && availableYears.length ? availableYears : [vatState.halfYear];
-    const yearGroup = document.createElement('div'); yearGroup.className = 'filter-group';
-    for (const y of years) {
-      yearGroup.appendChild(renderChip(`${y}년`, vatState.halfYear === y, () => {
-        vatState.halfYear = y; renderVatSubFilter(years); loadVatView();
-      }));
-    }
-    el.appendChild(yearGroup); el.appendChild(sep());
-    const halfGroup = document.createElement('div'); halfGroup.className = 'filter-group';
-    halfGroup.appendChild(renderChip('상반기 (1~6월)', vatState.half === 1, () => {
-      vatState.half = 1; renderVatSubFilter(years); loadVatView();
-    }));
-    halfGroup.appendChild(renderChip('하반기 (7~12월)', vatState.half === 2, () => {
-      vatState.half = 2; renderVatSubFilter(years); loadVatView();
-    }));
-    el.appendChild(halfGroup);
-  }
-
-  function renderVatSummaryTable(data) {
-    document.getElementById('vat-table').style.display = '';
-    document.getElementById('vat-monthly-table').style.display = 'none';
-    const tbody = document.querySelector('#vat-table tbody');
-    const tfoot = document.querySelector('#vat-table tfoot');
-    tbody.innerHTML = ''; tfoot.innerHTML = '';
-    for (const row of data.rows) {
+  function renderVatStageTable() {
+    const wrap = document.getElementById('vat-stage-wrap');
+    const tbody = document.querySelector('#vat-stage-table tbody');
+    tbody.innerHTML = '';
+    wrap.style.display = vatStagedFiles.length ? '' : 'none';
+    vatStagedFiles.forEach((file, idx) => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${row.market}</td><td>${num(row.credit)}</td><td>${num(row.cash)}</td>
-        <td>${num(row.mobile)}</td><td>${num(row.other)}</td><td style="font-weight:700;">${num(row.total)}</td>`;
+      const nameTd = document.createElement('td');
+      nameTd.textContent = file.name;
+      nameTd.title = file.name;
+      nameTd.style.maxWidth = '360px';
+      nameTd.style.overflow = 'hidden';
+      nameTd.style.textOverflow = 'ellipsis';
+      nameTd.style.whiteSpace = 'nowrap';
+      tr.appendChild(nameTd);
+
+      const selectTd = document.createElement('td');
+      const select = document.createElement('select');
+      select.dataset.idx = String(idx);
+      const blankOpt = document.createElement('option');
+      blankOpt.value = ''; blankOpt.textContent = '마켓 선택';
+      select.appendChild(blankOpt);
+      for (const m of vatMarkets) {
+        const opt = document.createElement('option');
+        opt.value = m; opt.textContent = m;
+        select.appendChild(opt);
+      }
+      const guessed = guessVatMarket(file.name);
+      if (guessed) select.value = guessed;
+      selectTd.appendChild(select);
+      tr.appendChild(selectTd);
+
+      const removeTd = document.createElement('td');
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'stage-remove-btn';
+      removeBtn.textContent = '✕';
+      removeBtn.addEventListener('click', () => {
+        vatStagedFiles.splice(idx, 1);
+        renderVatStageTable();
+      });
+      removeTd.appendChild(removeBtn);
+      tr.appendChild(removeTd);
+
       tbody.appendChild(tr);
+    });
+  }
+
+  function addVatStagedFiles(fileList) {
+    for (const f of fileList) {
+      if (!vatStagedFiles.some(existing => existing.name === f.name && existing.size === f.size)) {
+        vatStagedFiles.push(f);
+      }
     }
+    renderVatStageTable();
+  }
+
+  function renderVatHalfTable(data) {
+    const tbody = document.querySelector('#vat-half-table tbody');
+    tbody.innerHTML = '';
+
     const t = data.total;
     const totalTr = document.createElement('tr');
-    totalTr.style.borderTop = '2px solid var(--border-strong)';
-    totalTr.innerHTML = `<td style="font-weight:700;">합계</td><td style="font-weight:700;">${num(t.credit)}</td>
-      <td style="font-weight:700;">${num(t.cash)}</td><td style="font-weight:700;">${num(t.mobile)}</td>
-      <td style="font-weight:700;">${num(t.other)}</td><td style="font-weight:700; color:var(--good);">${num(t.total)}</td>`;
-    tfoot.appendChild(totalTr);
-  }
+    totalTr.style.borderBottom = '2px solid var(--border-strong)';
+    totalTr.innerHTML = `<td colspan="2" style="font-weight:700;">합계</td>
+      <td style="font-weight:700;">${num(t.credit)}</td><td style="font-weight:700;">${num(t.cash)}</td>
+      <td style="font-weight:700;">${num(t.mobile)}</td><td style="font-weight:700;">${num(t.other)}</td>
+      <td style="font-weight:700; color:var(--good);">${num(t.total)}</td>`;
+    tbody.appendChild(totalTr);
 
-  function renderVatMonthlyTable(data) {
-    document.getElementById('vat-table').style.display = 'none';
-    document.getElementById('vat-monthly-table').style.display = '';
-    const tbody = document.querySelector('#vat-monthly-table tbody');
-    tbody.innerHTML = '';
     let lastMonth = null;
     for (const row of data.rows) {
-      const ymKey = `${row.year}-${row.month}`;
       const tr = document.createElement('tr');
-      if (ymKey !== lastMonth) tr.style.borderTop = '2px solid var(--border-strong)';
-      lastMonth = ymKey;
-      tr.innerHTML = `<td style="font-weight:700;">${row.year}-${String(row.month).padStart(2, '0')}</td>
+      if (row.month !== lastMonth) tr.style.borderTop = '2px solid var(--border-strong)';
+      lastMonth = row.month;
+      tr.innerHTML = `<td style="font-weight:700;">${row.month}월</td>
         <td>${row.market}</td><td>${num(row.credit)}</td><td>${num(row.cash)}</td>
         <td>${num(row.mobile)}</td><td>${num(row.other)}</td><td style="font-weight:700;">${num(row.total)}</td>`;
       tbody.appendChild(tr);
@@ -750,63 +764,89 @@
 
   async function loadVatView() {
     const emptyHint = document.getElementById('vat-empty-hint');
-    let data;
-    if (vatState.viewMode === '월별') {
-      data = await api('/api/vat/monthly');
-      renderVatSubFilter(null);
-      if (data.available_months.length === 0) { emptyHint.style.display = ''; document.getElementById('vat-table').style.display = 'none'; document.getElementById('vat-monthly-table').style.display = 'none'; return; }
-      emptyHint.style.display = 'none';
-      renderVatMonthlyTable(data);
-    } else if (vatState.viewMode === '반기별') {
-      const probe = await api('/api/vat/table');
-      const years = [...new Set(probe.available_months.map(ym => parseInt(ym.split('-')[0], 10)))];
-      renderVatSubFilter(years);
-      if (years.length === 0) { emptyHint.style.display = ''; document.getElementById('vat-table').style.display = 'none'; document.getElementById('vat-monthly-table').style.display = 'none'; return; }
-      if (!years.includes(vatState.halfYear)) vatState.halfYear = years[years.length - 1];
-      data = await api(`/api/vat/half?${qs({ year: vatState.halfYear, half: vatState.half })}`);
-      emptyHint.style.display = 'none';
-      renderVatSummaryTable(data);
-    } else {
-      data = await api('/api/vat/table');
-      renderVatSubFilter(null);
-      if (data.available_months.length === 0) { emptyHint.style.display = ''; document.getElementById('vat-table').style.display = 'none'; document.getElementById('vat-monthly-table').style.display = 'none'; return; }
-      emptyHint.style.display = 'none';
-      renderVatSummaryTable(data);
+    const table = document.getElementById('vat-half-table');
+    document.getElementById('vat-half-label').textContent = `${vatState.year}년 ${vatState.half === 1 ? '상반기 (1~6월)' : '하반기 (7~12월)'}`;
+    const data = await api(`/api/vat/half?${qs({ year: vatState.year, half: vatState.half })}`);
+    if (data.rows.length === 0) {
+      emptyHint.style.display = '';
+      table.style.display = 'none';
+      return;
     }
+    emptyHint.style.display = 'none';
+    table.style.display = '';
+    renderVatHalfTable(data);
   }
 
-  async function uploadVatFiles(fileList) {
-    const market = document.getElementById('vat-market-select').value;
-    if (!market) { toast('마켓을 먼저 선택해주세요.', 'err'); return; }
+  function navigateVatHalf(dir) {
+    if (dir > 0) {
+      if (vatState.half === 1) { vatState.half = 2; } else { vatState.half = 1; vatState.year += 1; }
+    } else {
+      if (vatState.half === 2) { vatState.half = 1; } else { vatState.half = 2; vatState.year -= 1; }
+    }
+    loadVatView();
+  }
+  document.getElementById('vat-half-prev').addEventListener('click', () => navigateVatHalf(-1));
+  document.getElementById('vat-half-next').addEventListener('click', () => navigateVatHalf(1));
+
+  async function uploadOneVatFile(file, market) {
     const fd = new FormData();
     fd.append('market', market);
-    for (const f of fileList) fd.append('files', f);
-    const log = document.getElementById('vat-upload-log');
-    log.innerHTML = '<div class="hint">업로드 처리 중...</div>';
-    try {
-      const data = await api('/api/vat/upload', { method: 'POST', body: fd });
-      log.innerHTML = '';
-      for (const r of data.results) {
-        const item = document.createElement('div');
-        item.className = `upload-log-item ${r.error ? 'err' : ''}`;
-        item.innerHTML = r.error
-          ? `<span>${r.filename}</span><span>${r.error}</span>`
-          : `<span>${r.filename} <span class="tag">(${market})</span></span><span>인식: ${r.months.join(', ')}</span>`;
-        log.appendChild(item);
-      }
-      toast('부가세 자료가 반영되었습니다.', 'ok');
-      loadVatView();
-    } catch (err) {
-      log.innerHTML = `<div class="upload-log-item err">${err.message}</div>`;
-    }
+    fd.append('files', file);
+    const data = await api('/api/vat/upload', { method: 'POST', body: fd });
+    return { market, result: data.results[0] };
   }
 
-  document.getElementById('vat-file-btn').addEventListener('click', () => {
-    document.getElementById('vat-file-input').click();
+  async function submitVatStage() {
+    const selects = Array.from(document.querySelectorAll('#vat-stage-table select'));
+    const missing = selects.filter(s => !s.value);
+    if (missing.length) {
+      toast(`마켓을 선택하지 않은 파일이 ${missing.length}개 있어요.`, 'err');
+      return;
+    }
+    const log = document.getElementById('vat-upload-log');
+    log.innerHTML = '<div class="hint">업로드 처리 중...</div>';
+    const jobs = vatStagedFiles.map((file, idx) => uploadOneVatFile(file, selects[idx].value));
+    const outcomes = await Promise.allSettled(jobs);
+
+    log.innerHTML = '';
+    outcomes.forEach((outcome, idx) => {
+      const file = vatStagedFiles[idx];
+      const item = document.createElement('div');
+      if (outcome.status === 'rejected') {
+        item.className = 'upload-log-item err';
+        item.innerHTML = `<span>${file.name}</span><span>${outcome.reason.message}</span>`;
+      } else {
+        const { market, result } = outcome.value;
+        item.className = `upload-log-item ${result.error ? 'err' : ''}`;
+        item.innerHTML = result.error
+          ? `<span>${result.filename}</span><span>${result.error}</span>`
+          : `<span>${result.filename} <span class="tag">(${market})</span></span><span>인식: ${result.months.join(', ')}</span>`;
+      }
+      log.appendChild(item);
+    });
+
+    toast('부가세 자료가 반영되었습니다.', 'ok');
+    vatStagedFiles = [];
+    renderVatStageTable();
+    loadVatView();
+  }
+
+  const vatDropzone = document.getElementById('vat-dropzone');
+  vatDropzone.addEventListener('click', () => document.getElementById('vat-file-input').click());
+  vatDropzone.addEventListener('dragover', (e) => { e.preventDefault(); vatDropzone.classList.add('drag'); });
+  vatDropzone.addEventListener('dragleave', () => vatDropzone.classList.remove('drag'));
+  vatDropzone.addEventListener('drop', (e) => {
+    e.preventDefault(); vatDropzone.classList.remove('drag');
+    if (e.dataTransfer.files.length) addVatStagedFiles(e.dataTransfer.files);
   });
   document.getElementById('vat-file-input').addEventListener('change', (e) => {
-    if (e.target.files.length) uploadVatFiles(e.target.files);
+    if (e.target.files.length) addVatStagedFiles(e.target.files);
     e.target.value = '';
+  });
+  document.getElementById('vat-stage-upload-btn').addEventListener('click', submitVatStage);
+  document.getElementById('vat-stage-clear-btn').addEventListener('click', () => {
+    vatStagedFiles = [];
+    renderVatStageTable();
   });
 
   // ================= TAB SWITCHING =================
@@ -819,7 +859,7 @@
     state.loadedTabs.add(name);
     if (name === 'summary') { loadSummaryAll(); loadCalendar(); }
     if (name === 'dashboard') { renderDashFilters(); renderDashTableHead(); loadDashOrders(); }
-    if (name === 'vat') { loadVatMarkets(); renderVatViewMode(); loadVatView(); }
+    if (name === 'vat') { loadVatMarkets(); loadVatView(); }
     if (name === 'upload') { loadSettingsLinks(); }
     if (name === 'fees') { loadFees(); }
   }

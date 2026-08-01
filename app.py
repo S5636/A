@@ -229,25 +229,13 @@ def api_vat_upload():
     return jsonify({'results': results})
 
 
-@app.route('/api/vat/table')
-def api_vat_table():
-    year = request.args.get('year', type=int)
-    month = request.args.get('month', type=int)
-    return jsonify(vat.get_vat_table(DB_PATH, year, month))
-
-
 @app.route('/api/vat/half')
 def api_vat_half():
     year = request.args.get('year', type=int)
     half = request.args.get('half', type=int)
     if not year or half not in (1, 2):
         return jsonify({'error': 'year, half(1 또는 2) 파라미터가 필요합니다.'}), 400
-    return jsonify(vat.get_vat_half_table(DB_PATH, year, half))
-
-
-@app.route('/api/vat/monthly')
-def api_vat_monthly():
-    return jsonify(vat.get_vat_monthly_detail(DB_PATH))
+    return jsonify(vat.get_vat_half_detail(DB_PATH, year, half))
 
 
 # ---------------------------------------------------------------------------

@@ -78,7 +78,7 @@ a { color: inherit; }
 
 .grid-2 { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; align-items: start; }
 .grid-3 { display: grid; grid-template-columns: 0.95fr 0.55fr 1.75fr; gap: 18px; align-items: stretch; }
-.grid-3 > .card { display: flex; flex-direction: column; padding: 24px 26px; height: 600px; }
+.grid-3 > .card { display: flex; flex-direction: column; padding: 24px 26px; height: 600px; margin-top: 0; }
 .grid-3 > .card > .donut-wrap { margin: auto 0; }
 .grid-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
 @media (max-width: 1100px) { .grid-3 { grid-template-columns: 1fr; } }
@@ -191,7 +191,7 @@ table.summary-table th { text-align: right; color: var(--text-muted); font-weigh
 table.summary-table th:first-child { text-align: left; }
 table.summary-table td { text-align: right; padding: 10.5px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 table.summary-table td:first-child { text-align: left; font-weight: 700; white-space: nowrap; }
-#vat-monthly-table td:nth-child(2) { text-align: left; font-weight: 600; }
+#vat-half-table td:nth-child(2) { text-align: left; font-weight: 600; }
 table.summary-table td.rate-pos { color: var(--good); font-weight: 700; }
 
 /* ---------- Calendar ---------- */
@@ -254,6 +254,9 @@ table.hl-table { width: 100%; border-collapse: collapse; font-size: 12.5px; marg
 table.hl-table th { text-align: left; color: var(--text-muted); padding: 7px 8px; border-bottom: 1px solid var(--border-strong); }
 table.hl-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
 table.hl-table td input { width: 100%; background: rgba(255,242,204,0.14); border: 1px solid rgba(255,242,204,0.4); color: var(--text-primary); padding: 5px 7px; border-radius: 5px; }
+#vat-stage-table select { width: 100%; background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-primary); padding: 5px 7px; border-radius: 5px; }
+#vat-stage-table .stage-remove-btn { background: transparent; border: none; color: var(--critical); cursor: pointer; font-size: 15px; padding: 2px 6px; }
+#vat-stage-table .stage-remove-btn:hover { color: #fff; background: var(--critical); border-radius: 4px; }
 
 /* ---------- Fees tab ---------- */
 table.fee-table { width: 100%; border-collapse: collapse; font-size: 13px; }

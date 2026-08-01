@@ -259,72 +259,29 @@ def process_vat_upload(db_path, fp, filename, market):
     }
 
 
-def _rows_to_table(rows):
-    by_market = {}
-    for market, cat, amt in rows:
-        by_market.setdefault(market, {c: 0 for c in CATEGORIES})[cat] = int(amt or 0)
-    table = []
-    total = {c: 0 for c in CATEGORIES}
-    for market, cats in sorted(by_market.items()):
-        row_total = sum(cats.values())
-        table.append({'market': market, **cats, 'total': row_total})
-        for c in CATEGORIES:
-            total[c] += cats[c]
-    total['total'] = sum(total.values())
-    return table, total
-
-
-def _available_months(cur):
-    cur.execute("SELECT DISTINCT year, month FROM vat_summary ORDER BY year, month")
-    return [f"{y}-{m:02d}" for y, m in cur.fetchall()]
-
-
-def get_vat_table(db_path, year=None, month=None):
-    """year/month가 있으면 해당 (연,월)만, 없으면 전체 기간 합계."""
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    if year and month:
-        cur.execute("SELECT market, category, amount FROM vat_summary WHERE year=? AND month=?", (year, month))
-    else:
-        cur.execute("SELECT market, category, SUM(amount) FROM vat_summary GROUP BY market, category")
-    rows = cur.fetchall()
-    available_months = _available_months(cur)
-    conn.close()
-    table, total = _rows_to_table(rows)
-    return {'rows': table, 'total': total, 'available_months': available_months}
-
-
-def get_vat_half_table(db_path, year, half):
-    """half: 1(상반기, 1~6월) 또는 2(하반기, 7~12월)"""
+def get_vat_half_detail(db_path, year, half):
+    """half(1=상반기 1~6월, 2=하반기 7~12월)의 (월,마켓)별 상세 내역을 월 오름차순으로 전부 나열.
+    반기 전체 총합계도 함께 반환 - 목록 상단에 합계를 고정 표시하기 위함."""
     months = list(range(1, 7)) if half == 1 else list(range(7, 13))
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     placeholders = ','.join('?' * len(months))
-    cur.execute(f"""SELECT market, category, SUM(amount) FROM vat_summary
-        WHERE year=? AND month IN ({placeholders}) GROUP BY market, category""", [year, *months])
+    cur.execute(f"""SELECT market, month, category, amount FROM vat_summary
+        WHERE year=? AND month IN ({placeholders})""", [year, *months])
     rows = cur.fetchall()
     cur.execute("SELECT DISTINCT year FROM vat_summary ORDER BY year")
     available_years = [r[0] for r in cur.fetchall()]
-    available_months = _available_months(cur)
-    conn.close()
-    table, total = _rows_to_table(rows)
-    return {'rows': table, 'total': total, 'available_years': available_years, 'available_months': available_months}
-
-
-def get_vat_monthly_detail(db_path):
-    """모든 (연,월,마켓) 조합을 최신순으로 나열 - 월별로 눈으로 바로 확인할 수 있게."""
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    cur.execute("SELECT market, year, month, category, amount FROM vat_summary")
-    rows = cur.fetchall()
-    available_months = _available_months(cur)
     conn.close()
 
     by_key = {}
-    for market, y, m, cat, amt in rows:
-        by_key.setdefault((y, m, market), {c: 0 for c in CATEGORIES})[cat] = int(amt or 0)
+    total = {c: 0 for c in CATEGORIES}
+    for market, m, cat, amt in rows:
+        amt = int(amt or 0)
+        by_key.setdefault((m, market), {c: 0 for c in CATEGORIES})[cat] = amt
+        total[cat] += amt
 
     result = []
-    for (y, m, market), cats in sorted(by_key.items(), key=lambda kv: (-kv[0][0], -kv[0][1], kv[0][2])):
-        result.append({'year': y, 'month': m, 'market': market, **cats, 'total': sum(cats.values())})
-    return {'rows': result, 'available_months': available_months}
+    for (m, market), cats in sorted(by_key.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        result.append({'month': m, 'market': market, **cats, 'total': sum(cats.values())})
+    total['total'] = sum(total.values())
+    return {'rows': result, 'total': total, 'available_years': available_years}
