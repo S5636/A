@@ -41,9 +41,18 @@ def _find_exact_col(columns, *names):
     return None
 
 
+def _scalar(v):
+    # 실제 마켓 엑셀에는 빈 헤더 셀이 여러 개라 컬럼명이 중복되는 경우가 있는데,
+    # 이러면 df[col]이 Series를 여러 개 묶어서 돌려줘서 이후 계산이 통째로 죽는다.
+    # 그럴 땐 첫 번째 값만 취한다.
+    if isinstance(v, pd.Series):
+        return v.iloc[0] if len(v) else None
+    return v
+
+
 def _num(v):
     try:
-        s = re.sub(r'[^\d.\-]', '', str(v))
+        s = re.sub(r'[^\d.\-]', '', str(_scalar(v)))
         return float(s) if s not in ('', '-', '.') else 0.0
     except Exception:
         return 0.0
@@ -51,7 +60,7 @@ def _num(v):
 
 def _year_month(val):
     # "2026-05-01" / "2026.06.05" / "2026/03/21" / "2026. 05. 19. 21:16:32"(마침표 뒤 공백 포함) 전부 대응
-    m = re.match(r'\s*(\d{4})[.\-/]\s*(\d{1,2})', str(val))
+    m = re.match(r'\s*(\d{4})[.\-/]\s*(\d{1,2})', str(_scalar(val)))
     if not m:
         return None
     y, mo = int(m.group(1)), int(m.group(2))
@@ -90,15 +99,18 @@ def _parse_format_a(df):
 
     result = {}
     for _, row in df.iterrows():
-        ym = _year_month(row.get(date_col))
-        if not ym:
+        try:
+            ym = _year_month(row.get(date_col))
+            if not ym:
+                continue
+            credit = _num(row.get(c_sale)) - (_num(row.get(c_ref)) if c_ref else 0)
+            cash = (_num(row.get(h_sale)) if h_sale else 0) - (_num(row.get(h_ref)) if h_ref else 0)
+            other = (_num(row.get(o_sale)) if o_sale else 0) - (_num(row.get(o_ref)) if o_ref else 0)
+            _add(result, ym, 'credit', credit)
+            _add(result, ym, 'cash', cash)
+            _add(result, ym, 'other', other)
+        except Exception:
             continue
-        credit = _num(row.get(c_sale)) - (_num(row.get(c_ref)) if c_ref else 0)
-        cash = (_num(row.get(h_sale)) if h_sale else 0) - (_num(row.get(h_ref)) if h_ref else 0)
-        other = (_num(row.get(o_sale)) if o_sale else 0) - (_num(row.get(o_ref)) if o_ref else 0)
-        _add(result, ym, 'credit', credit)
-        _add(result, ym, 'cash', cash)
-        _add(result, ym, 'other', other)
     return result
 
 
@@ -117,17 +129,20 @@ def _parse_format_b(df):
 
     result = {}
     for _, row in df.iterrows():
-        ym = _year_month(row.get(date_col))
-        if not ym:
+        try:
+            ym = _year_month(row.get(date_col))
+            if not ym:
+                continue
+            credit = _num(row.get(credit_col)) if credit_col else 0
+            cash = (_num(row.get(cash1_col)) if cash1_col else 0) + (_num(row.get(cash2_col)) if cash2_col else 0)
+            mobile = _num(row.get(mobile_col)) if mobile_col else 0
+            other = _num(row.get(other_col)) if other_col else 0
+            _add(result, ym, 'credit', credit)
+            _add(result, ym, 'cash', cash)
+            _add(result, ym, 'mobile', mobile)
+            _add(result, ym, 'other', other)
+        except Exception:
             continue
-        credit = _num(row.get(credit_col)) if credit_col else 0
-        cash = (_num(row.get(cash1_col)) if cash1_col else 0) + (_num(row.get(cash2_col)) if cash2_col else 0)
-        mobile = _num(row.get(mobile_col)) if mobile_col else 0
-        other = _num(row.get(other_col)) if other_col else 0
-        _add(result, ym, 'credit', credit)
-        _add(result, ym, 'cash', cash)
-        _add(result, ym, 'mobile', mobile)
-        _add(result, ym, 'other', other)
     return result
 
 
@@ -148,19 +163,22 @@ def _parse_format_c(df):
 
     result = {}
     for _, row in df.iterrows():
-        ym = _year_month(row.get(date_col))
-        if not ym:
+        try:
+            ym = _year_month(row.get(date_col))
+            if not ym:
+                continue
+            method = str(_scalar(row.get(method_col)) or '').strip()
+            if '카드' in method or '신용' in method:
+                cat = 'credit'
+            elif '현금' in method:
+                cat = 'cash'
+            elif '휴대' in method or '폰' in method:
+                cat = 'mobile'
+            else:
+                cat = 'other'
+            _add(result, ym, cat, _num(row.get(amount_col)))
+        except Exception:
             continue
-        method = str(row.get(method_col) or '').strip()
-        if '카드' in method or '신용' in method:
-            cat = 'credit'
-        elif '현금' in method:
-            cat = 'cash'
-        elif '휴대' in method or '폰' in method:
-            cat = 'mobile'
-        else:
-            cat = 'other'
-        _add(result, ym, cat, _num(row.get(amount_col)))
     return result
 
 
@@ -182,15 +200,18 @@ def _parse_format_d(df):
 
     result = {}
     for _, row in df.iterrows():
-        ym = _year_month(row.get(date_col))
-        if not ym:
+        try:
+            ym = _year_month(row.get(date_col))
+            if not ym:
+                continue
+            credit = _num(row.get(credit_col))
+            cash = sum(_num(row.get(c)) for c in cash_cols)
+            other = _num(row.get(other_col)) if other_col else 0
+            _add(result, ym, 'credit', credit)
+            _add(result, ym, 'cash', cash)
+            _add(result, ym, 'other', other)
+        except Exception:
             continue
-        credit = _num(row.get(credit_col))
-        cash = sum(_num(row.get(c)) for c in cash_cols)
-        other = _num(row.get(other_col)) if other_col else 0
-        _add(result, ym, 'credit', credit)
-        _add(result, ym, 'cash', cash)
-        _add(result, ym, 'other', other)
     return result
 
 
@@ -260,28 +281,32 @@ def process_vat_upload(db_path, fp, filename, market):
 
 
 def get_vat_half_detail(db_path, year, half):
-    """half(1=상반기 1~6월, 2=하반기 7~12월)의 (월,마켓)별 상세 내역을 월 오름차순으로 전부 나열.
-    반기 전체 총합계도 함께 반환 - 목록 상단에 합계를 고정 표시하기 위함."""
+    """half(1=상반기 1~6월, 2=하반기 7~12월)를 '부가세 통합 엑셀'처럼 마켓을 행, 월을 열로
+    둔 피벗 표로 반환. 셀 값은 결제수단 4종을 합친 그 달 총액이고, 오른쪽 끝에 마켓별
+    합계열, 맨 아래에 월별 합계행, 우하단에 전체 총합계를 둔다."""
     months = list(range(1, 7)) if half == 1 else list(range(7, 13))
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     placeholders = ','.join('?' * len(months))
-    cur.execute(f"""SELECT market, month, category, amount FROM vat_summary
-        WHERE year=? AND month IN ({placeholders})""", [year, *months])
+    cur.execute(f"""SELECT market, month, SUM(amount) FROM vat_summary
+        WHERE year=? AND month IN ({placeholders}) GROUP BY market, month""", [year, *months])
     rows = cur.fetchall()
     cur.execute("SELECT DISTINCT year FROM vat_summary ORDER BY year")
     available_years = [r[0] for r in cur.fetchall()]
     conn.close()
 
-    by_key = {}
-    total = {c: 0 for c in CATEGORIES}
-    for market, m, cat, amt in rows:
-        amt = int(amt or 0)
-        by_key.setdefault((m, market), {c: 0 for c in CATEGORIES})[cat] = amt
-        total[cat] += amt
+    markets = sorted({market for market, _, _ in rows})
+    cell = {(market, m): int(amt or 0) for market, m, amt in rows}
 
-    result = []
-    for (m, market), cats in sorted(by_key.items(), key=lambda kv: (kv[0][0], kv[0][1])):
-        result.append({'month': m, 'market': market, **cats, 'total': sum(cats.values())})
-    total['total'] = sum(total.values())
-    return {'rows': result, 'total': total, 'available_years': available_years}
+    matrix = []
+    for market in markets:
+        month_amounts = [cell.get((market, m), 0) for m in months]
+        matrix.append({'market': market, 'months': month_amounts, 'row_total': sum(month_amounts)})
+
+    col_totals = [sum(cell.get((market, m), 0) for market in markets) for m in months]
+    grand_total = sum(col_totals)
+
+    return {
+        'months': months, 'matrix': matrix, 'col_totals': col_totals,
+        'grand_total': grand_total, 'available_years': available_years,
+    }

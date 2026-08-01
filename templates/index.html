@@ -112,7 +112,7 @@
       </div>
 
       <table class="summary-table" id="vat-half-table" style="margin-top:14px;">
-        <thead><tr><th>월</th><th>마켓</th><th>신용카드</th><th>현금</th><th>휴대폰</th><th>기타</th><th>합계</th></tr></thead>
+        <thead></thead>
         <tbody></tbody>
       </table>
 
@@ -134,6 +134,11 @@
         <input class="text-input" id="input-dapalza-url" placeholder="다팔자 주문 다운로드 페이지 URL">
         <input class="text-input" id="input-ownerclan-url" placeholder="오너클랜 발주내역 페이지 URL">
         <button class="btn" id="btn-save-links">저장</button>
+      </div>
+      <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+        <button class="btn" id="btn-dapalza-collect">🖱️ 지금 수집 (다팔자 자동화)</button>
+        <div class="hint" style="margin-top:8px;">다팔자에서 기간 1개월 설정 → 주문수집 → 엑셀 전체다운로드 → 저장 → 마진보드 반영까지 자동으로 해봅니다. 1차 버전이라 다팔자 화면 구성이 다르면 중간에 멈출 수 있어요 - 실행 중엔 다른 창을 건드리지 말고 지켜봐 주시고, 안 되면 아래 로그를 캡처해서 보내주세요.</div>
+        <div class="upload-log" id="dapalza-collect-log"></div>
       </div>
     </div>
 

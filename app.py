@@ -7,12 +7,15 @@ import os
 import json
 import sqlite3
 import tempfile
+import traceback
 
 from flask import Flask, request, jsonify, render_template, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 import calc_engine as ce
 import parsers
 import vat_parser as vat
+import dapalza_auto
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'shop_data.db')
@@ -24,6 +27,20 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
 # 로컬 1인용 앱이라 static 파일(CSS/JS) 캐시를 꺼서, 업데이트 zip으로 갈아끼운 뒤
 # 브라우저가 옛날 버전을 계속 보여주는 문제를 원천 차단한다.
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+
+@app.errorhandler(Exception)
+def handle_uncaught_error(e):
+    # /api/* 라우트에서 미처 못 잡은 예외가 새하얀 "INTERNAL SERVER ERROR" 페이지로
+    # 그대로 노출되던 문제 - 콘솔에 전체 traceback을 찍고, 화면에는 JSON 에러로
+    # 내려줘서 최소한 무엇이 문제인지 콘솔 창(검은 창)에서 확인할 수 있게 한다.
+    # 404 같은 정상적인 HTTP 예외는 그대로 흘려보내야 한다 (안 그러면 404가 500으로 둔갑함).
+    if isinstance(e, HTTPException):
+        return e
+    if request.path.startswith('/api/'):
+        traceback.print_exc()
+        return jsonify({'error': f'{type(e).__name__}: {e}'}), 500
+    raise e
 
 
 def init_db():
@@ -192,6 +209,19 @@ def api_upload():
             res['filename'] = f.filename
             results.append(res)
     return jsonify({'results': results})
+
+
+@app.route('/api/dapalza/collect', methods=['POST'])
+def api_dapalza_collect():
+    result = dapalza_auto.collect_and_upload()
+    if not result.get('ok'):
+        return jsonify(result)
+    try:
+        upload_res = parsers.process_upload(DB_PATH, result['file_path'], os.path.basename(result['file_path']))
+    except Exception as e:
+        upload_res = {'error': str(e)}
+    result['upload'] = upload_res
+    return jsonify(result)
 
 
 # ---------------------------------------------------------------------------

@@ -539,6 +539,37 @@
     toast('바로가기 주소가 저장되었습니다.', 'ok');
   });
 
+  document.getElementById('btn-dapalza-collect').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-dapalza-collect');
+    const log = document.getElementById('dapalza-collect-log');
+    btn.disabled = true;
+    btn.textContent = '⏳ 수집 중... (다팔자 창을 건드리지 마세요)';
+    log.innerHTML = '<div class="hint">다팔자 자동화를 시작합니다...</div>';
+    try {
+      const data = await api('/api/dapalza/collect', { method: 'POST' });
+      log.innerHTML = '';
+      for (const line of (data.log || [])) {
+        const item = document.createElement('div');
+        item.className = 'upload-log-item';
+        item.innerHTML = `<span>${line}</span>`;
+        log.appendChild(item);
+      }
+      if (data.ok && data.upload && !data.upload.error) {
+        toast('다팔자 자동 수집 및 반영이 완료되었습니다.', 'ok');
+        state.loadedTabs.delete('summary'); state.loadedTabs.delete('dashboard');
+      } else if (data.ok && data.upload && data.upload.error) {
+        toast(`파일은 저장했지만 반영 중 오류: ${data.upload.error}`, 'err');
+      } else {
+        toast('자동 수집이 중간에 멈췄어요. 아래 로그를 확인해주세요.', 'err');
+      }
+    } catch (e) {
+      log.innerHTML = `<div class="upload-log-item err"><span>${e.message}</span></div>`;
+      toast('자동 수집 요청이 실패했습니다.', 'err');
+    }
+    btn.disabled = false;
+    btn.textContent = '🖱️ 지금 수집 (다팔자 자동화)';
+  });
+
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');
   dropzone.addEventListener('click', () => fileInput.click());
@@ -738,28 +769,30 @@
   }
 
   function renderVatHalfTable(data) {
+    const thead = document.querySelector('#vat-half-table thead');
     const tbody = document.querySelector('#vat-half-table tbody');
+    thead.innerHTML = '';
     tbody.innerHTML = '';
 
-    const t = data.total;
-    const totalTr = document.createElement('tr');
-    totalTr.style.borderBottom = '2px solid var(--border-strong)';
-    totalTr.innerHTML = `<td colspan="2" style="font-weight:700;">합계</td>
-      <td style="font-weight:700;">${num(t.credit)}</td><td style="font-weight:700;">${num(t.cash)}</td>
-      <td style="font-weight:700;">${num(t.mobile)}</td><td style="font-weight:700;">${num(t.other)}</td>
-      <td style="font-weight:700; color:var(--good);">${num(t.total)}</td>`;
-    tbody.appendChild(totalTr);
+    const headTr = document.createElement('tr');
+    headTr.innerHTML = `<th style="text-align:left;">마켓</th>` +
+      data.months.map(m => `<th>${m}월</th>`).join('') + `<th>합계</th>`;
+    thead.appendChild(headTr);
 
-    let lastMonth = null;
-    for (const row of data.rows) {
+    for (const row of data.matrix) {
       const tr = document.createElement('tr');
-      if (row.month !== lastMonth) tr.style.borderTop = '2px solid var(--border-strong)';
-      lastMonth = row.month;
-      tr.innerHTML = `<td style="font-weight:700;">${row.month}월</td>
-        <td>${row.market}</td><td>${num(row.credit)}</td><td>${num(row.cash)}</td>
-        <td>${num(row.mobile)}</td><td>${num(row.other)}</td><td style="font-weight:700;">${num(row.total)}</td>`;
+      tr.innerHTML = `<td>${row.market}</td>` +
+        row.months.map(v => `<td>${num(v)}</td>`).join('') +
+        `<td style="font-weight:700;">${num(row.row_total)}</td>`;
       tbody.appendChild(tr);
     }
+
+    const totalTr = document.createElement('tr');
+    totalTr.style.borderTop = '2px solid var(--border-strong)';
+    totalTr.innerHTML = `<td style="font-weight:700;">합계</td>` +
+      data.col_totals.map(v => `<td style="font-weight:700;">${num(v)}</td>`).join('') +
+      `<td style="font-weight:700; color:var(--good);">${num(data.grand_total)}</td>`;
+    tbody.appendChild(totalTr);
   }
 
   async function loadVatView() {
@@ -767,7 +800,7 @@
     const table = document.getElementById('vat-half-table');
     document.getElementById('vat-half-label').textContent = `${vatState.year}년 ${vatState.half === 1 ? '상반기 (1~6월)' : '하반기 (7~12월)'}`;
     const data = await api(`/api/vat/half?${qs({ year: vatState.year, half: vatState.half })}`);
-    if (data.rows.length === 0) {
+    if (data.matrix.length === 0) {
       emptyHint.style.display = '';
       table.style.display = 'none';
       return;
