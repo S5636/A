@@ -104,13 +104,16 @@ def _find_smallest_text_match(win, title, log=None, descendants=None):
     return candidates[0][3]
 
 
-def _find_near(anchor, title, log=None, max_up=6):
+def _find_near(anchor, title, log=None, max_up=10):
     """전체 창(963개 요소)을 다 훑어서 title을 찾으면, 완전히 동떨어진 곳에
     우연히 같은 글자가 들어간 요소(예: 주문 목록 어딘가의 텍스트)를 잘못 골라서
     엉뚱한 좌표를 클릭하는 사고가 실제로 발생했다 ('확인'을 찾다가 TOSS 관련
     요소를 클릭한 사례). 그래서 anchor(예: 팝업 안의 '완료하였습니다' 텍스트
     요소)의 조상을 위로 올라가면서, 그 조상 범위 안에서만 title을 찾는다 - 같은
-    모달/패널 안에 있을 가능성이 훨씬 높아서 오탐이 크게 줄어든다."""
+    모달/패널 안에 있을 가능성이 훨씬 높아서 오탐이 크게 줄어든다. 작은 범위부터
+    순서대로 시도해서 처음 찾은 곳(=가장 좁은 범위)을 바로 채택한다. (이전에는
+    후보 범위 크기에 상한선(200개)을 둬서, 모달 자체가 200개보다 큰 경우 계속
+    건너뛰다가 결국 못 찾는 버그가 있었다 - 실제로 발생해서 상한선을 없앴다.)"""
     container = anchor
     for _ in range(max_up):
         try:
@@ -124,10 +127,9 @@ def _find_near(anchor, title, log=None, max_up=6):
             desc = container.descendants()
         except Exception:
             continue
-        if len(desc) < 2 or len(desc) > 200:
-            # 범위가 너무 좁으면(자기 자신 근처만) 아직 버튼이 안 들어있을 수 있고,
-            # 너무 넓으면(200개 초과) 이미 창 전체에 가까워져서 오탐 방지 효과가
-            # 없어지니 계속 위로 올라간다.
+        if len(desc) < 2:
+            # 범위가 너무 좁으면(자기 자신 근처만) 아직 버튼이 안 들어있을 수
+            # 있으니 계속 위로 올라간다.
             continue
         match = _find_smallest_text_match(container, title, None, descendants=desc)
         if match is not None:
@@ -368,7 +370,7 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         # 안에서 '전체 다운로드'를 찾아보고, 그래도 없을 때만 별도 창을 확인한다.
         L("'전체 다운로드' 버튼을 찾는 중...")
         dl_ctrl = None
-        for i in range(15):
+        for i in range(30):
             try:
                 descendants = win.descendants()
             except Exception:
@@ -381,10 +383,15 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             L("메인 창 안에서 '전체 다운로드' 버튼 발견 - 클릭...")
             dl_ctrl.click_input()
         else:
-            L("메인 창 안에서 못 찾아서 별도 '엑셀 다운로드' 창을 확인합니다...")
-            dl_win = Desktop(backend='uia').window(title='엑셀 다운로드')
-            dl_win.wait('visible', timeout=15)
-            _click(dl_win, '전체 다운로드', 'Button', L)
+            # 지금까지 확인된 바로는 별도 창이 아니라 메인 창 안 패널이었지만,
+            # 혹시 모를 다른 상황(버전 차이 등)을 대비해 짧게만 별도 창도 확인한다.
+            L("메인 창 안에서 못 찾아서 혹시 모를 별도 '엑셀 다운로드' 창을 잠깐 확인합니다...")
+            try:
+                dl_win = Desktop(backend='uia').window(title='엑셀 다운로드')
+                dl_win.wait('visible', timeout=5)
+                _click(dl_win, '전체 다운로드', 'Button', L)
+            except Exception as e:
+                L(f"별도 창도 없었습니다: {type(e).__name__}: {e} - 그래도 다음 단계로 진행합니다.")
         time.sleep(2)
 
         L('파일 저장 대화상자를 찾는 중...')
