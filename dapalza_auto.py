@@ -61,6 +61,26 @@ def _dump_controls(win, limit=50):
         return [f'(진단정보 수집도 실패: {e})']
 
 
+def _dump_structure(win):
+    """텍스트가 있는 컨트롤만 보면 안 보이는 경우를 위해, 클래스명/컨트롤타입까지
+    전부(빈 글자 포함) 찍어서 UIA가 이 창의 내용을 얼마나 볼 수 있는지 확인한다."""
+    try:
+        cls = win.class_name()
+    except Exception as e:
+        cls = f'(조회 실패: {e})'
+    try:
+        desc = win.descendants()
+        info = []
+        for c in desc[:80]:
+            try:
+                info.append(f"{c.friendly_class_name()}/{c.element_info.control_type}:'{c.window_text().strip()}'")
+            except Exception:
+                info.append('(조회실패)')
+        return cls, len(desc), info
+    except Exception as e:
+        return cls, 0, [f'(하위 요소 조회 실패: {e})']
+
+
 def _click(win, title, control_type=None, log=None):
     ctrl = _find_control(win, title, control_type)
     if ctrl is None:
@@ -126,6 +146,9 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
 
         visible_now = _dump_controls(win)
         L(f'창을 찾은 직후 화면에 보이는 글자들 (참고용): {visible_now}')
+        cls, desc_count, structure = _dump_structure(win)
+        L(f'창 클래스명: {cls} / 하위 요소 총 {desc_count}개')
+        L(f'하위 요소 구조(클래스/타입/텍스트, 최대 80개): {structure}')
 
         try:
             L("'주문관리' 탭 클릭...")
