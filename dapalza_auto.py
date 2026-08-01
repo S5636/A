@@ -403,6 +403,15 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         target_path = os.path.join(target_dir, save_filename)
 
         L(f'저장 경로를 지정: {target_path}')
+        # 키보드 입력(Enter 포함)은 pywinauto로 어느 컨트롤을 지정해서 보내든
+        # 실제로는 그 순간 윈도우 화면에서 포커스를 가진(맨 앞에 있는) 창으로
+        # 들어간다. 저장창을 다시 한번 맨 앞으로 가져와서, 혹시 사용자가 그
+        # 사이에 다른 창(탐색기 등)을 클릭해서 포커스가 넘어가 있었더라도
+        # Enter가 엉뚱한 곳으로 새는 걸 최대한 막는다.
+        try:
+            save_win.set_focus()
+        except Exception:
+            pass
         # 저장 대화상자 안에는 Edit 컨트롤이 여러 개(주소창, 검색창, 파일이름 칸)
         # 있을 수 있어서 found_index=0으로 아무거나 집으면 엉뚱한 칸(검색창 등)을
         # 잘못 건드릴 수 있다. 다팔자가 기본으로 제안하는 파일명(.xlsx로 끝남)이
@@ -449,6 +458,10 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         # Enter키로 기본 버튼(저장)을 실행한다 - 버튼 이름 매칭이 실패해도
         # (실제로 실패한 적이 있었음) 항상 동작하는 훨씬 안정적인 방법이다.
         try:
+            save_win.set_focus()
+        except Exception:
+            pass
+        try:
             if edit_ctrl is not None:
                 edit_ctrl.type_keys('{ENTER}')
             else:
@@ -467,12 +480,37 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             pass
 
         L('파일이 실제로 저장됐는지 확인하는 중...')
+        saved = False
         for _ in range(20):
             if os.path.exists(target_path) and (time.time() - os.path.getmtime(target_path)) < 60:
+                saved = True
                 break
             time.sleep(1)
-        else:
-            L(f'저장된 파일을 끝내 못 찾았습니다: {target_path} (파일명 입력이 실패했을 수 있어요)')
+        if not saved:
+            # Enter가 다른 창(사용자가 그 사이 클릭한 다른 프로그램 등)으로 샜을
+            # 수 있으니, 저장창이 아직 열려있다면 이번엔 '저장' 버튼을 직접 찾아서
+            # 마지막으로 한 번 더 시도해본다.
+            L('아직 저장이 안 된 것 같습니다 - 저장창이 남아있으면 저장 버튼을 직접 클릭해서 재시도합니다...')
+            try:
+                if save_win.exists(timeout=2):
+                    save_win.set_focus()
+                    _click(save_win, '저장', 'Button', L)
+                    time.sleep(1)
+                    try:
+                        confirm = Desktop(backend='uia').window(title_re='.*(덮어쓰|같은 이름).*')
+                        if confirm.exists(timeout=2):
+                            _click(confirm, '예', 'Button', L)
+                    except Exception:
+                        pass
+                    for _ in range(10):
+                        if os.path.exists(target_path) and (time.time() - os.path.getmtime(target_path)) < 60:
+                            saved = True
+                            break
+                        time.sleep(1)
+            except Exception as e:
+                L(f'재시도 중 오류: {type(e).__name__}: {e}')
+        if not saved:
+            L(f'저장된 파일을 끝내 못 찾았습니다: {target_path} (자동화 중 다른 창을 조작하면 Enter/클릭이 엉뚱한 곳으로 샐 수 있어요 - 자동화가 끝날 때까지 다른 창은 건드리지 말아주세요)')
             return {'ok': False, 'log': log}
 
         L(f'파일 저장 확인 완료: {target_path}')
