@@ -395,7 +395,21 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         time.sleep(2)
 
         L('파일 저장 대화상자를 찾는 중...')
-        save_win = Desktop(backend='uia').window(title_re='.*(다운로드|저장).*')
+        # 예전 코드는 title_re='.*(다운로드|저장).*'로 너무 느슨하게 찾아서,
+        # 사용자가 예전에 다운로드 폴더나 압축파일을 탐색기로 열어둔 채로
+        # 놔뒀으면(제목에 '다운로드'가 들어감) 그 탐색기 창을 저장창으로 착각해
+        # 잘못 잡을 수 있었다 - 그러면 이후 set_focus()/Enter가 전부 그 엉뚱한
+        # 탐색기 창으로 들어가서 사고가 난다. 실제 저장창의 제목은 '주문 excel
+        # 다운로드'로 고정되어 있어서(스크린샷으로 확인) 정확한 제목으로 먼저
+        # 찾고, 그래도 안 되면 느슨한 방식을 마지막 수단으로만 쓴다.
+        save_win = Desktop(backend='uia').window(title='주문 excel 다운로드')
+        try:
+            found_exact = save_win.exists(timeout=5)
+        except Exception:
+            found_exact = False
+        if not found_exact:
+            L("정확한 제목('주문 excel 다운로드')으로 못 찾아서 느슨한 방식으로 재시도합니다 (다른 창을 잘못 잡을 위험이 있음)...")
+            save_win = Desktop(backend='uia').window(title_re='.*(다운로드|저장).*')
         save_win.wait('visible', timeout=30)
 
         target_dir = save_folder or os.path.join(os.path.expanduser('~'), 'Downloads')
