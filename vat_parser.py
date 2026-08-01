@@ -12,22 +12,7 @@
 """
 import re
 import sqlite3
-import time
 import pandas as pd
-
-
-def _retry_on_lock(fn, retries=20, delay=0.6):
-    """윈도우 디펜더 등 백신이 방금 생성된 임시 엑셀 파일을 순간적으로 잠가서
-    'PermissionError: [WinError 32] 다른 프로세스가 파일을 사용 중' 이 나는 경우가 있다.
-    보통 1초 안에 풀리는 일시적인 잠금이라 짧게 재시도한다."""
-    last_err = None
-    for _ in range(retries):
-        try:
-            return fn()
-        except PermissionError as e:
-            last_err = e
-            time.sleep(delay)
-    raise last_err
 
 CATEGORIES = ['credit', 'cash', 'mobile', 'other']
 CATEGORY_LABEL = {'credit': '신용카드', 'cash': '현금', 'mobile': '휴대폰', 'other': '기타'}
@@ -263,16 +248,19 @@ def parse_sheet(raw_df):
 
 
 def _read_raw_sheets(fp, filename):
-    """(시트이름, header=None 원본 DataFrame) 리스트. csv는 시트 1개짜리로 취급."""
+    """(시트이름, header=None 원본 DataFrame) 리스트. csv는 시트 1개짜리로 취급.
+    fp: 디스크 임시파일을 거치지 않고 업로드된 내용을 그대로 담은 BytesIO.
+    (윈도우 백신이 방금 생성된 임시파일을 잠가서 PermissionError가 나던 문제를
+    아예 디스크에 안 쓰는 방식으로 근본 해결)"""
     if filename.lower().endswith('.csv'):
         try:
-            raw_df = _retry_on_lock(lambda: pd.read_csv(fp, header=None, dtype=str, encoding='utf-8-sig'))
+            raw_df = pd.read_csv(fp, header=None, dtype=str, encoding='utf-8-sig')
         except UnicodeDecodeError:
-            raw_df = _retry_on_lock(lambda: pd.read_csv(fp, header=None, dtype=str, encoding='cp949'))
+            fp.seek(0)
+            raw_df = pd.read_csv(fp, header=None, dtype=str, encoding='cp949')
         return [('CSV', raw_df)]
-    xl = _retry_on_lock(lambda: pd.ExcelFile(fp))
-    return [(sheet, _retry_on_lock(lambda s=sheet: pd.read_excel(fp, sheet_name=s, header=None, dtype=str)))
-            for sheet in xl.sheet_names]
+    xl = pd.ExcelFile(fp)
+    return [(sheet, pd.read_excel(fp, sheet_name=sheet, header=None, dtype=str)) for sheet in xl.sheet_names]
 
 
 def process_vat_upload(db_path, fp, filename, market):

@@ -3,10 +3,10 @@
 
 실행: python app.py  →  http://127.0.0.1:5000
 """
+import io
 import os
 import json
 import sqlite3
-import tempfile
 import time
 import traceback
 
@@ -40,22 +40,31 @@ def handle_uncaught_error(e):
         return e
     if request.path.startswith('/api/'):
         traceback.print_exc()
-        return jsonify({'error': f'{type(e).__name__}: {e}'}), 500
+        return jsonify({'error': _friendly_error(e)}), 500
     raise e
 
 
-def _save_with_retry(fstorage, fp, retries=20, delay=0.6):
-    # 윈도우 디펜더가 방금 만든 임시파일을 순간적으로 잠가서 저장 자체가
-    # PermissionError로 실패하는 경우가 있어 짧게 재시도한다.
+def _read_with_retry(path, retries=30, delay=0.5):
+    # 다팔자가 직접 디스크에 저장한 파일이라 메모리 우회가 불가능한 유일한 경로.
+    # 윈도우 백신이 방금 생성된 파일을 순간적으로 잠그는 경우가 있어 짧게 재시도한다.
     last_err = None
     for _ in range(retries):
         try:
-            fstorage.save(fp)
-            return
+            with open(path, 'rb') as f:
+                return f.read()
         except PermissionError as e:
             last_err = e
             time.sleep(delay)
     raise last_err
+
+
+def _friendly_error(e):
+    # 파이썬 예외 원문(영어 클래스명, WinError 코드 등)을 그대로 화면에 띄우면
+    # 개발자가 아닌 사용자는 못 알아본다 - 흔한 케이스는 평범한 한국어 문장으로 바꾸고,
+    # 나머지는 콘솔 창에서 확인하라고 안내한다.
+    if isinstance(e, PermissionError):
+        return '파일에 일시적으로 접근할 수 없었습니다 (보안 프로그램이 검사 중일 수 있어요). 잠시 후 다시 시도해주세요.'
+    return f'처리 중 오류가 발생했습니다. 콘솔 창(검은 화면)에 자세한 내용이 남았어요. ({type(e).__name__})'
 
 
 def init_db():
@@ -209,20 +218,17 @@ def api_upload():
     if not files:
         return jsonify({'error': '파일이 없습니다.'}), 400
     results = []
-    with tempfile.TemporaryDirectory() as tmp:
-        for i, f in enumerate(files):
-            try:
-                # 원본 파일명을 그대로 경로에 쓰면 OS에서 허용하지 않는 문자(콜론 등)가
-                # 섞여 있을 때 저장 자체가 예외를 던져 요청 전체가 500으로 죽는 문제가
-                # 있었음 - 저장용 경로는 항상 안전한 이름을 새로 만들어 쓴다.
-                ext = os.path.splitext(f.filename)[1]
-                fp = os.path.join(tmp, f"upload_{i}{ext}")
-                _save_with_retry(f, fp)
-                res = parsers.process_upload(DB_PATH, fp, f.filename)
-            except Exception as e:
-                res = {'error': str(e)}
-            res['filename'] = f.filename
-            results.append(res)
+    for f in files:
+        try:
+            # 디스크에 임시파일로 저장하지 않고 메모리에서 바로 읽는다 - 윈도우
+            # 백신이 방금 생성된 임시파일을 순간적으로 잠가서 나던 PermissionError를
+            # 아예 원천 차단한다.
+            buf = io.BytesIO(f.read())
+            res = parsers.process_upload(DB_PATH, buf, f.filename)
+        except Exception as e:
+            res = {'error': _friendly_error(e)}
+        res['filename'] = f.filename
+        results.append(res)
     return jsonify({'results': results})
 
 
@@ -232,9 +238,11 @@ def api_dapalza_collect():
     if not result.get('ok'):
         return jsonify(result)
     try:
-        upload_res = parsers.process_upload(DB_PATH, result['file_path'], os.path.basename(result['file_path']))
+        # 다팔자가 직접 디스크에 저장한 파일이라 메모리로 못 우회함 - 읽기만 재시도.
+        buf = io.BytesIO(_read_with_retry(result['file_path']))
+        upload_res = parsers.process_upload(DB_PATH, buf, os.path.basename(result['file_path']))
     except Exception as e:
-        upload_res = {'error': str(e)}
+        upload_res = {'error': _friendly_error(e)}
     result['upload'] = upload_res
     return jsonify(result)
 
@@ -260,17 +268,14 @@ def api_vat_upload():
     if not files:
         return jsonify({'error': '파일이 없습니다.'}), 400
     results = []
-    with tempfile.TemporaryDirectory() as tmp:
-        for i, f in enumerate(files):
-            try:
-                ext = os.path.splitext(f.filename)[1]
-                fp = os.path.join(tmp, f"upload_{i}{ext}")
-                _save_with_retry(f, fp)
-                res = vat.process_vat_upload(DB_PATH, fp, f.filename, market)
-            except Exception as e:
-                res = {'error': str(e)}
-            res['filename'] = f.filename
-            results.append(res)
+    for f in files:
+        try:
+            buf = io.BytesIO(f.read())
+            res = vat.process_vat_upload(DB_PATH, buf, f.filename, market)
+        except Exception as e:
+            res = {'error': _friendly_error(e)}
+        res['filename'] = f.filename
+        results.append(res)
     return jsonify({'results': results})
 
 

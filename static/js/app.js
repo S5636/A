@@ -926,5 +926,11 @@
     btn.addEventListener('click', () => activateTab(btn.dataset.tab));
   });
 
+  const appLogo = document.getElementById('app-logo');
+  appLogo.addEventListener('click', () => activateTab('summary'));
+  appLogo.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateTab('summary'); }
+  });
+
   activateTab('summary');
 })();
