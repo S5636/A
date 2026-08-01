@@ -101,7 +101,10 @@ def _add(result, ym, category, amount):
 
 
 def _parse_format_a(df):
-    """쿠팡·TOSS형: 매출인식일 + 신용카드(판매)/현금(판매)/기타(판매) - (환불)"""
+    """쿠팡·TOSS형: 매출인식일 + 신용카드(판매)/현금(판매)/기타(판매) - (환불).
+    TOSS는 '현금(판매)' 컬럼이 따로 없고, '기타(판매)'(토스머니 전체)에 현금영수증
+    발행분이 섞여 들어온다. 이럴 땐 '현금영수증' 컬럼을 현금으로 따로 떼어내고,
+    기타에서는 그만큼을 빼서 순수 전자화폐 금액만 남긴다."""
     date_col = _find_col(df.columns, '매출인식일') or _find_col(df.columns, '인식일')
     c_sale = _find_col(df.columns, '신용카드', '판매')
     if date_col is None or c_sale is None:
@@ -111,6 +114,9 @@ def _parse_format_a(df):
     h_ref = _find_col(df.columns, '현금', '환불')
     o_sale = _find_col(df.columns, '기타', '판매')
     o_ref = _find_col(df.columns, '기타', '환불')
+    receipt_col = None
+    if h_sale is None:
+        receipt_col = _find_col(df.columns, '현금영수증')
 
     result = {}
     for _, row in df.iterrows():
@@ -119,8 +125,16 @@ def _parse_format_a(df):
             if not ym:
                 continue
             credit = _num(row.get(c_sale)) - (_num(row.get(c_ref)) if c_ref else 0)
-            cash = (_num(row.get(h_sale)) if h_sale else 0) - (_num(row.get(h_ref)) if h_ref else 0)
-            other = (_num(row.get(o_sale)) if o_sale else 0) - (_num(row.get(o_ref)) if o_ref else 0)
+            other_raw = (_num(row.get(o_sale)) if o_sale else 0) - (_num(row.get(o_ref)) if o_ref else 0)
+            if h_sale:
+                cash = _num(row.get(h_sale)) - (_num(row.get(h_ref)) if h_ref else 0)
+                other = other_raw
+            elif receipt_col:
+                cash = _num(row.get(receipt_col))
+                other = other_raw - cash
+            else:
+                cash = 0
+                other = other_raw
             _add(result, ym, 'credit', credit)
             _add(result, ym, 'cash', cash)
             _add(result, ym, 'other', other)
