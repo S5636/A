@@ -241,32 +241,57 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         _click(win, '주문수집 및 동기화', 'Button', L)
 
         L('수집 완료 팝업을 기다리는 중 (마켓/주문이 많으면 시간이 꽤 걸릴 수 있음)...')
+        # 실제로 뜨는 '수집 완료' 팝업은 별도의 윈도우 창이 아니라, 메인 창
+        # 안에서 카드 형태로 겹쳐 뜨는 내부 모달이다 (사용자 스크린샷으로 확인:
+        # 진행바 100% + '주문 수집을 완료하였습니다.' 문구 + '확인' 버튼이 전부
+        # 다팔자 메인 창 안에 있고, 별도 제목표시줄이 없다). 그래서 Desktop().windows()로
+        # 별도 창을 찾는 방식은 애초에 안 맞았고, 메인 창 안에서 '확인' 버튼을
+        # 정확한 이름으로 찾는 _find_control()만으로는 실패했었다 - 다른 버튼들처럼
+        # 이것도 큰 텍스트 덩어리 안에 파묻혀 있을 수 있어서, 성공률이 검증된
+        # _find_smallest_text_match()로 먼저 찾는다. '완료하였습니다' 문구가 실제로
+        # 보일 때만 확인 버튼을 누르게 해서, 평소에 어딘가 있을지 모르는 엉뚱한
+        # '확인' 버튼을 잘못 눌러버리는 것도 막는다.
         confirmed = False
         poll_seconds = max(wait_after_collect, 600)
+        check_interval = 2
         last_progress_log = 0
-        for i in range(poll_seconds * 2):
-            time.sleep(0.5)
-            elapsed = round((i + 1) * 0.5)
-            # 아무 로그도 없이 오래 기다리면 멈춘 건지 계속 확인 중인 건지 알 수가
-            # 없다고 지적받아서, 15초마다 "계속 확인 중" 로그를 남긴다.
+        elapsed = 0
+        while elapsed < poll_seconds:
+            time.sleep(check_interval)
+            elapsed += check_interval
             if elapsed - last_progress_log >= 15:
                 L(f'  - {elapsed}초 경과, 계속 확인 중...')
                 last_progress_log = elapsed
+
+            try:
+                descendants = win.descendants()
+            except Exception:
+                descendants = None
+
+            done_marker = _find_smallest_text_match(win, '완료하였습니다', None, descendants=descendants)
+            if done_marker is not None:
+                L("'주문 수집을 완료하였습니다' 메시지 확인됨 - '확인' 버튼 찾는 중...")
+                ok_ctrl = _find_smallest_text_match(win, '확인', L, descendants=descendants)
+                if ok_ctrl is None:
+                    ok_ctrl = _find_control(win, '확인', 'Button')
+                if ok_ctrl is not None:
+                    try:
+                        ok_ctrl.click_input()
+                        L("'확인' 버튼 클릭 완료.")
+                        confirmed = True
+                        break
+                    except Exception as e:
+                        L(f"'확인' 버튼 클릭 실패: {type(e).__name__}: {e}")
+                else:
+                    L("완료 메시지는 보이는데 '확인' 버튼을 못 찾았습니다 - 계속 재시도합니다.")
+
+            # 혹시 별도 팝업 창으로 뜨는 구버전/다른 상황도 대비해서 함께 확인한다.
             try:
                 popups = [w for w in Desktop(backend='uia').windows()
                           if '수집' in w.window_text() and w.window_text() != win.window_text()]
                 if popups:
-                    L(f"수집 완료 팝업 발견: '{popups[0].window_text()}' - 확인 클릭...")
+                    L(f"수집 완료 팝업(별도 창) 발견: '{popups[0].window_text()}' - 확인 클릭...")
                     _click(popups[0], '확인', 'Button', L)
-                    confirmed = True
-                    break
-            except Exception:
-                pass
-            try:
-                ok_ctrl = _find_control(win, '확인', 'Button')
-                if ok_ctrl is not None:
-                    L("메인 창 안에서 '확인' 버튼 발견 - 클릭...")
-                    ok_ctrl.click_input()
                     confirmed = True
                     break
             except Exception:
