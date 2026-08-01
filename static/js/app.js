@@ -769,40 +769,53 @@
     renderVatStageTable();
   }
 
+  const VAT_CAT_KEYS = ['credit', 'cash', 'mobile', 'other'];
+  const VAT_CAT_SHORT = { credit: '카드', cash: '현금', mobile: '폰', other: '기타' };
+
   function renderVatHalfTable(data) {
     const thead = document.querySelector('#vat-half-table thead');
     const tbody = document.querySelector('#vat-half-table tbody');
     thead.innerHTML = '';
     tbody.innerHTML = '';
 
-    const headTr = document.createElement('tr');
-    headTr.innerHTML = `<th style="text-align:left;">마켓 / 구분</th>` +
-      data.months.map(m => `<th>${m}월</th>`).join('') + `<th>합계</th>`;
-    thead.appendChild(headTr);
+    const groupBorder = 'border-left:2px solid var(--border-strong);';
 
-    const grandTr = document.createElement('tr');
-    grandTr.innerHTML = `<td style="font-weight:700;">총합계</td>` +
-      data.grand_month_totals.map(v => `<td style="font-weight:700;">${num(v)}</td>`).join('') +
-      `<td style="font-weight:700; color:var(--good);">${num(data.grand_total)}</td>`;
-    tbody.appendChild(grandTr);
+    const headTr1 = document.createElement('tr');
+    headTr1.innerHTML = `<th rowspan="2" style="text-align:left; vertical-align:bottom;">월</th>` +
+      data.market_groups.map(g => `<th colspan="5" style="${groupBorder} text-align:center;">${g.market}</th>`).join('') +
+      `<th rowspan="2" style="${groupBorder}">총합계</th>`;
+    thead.appendChild(headTr1);
 
-    for (const group of data.market_groups) {
-      const subTr = document.createElement('tr');
-      subTr.style.borderTop = '2px solid var(--border-strong)';
-      subTr.innerHTML = `<td style="font-weight:700;">${group.market} 소계</td>` +
-        group.months.map(v => `<td style="font-weight:700;">${num(v)}</td>`).join('') +
-        `<td style="font-weight:700;">${num(group.row_total)}</td>`;
-      tbody.appendChild(subTr);
+    const headTr2 = document.createElement('tr');
+    headTr2.innerHTML = data.market_groups.map(() =>
+      `<th style="${groupBorder}">소계</th>` + VAT_CAT_KEYS.map(k => `<th>${VAT_CAT_SHORT[k]}</th>`).join('')
+    ).join('');
+    thead.appendChild(headTr2);
 
-      for (const catKey of ['credit', 'cash', 'mobile', 'other']) {
-        const cat = group.categories[catKey];
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td style="padding-left:22px; color:var(--text-secondary); font-weight:400;">${cat.label}</td>` +
-          cat.months.map(v => `<td>${num(v)}</td>`).join('') +
-          `<td>${num(cat.row_total)}</td>`;
-        tbody.appendChild(tr);
+    function buildRowCells(monthIdx) {
+      let cells = '';
+      for (const g of data.market_groups) {
+        const subtotal = monthIdx === null ? g.row_total : g.months[monthIdx];
+        cells += `<td style="${groupBorder} font-weight:700;">${num(subtotal)}</td>`;
+        for (const k of VAT_CAT_KEYS) {
+          const catVal = monthIdx === null ? g.categories[k].row_total : g.categories[k].months[monthIdx];
+          cells += `<td>${num(catVal)}</td>`;
+        }
       }
+      const grand = monthIdx === null ? data.grand_total : data.grand_month_totals[monthIdx];
+      return cells + `<td style="${groupBorder} font-weight:700; color:var(--good);">${num(grand)}</td>`;
     }
+
+    const totalTr = document.createElement('tr');
+    totalTr.style.borderBottom = '2px solid var(--border-strong)';
+    totalTr.innerHTML = `<td style="font-weight:700;">총합계</td>` + buildRowCells(null);
+    tbody.appendChild(totalTr);
+
+    data.months.forEach((m, idx) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td style="font-weight:700;">${m}월</td>` + buildRowCells(idx);
+      tbody.appendChild(tr);
+    });
   }
 
   async function loadVatView() {

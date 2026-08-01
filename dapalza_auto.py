@@ -86,8 +86,25 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
 
     try:
         L('다팔자 창을 찾는 중...')
-        win = Desktop(backend='uia').window(title_re='.*다팔자.*')
-        win.wait('visible', timeout=10)
+        desktop = Desktop(backend='uia')
+        win = None
+        for _ in range(6):
+            try:
+                candidate = desktop.window(title_re='.*다팔자.*')
+                if candidate.exists(timeout=5):
+                    win = candidate
+                    break
+            except Exception:
+                pass
+            time.sleep(2)
+        if win is None:
+            try:
+                titles = [w.window_text() for w in desktop.windows() if w.window_text().strip()]
+            except Exception as e:
+                titles = [f'(창 목록 조회 실패: {e})']
+            L(f"다팔자 창을 찾지 못했습니다. 지금 열려있는 창 제목들: {titles}")
+            return {'ok': False, 'log': log}
+        win.wait('visible', timeout=15)
         win.set_focus()
         L('다팔자 창을 찾았습니다.')
 

@@ -192,6 +192,8 @@ table.summary-table th:first-child { text-align: left; }
 table.summary-table td { text-align: right; padding: 10.5px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 table.summary-table td:first-child { text-align: left; font-weight: 700; white-space: nowrap; }
 table.summary-table td.rate-pos { color: var(--good); font-weight: 700; }
+table.summary-table.compact th, table.summary-table.compact td { padding: 4px 8px; white-space: nowrap; }
+.table-wrap-x { overflow-x: auto; }
 
 /* ---------- Calendar ---------- */
 .calendar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
