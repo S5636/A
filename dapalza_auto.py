@@ -379,6 +379,17 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             if dl_ctrl is not None:
                 break
             time.sleep(1)
+        # '전체 다운로드'를 누르면 새 저장창(윈도우 표준 파일 저장 대화상자)이
+        # 뜬다 - 이 창을 나중에 제목으로 찾으려다가, 사용자가 이미 열어둔 다른
+        # 탐색기 창(제목에 '다운로드'가 들어간 경우 등)을 잘못 잡는 사고가 실제로
+        # 반복해서 발생했다. 그래서 제목으로 찾는 대신, 지금 이 순간까지 열려있던
+        # 모든 창의 핸들을 미리 저장해두고, 클릭 이후에 '새로 생긴 창'만 후보로
+        # 삼는다 - 기존에 열려있던 창은 애초에 후보에서 제외되니 훨씬 안전하다.
+        try:
+            pre_download_handles = set(w.handle for w in Desktop(backend='uia').windows())
+        except Exception:
+            pre_download_handles = set()
+
         if dl_ctrl is not None:
             L("메인 창 안에서 '전체 다운로드' 버튼 발견 - 클릭...")
             dl_ctrl.click_input()
@@ -395,21 +406,31 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         time.sleep(2)
 
         L('파일 저장 대화상자를 찾는 중...')
-        # 예전 코드는 title_re='.*(다운로드|저장).*'로 너무 느슨하게 찾아서,
-        # 사용자가 예전에 다운로드 폴더나 압축파일을 탐색기로 열어둔 채로
-        # 놔뒀으면(제목에 '다운로드'가 들어감) 그 탐색기 창을 저장창으로 착각해
-        # 잘못 잡을 수 있었다 - 그러면 이후 set_focus()/Enter가 전부 그 엉뚱한
-        # 탐색기 창으로 들어가서 사고가 난다. 실제 저장창의 제목은 '주문 excel
-        # 다운로드'로 고정되어 있어서(스크린샷으로 확인) 정확한 제목으로 먼저
-        # 찾고, 그래도 안 되면 느슨한 방식을 마지막 수단으로만 쓴다.
-        save_win = Desktop(backend='uia').window(title='주문 excel 다운로드')
-        try:
-            found_exact = save_win.exists(timeout=5)
-        except Exception:
-            found_exact = False
-        if not found_exact:
-            L("정확한 제목('주문 excel 다운로드')으로 못 찾아서 느슨한 방식으로 재시도합니다 (다른 창을 잘못 잡을 위험이 있음)...")
-            save_win = Desktop(backend='uia').window(title_re='.*(다운로드|저장).*')
+        # 제목으로 찾는 방식(정확한 제목이든 느슨한 정규식이든)은 사용자가 이미
+        # 열어둔 다른 탐색기 창(예: 압축파일을 미리 열어본 창)을 잘못 잡는 사고가
+        # 반복됐다. 그래서 제목이 뭐든 상관없이, '전체 다운로드'를 누르기 직전에
+        # 이미 열려있던 창(pre_download_handles)은 아예 후보에서 제외하고, 그
+        # 이후에 새로 나타난 창만 저장창 후보로 삼는다 - 기존 창을 잘못 잡는 게
+        # 구조적으로 불가능해진다.
+        save_win = None
+        for _ in range(30):
+            try:
+                new_windows = [w for w in Desktop(backend='uia').windows()
+                                if w.handle not in pre_download_handles]
+            except Exception:
+                new_windows = []
+            if new_windows:
+                # 새로 생긴 창이 여러 개면 그 중 이름에 저장/다운로드/엑셀이
+                # 들어간 걸 우선한다.
+                named = [w for w in new_windows
+                         if any(k in w.window_text() for k in ('다운로드', '저장', '엑셀'))]
+                save_win = named[0] if named else new_windows[0]
+                L(f"새로 나타난 창 발견: '{save_win.window_text()}' - 이걸 저장창으로 사용합니다.")
+                break
+            time.sleep(1)
+        if save_win is None:
+            L("새로 나타난 창을 못 찾아서 제목 매칭으로 마지막 시도를 합니다 (다른 창을 잘못 잡을 위험이 있음)...")
+            save_win = Desktop(backend='uia').window(title='주문 excel 다운로드')
         save_win.wait('visible', timeout=30)
 
         target_dir = save_folder or os.path.join(os.path.expanduser('~'), 'Downloads')
@@ -432,7 +453,8 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         # 들어있는 칸을 찾아서 그 칸만 수정한다.
         edit_ctrl = None
         try:
-            for e in save_win.descendants(control_type='Edit'):
+            edits = list(save_win.descendants(control_type='Edit'))
+            for e in edits:
                 try:
                     val = e.get_value()
                 except Exception:
@@ -443,6 +465,12 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                 if '.xlsx' in val.lower():
                     edit_ctrl = e
                     break
+            if edit_ctrl is None and edits:
+                # 탐색기 설정에 따라 파일이름 칸에 확장자가 안 보일 수도 있어서
+                # (.xlsx로 못 찾은 경우), 표준 저장창에서 파일이름 칸이 보통
+                # 마지막 위치에 있는 Edit라는 점을 이용해 마지막 것을 사용한다.
+                edit_ctrl = edits[-1]
+                L(f"'.xlsx'가 포함된 칸을 못 찾아서 Edit 컨트롤 {len(edits)}개 중 마지막 걸 파일이름 칸으로 사용합니다.")
         except Exception as ex:
             L(f'파일이름 입력칸 탐색 중 오류: {type(ex).__name__}: {ex}')
 
