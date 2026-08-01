@@ -97,6 +97,39 @@ def _find_smallest_text_match(win, title, log=None, descendants=None):
     return candidates[0][3]
 
 
+def _find_near(anchor, title, log=None, max_up=6):
+    """전체 창(963개 요소)을 다 훑어서 title을 찾으면, 완전히 동떨어진 곳에
+    우연히 같은 글자가 들어간 요소(예: 주문 목록 어딘가의 텍스트)를 잘못 골라서
+    엉뚱한 좌표를 클릭하는 사고가 실제로 발생했다 ('확인'을 찾다가 TOSS 관련
+    요소를 클릭한 사례). 그래서 anchor(예: 팝업 안의 '완료하였습니다' 텍스트
+    요소)의 조상을 위로 올라가면서, 그 조상 범위 안에서만 title을 찾는다 - 같은
+    모달/패널 안에 있을 가능성이 훨씬 높아서 오탐이 크게 줄어든다."""
+    container = anchor
+    for _ in range(max_up):
+        try:
+            parent = container.parent()
+        except Exception:
+            break
+        if parent is None:
+            break
+        container = parent
+        try:
+            desc = container.descendants()
+        except Exception:
+            continue
+        if len(desc) < 2 or len(desc) > 200:
+            # 범위가 너무 좁으면(자기 자신 근처만) 아직 버튼이 안 들어있을 수 있고,
+            # 너무 넓으면(200개 초과) 이미 창 전체에 가까워져서 오탐 방지 효과가
+            # 없어지니 계속 위로 올라간다.
+            continue
+        match = _find_smallest_text_match(container, title, None, descendants=desc)
+        if match is not None:
+            if log is not None:
+                log(f"'{title}' - 근처 범위({len(desc)}개 요소) 안에서 발견.")
+            return match
+    return None
+
+
 def _dump_controls(win, limit=50, descendants=None):
     try:
         if descendants is None:
@@ -285,7 +318,12 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             done_marker = _find_smallest_text_match(win, '완료하였습니다', None, descendants=descendants)
             if done_marker is not None:
                 L("'주문 수집을 완료하였습니다' 메시지 확인됨 - '확인' 버튼 찾는 중...")
-                ok_ctrl = _find_smallest_text_match(win, '확인', L, descendants=descendants)
+                # 창 전체(963개 요소)를 다 훑으면 완전히 동떨어진 곳의 '확인'을
+                # 잘못 고를 수 있어서(실제로 TOSS 관련 요소를 잘못 클릭한 사고 발생),
+                # 완료 메시지 요소 근처 범위부터 먼저 찾는다.
+                ok_ctrl = _find_near(done_marker, '확인', L)
+                if ok_ctrl is None:
+                    ok_ctrl = _find_smallest_text_match(win, '확인', L, descendants=descendants)
                 if ok_ctrl is None:
                     ok_ctrl = _find_control(win, '확인', 'Button')
                 if ok_ctrl is not None:
