@@ -138,10 +138,36 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         _click(win, '조회', 'Button', L)
         time.sleep(2)
 
-        L("'주문수집 및 통합화' 버튼 클릭...")
-        _click(win, '주문수집 및 통합화', 'Button', L)
-        L(f'수집이 끝날 때까지 {wait_after_collect}초 대기...')
-        time.sleep(wait_after_collect)
+        L("'주문수집 및 동기화' 버튼 클릭...")
+        _click(win, '주문수집 및 동기화', 'Button', L)
+
+        L('수집 완료 팝업을 기다리는 중...')
+        confirmed = False
+        poll_seconds = max(wait_after_collect, 30)
+        for _ in range(poll_seconds * 2):
+            time.sleep(0.5)
+            try:
+                popups = [w for w in Desktop(backend='uia').windows()
+                          if '수집' in w.window_text() and w.window_text() != win.window_text()]
+                if popups:
+                    L(f"수집 완료 팝업 발견: '{popups[0].window_text()}' - 확인 클릭...")
+                    _click(popups[0], '확인', 'Button', L)
+                    confirmed = True
+                    break
+            except Exception:
+                pass
+            try:
+                ok_ctrl = _find_control(win, '확인', 'Button')
+                if ok_ctrl is not None:
+                    L("메인 창 안에서 '확인' 버튼 발견 - 클릭...")
+                    ok_ctrl.click_input()
+                    confirmed = True
+                    break
+            except Exception:
+                pass
+        if not confirmed:
+            L(f'{poll_seconds}초 안에 수집 완료 확인 팝업을 못 찾았습니다 - 그냥 다음 단계로 진행합니다.')
+        time.sleep(1)
 
         L("'엑셀' 버튼 클릭...")
         _click(win, '엑셀', 'Button', L)
