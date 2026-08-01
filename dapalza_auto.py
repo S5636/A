@@ -240,9 +240,9 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         L("'주문수집 및 동기화' 버튼 클릭...")
         _click(win, '주문수집 및 동기화', 'Button', L)
 
-        L('수집 완료 팝업을 기다리는 중...')
+        L('수집 완료 팝업을 기다리는 중 (마켓/주문이 많으면 시간이 꽤 걸릴 수 있음)...')
         confirmed = False
-        poll_seconds = max(wait_after_collect, 30)
+        poll_seconds = max(wait_after_collect, 180)
         for _ in range(poll_seconds * 2):
             time.sleep(0.5)
             try:
@@ -274,13 +274,13 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
 
         L("'엑셀 다운로드' 창에서 '전체 다운로드' 클릭...")
         dl_win = Desktop(backend='uia').window(title='엑셀 다운로드')
-        dl_win.wait('visible', timeout=10)
+        dl_win.wait('visible', timeout=30)
         _click(dl_win, '전체 다운로드', 'Button', L)
-        time.sleep(1.5)
+        time.sleep(2)
 
         L('파일 저장 대화상자를 찾는 중...')
         save_win = Desktop(backend='uia').window(title_re='.*(다운로드|저장).*')
-        save_win.wait('visible', timeout=10)
+        save_win.wait('visible', timeout=30)
 
         target_dir = save_folder or os.path.join(os.path.expanduser('~'), 'Downloads')
         os.makedirs(target_dir, exist_ok=True)
