@@ -15,6 +15,13 @@ import re
 import time
 
 
+def _escape_keys(s):
+    """pywinauto의 type_keys()는 +^%~(){} 를 특수 키 문법으로 해석하므로,
+    실제 경로 문자열에 그런 문자가 섞여 있어도 있는 그대로 입력되도록 감싸준다."""
+    special = '+^%~(){}'
+    return ''.join(('{' + ch + '}') if ch in special else ch for ch in s)
+
+
 def _find_control(win, title, control_type=None):
     """정확한 title+control_type 매칭을 먼저 시도하고, 안 되면 점점 느슨하게 찾는다.
     같은 이름의 컨트롤이 여러 개면 pywinauto가 ElementAmbiguousError를 던지는데,
@@ -389,13 +396,60 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         target_path = os.path.join(target_dir, save_filename)
 
         L(f'저장 경로를 지정: {target_path}')
+        # 저장 대화상자 안에는 Edit 컨트롤이 여러 개(주소창, 검색창, 파일이름 칸)
+        # 있을 수 있어서 found_index=0으로 아무거나 집으면 엉뚱한 칸(검색창 등)을
+        # 잘못 건드릴 수 있다. 다팔자가 기본으로 제안하는 파일명(.xlsx로 끝남)이
+        # 들어있는 칸을 찾아서 그 칸만 수정한다.
+        edit_ctrl = None
         try:
-            edit_ctrl = save_win.child_window(control_type='Edit', found_index=0)
-            edit_ctrl.set_edit_text(target_path)
-        except Exception as e:
-            L(f'저장 경로 입력에 실패해서 다팔자가 제안한 기본 파일명으로 저장을 진행합니다: {e}')
+            for e in save_win.descendants(control_type='Edit'):
+                try:
+                    val = e.get_value()
+                except Exception:
+                    try:
+                        val = e.window_text()
+                    except Exception:
+                        val = ''
+                if '.xlsx' in val.lower():
+                    edit_ctrl = e
+                    break
+        except Exception as ex:
+            L(f'파일이름 입력칸 탐색 중 오류: {type(ex).__name__}: {ex}')
 
-        _click(save_win, '저장(S)', 'Button', L)
+        path_entered = False
+        if edit_ctrl is not None:
+            try:
+                edit_ctrl.set_edit_text(target_path)
+                path_entered = True
+            except Exception as e:
+                L(f"파일이름 칸에 직접 값 설정 실패({type(e).__name__}: {e}) - 키보드 입력으로 재시도...")
+                try:
+                    edit_ctrl.click_input()
+                    time.sleep(0.2)
+                    edit_ctrl.type_keys('^a', pause=0.05)
+                    edit_ctrl.type_keys(_escape_keys(target_path), with_spaces=True, pause=0.01)
+                    path_entered = True
+                except Exception as e2:
+                    L(f'키보드 입력도 실패했습니다: {type(e2).__name__}: {e2}')
+        else:
+            L('파일이름 입력칸을 못 찾았습니다.')
+
+        if not path_entered:
+            L('저장 경로 지정에 실패해서 다팔자가 제안한 기본 파일명/위치로 저장을 진행합니다.')
+        time.sleep(0.3)
+
+        # '저장(S)' 버튼을 이름으로 찾아 클릭하는 대신, 윈도우 표준 동작인
+        # Enter키로 기본 버튼(저장)을 실행한다 - 버튼 이름 매칭이 실패해도
+        # (실제로 실패한 적이 있었음) 항상 동작하는 훨씬 안정적인 방법이다.
+        try:
+            if edit_ctrl is not None:
+                edit_ctrl.type_keys('{ENTER}')
+            else:
+                save_win.type_keys('{ENTER}')
+            L('Enter로 저장 실행.')
+        except Exception as e:
+            L(f'Enter 입력 실패({type(e).__name__}: {e}) - 저장 버튼을 직접 찾아 클릭 시도...')
+            _click(save_win, '저장', 'Button', L)
         time.sleep(1)
         try:
             confirm = Desktop(backend='uia').window(title_re='.*(덮어쓰|같은 이름).*')
