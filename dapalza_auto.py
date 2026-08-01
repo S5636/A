@@ -42,17 +42,21 @@ def _find_control(win, title, control_type=None):
     return None
 
 
-def _find_smallest_text_match(win, title, log=None):
+def _find_smallest_text_match(win, title, log=None, descendants=None):
     """다팔자 화면이 버튼 하나하나를 따로 노출하는 게 아니라, 화면 전체 글자를
     큰 덩어리 하나(웹뷰 컨테이너)로 노출하고 있을 수 있다. pywinauto의
     child_window 이름 매칭은 정확한 하나의 컨트롤을 찾는 방식이라 이런 큰 덩어리
     안에 파묻힌 글자는 못 찾는다. 그래서 화면의 모든 요소를 직접 훑어서 title을
     포함하는 요소들을 전부 모으고, 그 중 화면에서 차지하는 면적이 제일 작은 것을
     고른다 (작을수록 그 버튼 자체일 가능성이 높고, 큰 덩어리를 클릭하면 엉뚱한
-    위치를 누르게 된다)."""
+    위치를 누르게 된다). descendants를 미리 받으면 중복으로 트리를 다시 훑지
+    않는다 (다팔자처럼 트리가 크고 느린 앱에서 반복 조회가 타임아웃/에러로
+    이어지는 걸 줄이기 위함)."""
     candidates = []
     try:
-        for c in win.descendants():
+        if descendants is None:
+            descendants = win.descendants()
+        for c in descendants:
             try:
                 t = c.window_text().strip()
             except Exception:
@@ -64,9 +68,13 @@ def _find_smallest_text_match(win, title, log=None):
                 except Exception:
                     area = float('inf')
                 candidates.append((area, len(t), c))
-    except Exception:
-        pass
+    except Exception as e:
+        if log is not None:
+            log(f"'{title}' 요소 탐색 중 오류: {type(e).__name__}: {e}")
+        return None
     if not candidates:
+        if log is not None:
+            log(f"'{title}' 글자를 포함하는 요소를 하나도 못 찾았습니다 (총 {len(descendants) if descendants else 0}개 요소 중).")
         return None
     candidates.sort(key=lambda x: (x[0], x[1]))
     if log is not None:
@@ -75,10 +83,12 @@ def _find_smallest_text_match(win, title, log=None):
     return candidates[0][2]
 
 
-def _dump_controls(win, limit=50):
+def _dump_controls(win, limit=50, descendants=None):
     try:
+        if descendants is None:
+            descendants = win.descendants()
         texts = []
-        for c in win.descendants():
+        for c in descendants:
             try:
                 t = c.window_text().strip()
             except Exception:
@@ -94,7 +104,7 @@ def _dump_controls(win, limit=50):
         return [f'(진단정보 수집도 실패: {e})']
 
 
-def _dump_structure(win):
+def _dump_structure(win, descendants=None):
     """텍스트가 있는 컨트롤만 보면 안 보이는 경우를 위해, 클래스명/컨트롤타입까지
     전부(빈 글자 포함) 찍어서 UIA가 이 창의 내용을 얼마나 볼 수 있는지 확인한다."""
     try:
@@ -102,7 +112,7 @@ def _dump_structure(win):
     except Exception as e:
         cls = f'(조회 실패: {e})'
     try:
-        desc = win.descendants()
+        desc = descendants if descendants is not None else win.descendants()
         info = []
         for c in desc[:80]:
             try:
@@ -115,12 +125,21 @@ def _dump_structure(win):
 
 
 def _click(win, title, control_type=None, log=None):
-    ctrl = _find_control(win, title, control_type)
+    # 트리를 한 번만 훑어서 여러 곳에 재사용한다 - 다팔자처럼 트리가 크고 느린
+    # 앱에서 같은 창을 반복해서 훑으면 그 자체가 타임아웃/에러로 이어질 수 있다.
+    try:
+        descendants = win.descendants()
+    except Exception as e:
+        descendants = None
+        if log is not None:
+            log(f"화면 요소 목록을 가져오는 데 실패했습니다: {type(e).__name__}: {e}")
+
+    ctrl = _find_smallest_text_match(win, title, log, descendants=descendants)
     if ctrl is None:
-        ctrl = _find_smallest_text_match(win, title, log)
+        ctrl = _find_control(win, title, control_type)
     if ctrl is None:
         if log is not None:
-            visible = _dump_controls(win)
+            visible = _dump_controls(win, descendants=descendants)
             log(f"'{title}' 버튼(컨트롤)을 찾지 못했습니다. 지금 이 화면에 보이는 글자들: {visible}")
         raise RuntimeError(f"'{title}'를 찾지 못했습니다.")
     ctrl.click_input()
@@ -179,9 +198,14 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         time.sleep(1.5)
         L('다팔자 창을 찾았습니다.')
 
-        visible_now = _dump_controls(win)
+        try:
+            initial_descendants = win.descendants()
+        except Exception as e:
+            initial_descendants = None
+            L(f'화면 요소 목록을 가져오는 데 실패했습니다: {type(e).__name__}: {e}')
+        visible_now = _dump_controls(win, descendants=initial_descendants)
         L(f'창을 찾은 직후 화면에 보이는 글자들 (참고용): {visible_now}')
-        cls, desc_count, structure = _dump_structure(win)
+        cls, desc_count, structure = _dump_structure(win, descendants=initial_descendants)
         L(f'창 클래스명: {cls} / 하위 요소 총 {desc_count}개')
         L(f'하위 요소 구조(클래스/타입/텍스트, 최대 80개): {structure}')
 
