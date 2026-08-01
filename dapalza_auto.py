@@ -242,9 +242,16 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
 
         L('수집 완료 팝업을 기다리는 중 (마켓/주문이 많으면 시간이 꽤 걸릴 수 있음)...')
         confirmed = False
-        poll_seconds = max(wait_after_collect, 180)
-        for _ in range(poll_seconds * 2):
+        poll_seconds = max(wait_after_collect, 600)
+        last_progress_log = 0
+        for i in range(poll_seconds * 2):
             time.sleep(0.5)
+            elapsed = round((i + 1) * 0.5)
+            # 아무 로그도 없이 오래 기다리면 멈춘 건지 계속 확인 중인 건지 알 수가
+            # 없다고 지적받아서, 15초마다 "계속 확인 중" 로그를 남긴다.
+            if elapsed - last_progress_log >= 15:
+                L(f'  - {elapsed}초 경과, 계속 확인 중...')
+                last_progress_log = elapsed
             try:
                 popups = [w for w in Desktop(backend='uia').windows()
                           if '수집' in w.window_text() and w.window_text() != win.window_text()]
