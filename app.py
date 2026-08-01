@@ -178,10 +178,14 @@ def api_upload():
         return jsonify({'error': '파일이 없습니다.'}), 400
     results = []
     with tempfile.TemporaryDirectory() as tmp:
-        for f in files:
-            fp = os.path.join(tmp, f.filename)
-            f.save(fp)
+        for i, f in enumerate(files):
             try:
+                # 원본 파일명을 그대로 경로에 쓰면 OS에서 허용하지 않는 문자(콜론 등)가
+                # 섞여 있을 때 저장 자체가 예외를 던져 요청 전체가 500으로 죽는 문제가
+                # 있었음 - 저장용 경로는 항상 안전한 이름을 새로 만들어 쓴다.
+                ext = os.path.splitext(f.filename)[1]
+                fp = os.path.join(tmp, f"upload_{i}{ext}")
+                f.save(fp)
                 res = parsers.process_upload(DB_PATH, fp, f.filename)
             except Exception as e:
                 res = {'error': str(e)}
@@ -194,7 +198,7 @@ def api_upload():
 # 부가세 통합
 # ---------------------------------------------------------------------------
 
-VAT_MARKETS = ['쿠팡', '네이버', '11번가', '지마켓', '옥션', 'TOSS', '카카오', '위메프', '기타']
+VAT_MARKETS = ['쿠팡', '네이버', '11번가', '지마켓', '옥션', 'TOSS', '카카오', '기타']
 
 
 @app.route('/api/vat/markets')
@@ -212,10 +216,11 @@ def api_vat_upload():
         return jsonify({'error': '파일이 없습니다.'}), 400
     results = []
     with tempfile.TemporaryDirectory() as tmp:
-        for f in files:
-            fp = os.path.join(tmp, f.filename)
-            f.save(fp)
+        for i, f in enumerate(files):
             try:
+                ext = os.path.splitext(f.filename)[1]
+                fp = os.path.join(tmp, f"upload_{i}{ext}")
+                f.save(fp)
                 res = vat.process_vat_upload(DB_PATH, fp, f.filename, market)
             except Exception as e:
                 res = {'error': str(e)}
@@ -229,6 +234,20 @@ def api_vat_table():
     year = request.args.get('year', type=int)
     month = request.args.get('month', type=int)
     return jsonify(vat.get_vat_table(DB_PATH, year, month))
+
+
+@app.route('/api/vat/half')
+def api_vat_half():
+    year = request.args.get('year', type=int)
+    half = request.args.get('half', type=int)
+    if not year or half not in (1, 2):
+        return jsonify({'error': 'year, half(1 또는 2) 파라미터가 필요합니다.'}), 400
+    return jsonify(vat.get_vat_half_table(DB_PATH, year, half))
+
+
+@app.route('/api/vat/monthly')
+def api_vat_monthly():
+    return jsonify(vat.get_vat_monthly_detail(DB_PATH))
 
 
 # ---------------------------------------------------------------------------

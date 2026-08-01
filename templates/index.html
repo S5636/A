@@ -93,14 +93,22 @@
 
     <div class="card" style="margin-top:16px;">
       <div class="filter-row" style="justify-content:space-between;">
-        <div class="card-title" style="margin:0;"><span class="dot"></span>월별 · 마켓별 · 결제수단별 집계</div>
-        <div class="filter-group" id="vat-month-filter"></div>
+        <div class="card-title" style="margin:0;"><span class="dot"></span>마켓별 · 결제수단별 집계</div>
+        <div class="filter-group" id="vat-view-mode"></div>
       </div>
+      <div class="filter-row" id="vat-sub-filter" style="margin-top:8px;"></div>
+
       <table class="summary-table" id="vat-table" style="margin-top:14px;">
         <thead><tr><th>마켓</th><th>신용카드</th><th>현금</th><th>휴대폰</th><th>기타</th><th>합계</th></tr></thead>
         <tbody></tbody>
         <tfoot></tfoot>
       </table>
+
+      <table class="summary-table" id="vat-monthly-table" style="margin-top:14px; display:none;">
+        <thead><tr><th>월</th><th>마켓</th><th>신용카드</th><th>현금</th><th>휴대폰</th><th>기타</th><th>합계</th></tr></thead>
+        <tbody></tbody>
+      </table>
+
       <div class="hint" id="vat-empty-hint" style="display:none; margin-top:10px;">아직 업로드된 부가세 자료가 없습니다.</div>
     </div>
   </section>

@@ -665,7 +665,7 @@
   }
 
   // ================= TAB 3: 부가세 통합 =================
-  const vatState = { selectedMonth: '전체' };
+  const vatState = { viewMode: '전체', halfYear: NOW.getFullYear(), half: (NOW.getMonth() + 1) <= 6 ? 1 : 2 };
 
   async function loadVatMarkets() {
     const markets = await api('/api/vat/markets');
@@ -677,39 +677,44 @@
     }
   }
 
-  function renderVatMonthFilter(availableMonths) {
-    const el = document.getElementById('vat-month-filter');
+  function renderVatViewMode() {
+    const el = document.getElementById('vat-view-mode');
     el.innerHTML = '';
-    el.appendChild(renderChip('전체', vatState.selectedMonth === '전체', () => {
-      vatState.selectedMonth = '전체'; renderVatMonthFilter(availableMonths); loadVatTable();
-    }));
-    for (const ym of availableMonths) {
-      el.appendChild(renderChip(ym, vatState.selectedMonth === ym, () => {
-        vatState.selectedMonth = ym; renderVatMonthFilter(availableMonths); loadVatTable();
+    for (const mode of ['전체', '반기별', '월별']) {
+      el.appendChild(renderChip(mode, vatState.viewMode === mode, () => {
+        vatState.viewMode = mode; renderVatViewMode(); loadVatView();
       }));
     }
   }
 
-  async function loadVatTable() {
-    let url = '/api/vat/table';
-    if (vatState.selectedMonth !== '전체') {
-      const [y, m] = vatState.selectedMonth.split('-');
-      url += `?${qs({ year: parseInt(y, 10), month: parseInt(m, 10) })}`;
+  function renderVatSubFilter(availableYears) {
+    const el = document.getElementById('vat-sub-filter');
+    el.innerHTML = '';
+    if (vatState.viewMode !== '반기별') return;
+    const years = availableYears && availableYears.length ? availableYears : [vatState.halfYear];
+    const yearGroup = document.createElement('div'); yearGroup.className = 'filter-group';
+    for (const y of years) {
+      yearGroup.appendChild(renderChip(`${y}년`, vatState.halfYear === y, () => {
+        vatState.halfYear = y; renderVatSubFilter(years); loadVatView();
+      }));
     }
-    const data = await api(url);
-    renderVatMonthFilter(data.available_months);
+    el.appendChild(yearGroup); el.appendChild(sep());
+    const halfGroup = document.createElement('div'); halfGroup.className = 'filter-group';
+    halfGroup.appendChild(renderChip('상반기 (1~6월)', vatState.half === 1, () => {
+      vatState.half = 1; renderVatSubFilter(years); loadVatView();
+    }));
+    halfGroup.appendChild(renderChip('하반기 (7~12월)', vatState.half === 2, () => {
+      vatState.half = 2; renderVatSubFilter(years); loadVatView();
+    }));
+    el.appendChild(halfGroup);
+  }
 
+  function renderVatSummaryTable(data) {
+    document.getElementById('vat-table').style.display = '';
+    document.getElementById('vat-monthly-table').style.display = 'none';
     const tbody = document.querySelector('#vat-table tbody');
     const tfoot = document.querySelector('#vat-table tfoot');
-    const emptyHint = document.getElementById('vat-empty-hint');
     tbody.innerHTML = ''; tfoot.innerHTML = '';
-
-    if (data.available_months.length === 0) {
-      emptyHint.style.display = '';
-      return;
-    }
-    emptyHint.style.display = 'none';
-
     for (const row of data.rows) {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${row.market}</td><td>${num(row.credit)}</td><td>${num(row.cash)}</td>
@@ -723,6 +728,51 @@
       <td style="font-weight:700;">${num(t.cash)}</td><td style="font-weight:700;">${num(t.mobile)}</td>
       <td style="font-weight:700;">${num(t.other)}</td><td style="font-weight:700; color:var(--good);">${num(t.total)}</td>`;
     tfoot.appendChild(totalTr);
+  }
+
+  function renderVatMonthlyTable(data) {
+    document.getElementById('vat-table').style.display = 'none';
+    document.getElementById('vat-monthly-table').style.display = '';
+    const tbody = document.querySelector('#vat-monthly-table tbody');
+    tbody.innerHTML = '';
+    let lastMonth = null;
+    for (const row of data.rows) {
+      const ymKey = `${row.year}-${row.month}`;
+      const tr = document.createElement('tr');
+      if (ymKey !== lastMonth) tr.style.borderTop = '2px solid var(--border-strong)';
+      lastMonth = ymKey;
+      tr.innerHTML = `<td style="font-weight:700;">${row.year}-${String(row.month).padStart(2, '0')}</td>
+        <td>${row.market}</td><td>${num(row.credit)}</td><td>${num(row.cash)}</td>
+        <td>${num(row.mobile)}</td><td>${num(row.other)}</td><td style="font-weight:700;">${num(row.total)}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
+
+  async function loadVatView() {
+    const emptyHint = document.getElementById('vat-empty-hint');
+    let data;
+    if (vatState.viewMode === '월별') {
+      data = await api('/api/vat/monthly');
+      renderVatSubFilter(null);
+      if (data.available_months.length === 0) { emptyHint.style.display = ''; document.getElementById('vat-table').style.display = 'none'; document.getElementById('vat-monthly-table').style.display = 'none'; return; }
+      emptyHint.style.display = 'none';
+      renderVatMonthlyTable(data);
+    } else if (vatState.viewMode === '반기별') {
+      const probe = await api('/api/vat/table');
+      const years = [...new Set(probe.available_months.map(ym => parseInt(ym.split('-')[0], 10)))];
+      renderVatSubFilter(years);
+      if (years.length === 0) { emptyHint.style.display = ''; document.getElementById('vat-table').style.display = 'none'; document.getElementById('vat-monthly-table').style.display = 'none'; return; }
+      if (!years.includes(vatState.halfYear)) vatState.halfYear = years[years.length - 1];
+      data = await api(`/api/vat/half?${qs({ year: vatState.halfYear, half: vatState.half })}`);
+      emptyHint.style.display = 'none';
+      renderVatSummaryTable(data);
+    } else {
+      data = await api('/api/vat/table');
+      renderVatSubFilter(null);
+      if (data.available_months.length === 0) { emptyHint.style.display = ''; document.getElementById('vat-table').style.display = 'none'; document.getElementById('vat-monthly-table').style.display = 'none'; return; }
+      emptyHint.style.display = 'none';
+      renderVatSummaryTable(data);
+    }
   }
 
   async function uploadVatFiles(fileList) {
@@ -745,7 +795,7 @@
         log.appendChild(item);
       }
       toast('부가세 자료가 반영되었습니다.', 'ok');
-      loadVatTable();
+      loadVatView();
     } catch (err) {
       log.innerHTML = `<div class="upload-log-item err">${err.message}</div>`;
     }
@@ -769,7 +819,7 @@
     state.loadedTabs.add(name);
     if (name === 'summary') { loadSummaryAll(); loadCalendar(); }
     if (name === 'dashboard') { renderDashFilters(); renderDashTableHead(); loadDashOrders(); }
-    if (name === 'vat') { loadVatMarkets(); loadVatTable(); }
+    if (name === 'vat') { loadVatMarkets(); renderVatViewMode(); loadVatView(); }
     if (name === 'upload') { loadSettingsLinks(); }
     if (name === 'fees') { loadFees(); }
   }

@@ -191,6 +191,7 @@ table.summary-table th { text-align: right; color: var(--text-muted); font-weigh
 table.summary-table th:first-child { text-align: left; }
 table.summary-table td { text-align: right; padding: 10.5px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 table.summary-table td:first-child { text-align: left; font-weight: 700; white-space: nowrap; }
+#vat-monthly-table td:nth-child(2) { text-align: left; font-weight: 600; }
 table.summary-table td.rate-pos { color: var(--good); font-weight: 700; }
 
 /* ---------- Calendar ---------- */
