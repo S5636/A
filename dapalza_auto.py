@@ -413,12 +413,14 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         # 이후에 새로 나타난 창만 저장창 후보로 삼는다 - 기존 창을 잘못 잡는 게
         # 구조적으로 불가능해진다.
         save_win = None
+        diff_error = None
         for _ in range(30):
             try:
                 new_windows = [w for w in Desktop(backend='uia').windows()
                                 if w.handle not in pre_download_handles]
-            except Exception:
+            except Exception as e:
                 new_windows = []
+                diff_error = f'{type(e).__name__}: {e}'
             if new_windows:
                 # 새로 생긴 창이 여러 개면 그 중 이름에 저장/다운로드/엑셀이
                 # 들어간 걸 우선한다.
@@ -429,8 +431,17 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                 break
             time.sleep(1)
         if save_win is None:
-            L("새로 나타난 창을 못 찾아서 제목 매칭으로 마지막 시도를 합니다 (다른 창을 잘못 잡을 위험이 있음)...")
-            save_win = Desktop(backend='uia').window(title='주문 excel 다운로드')
+            if diff_error is not None:
+                L(f'새 창 탐지 중 오류가 반복됐습니다: {diff_error}')
+            try:
+                all_titles = [w.window_text() for w in Desktop(backend='uia').windows() if w.window_text().strip()]
+            except Exception as e:
+                all_titles = [f'(조회 실패: {e})']
+            L(f"새로 나타난 창을 못 찾았습니다. 지금 열려있는 창 제목들: {all_titles}")
+            L("제목 매칭(대소문자 구분 없이)으로 마지막 시도를 합니다...")
+            save_win = Desktop(backend='uia').window(title_re='(?i).*주문.*(엑셀|excel).*다운로드.*')
+            if not save_win.exists(timeout=3):
+                save_win = Desktop(backend='uia').window(title_re='.*(다운로드|저장).*')
         save_win.wait('visible', timeout=30)
 
         target_dir = save_folder or os.path.join(os.path.expanduser('~'), 'Downloads')
