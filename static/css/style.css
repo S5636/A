@@ -194,11 +194,8 @@ table.summary-table th:first-child { text-align: left; }
 table.summary-table td { text-align: right; padding: 10.5px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 table.summary-table td:first-child { text-align: left; font-weight: 700; white-space: nowrap; }
 table.summary-table td.rate-pos { color: var(--good); font-weight: 700; }
-table.summary-table.compact { width: auto; font-size: 12px; }
-table.summary-table.compact th, table.summary-table.compact td { padding: 1px 6px; line-height: 1.5; white-space: nowrap; }
-.table-wrap-x { display: inline-block; max-width: 100%; overflow-x: auto; }
-#vat-summary-card { display: inline-block; width: auto; max-width: 100%; }
-#vat-summary-card .calendar-head { gap: 24px; }
+table.summary-table.compact th, table.summary-table.compact td { padding: 6px 14px; white-space: nowrap; }
+.table-wrap-x { overflow-x: auto; }
 
 /* ---------- Calendar ---------- */
 .calendar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
