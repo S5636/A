@@ -110,9 +110,17 @@ init_db()
 # Pages
 # ---------------------------------------------------------------------------
 
+def _read_build_version():
+    try:
+        with open(os.path.join(BASE_DIR, 'BUILD_VERSION.txt'), 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception:
+        return '(버전 정보 없음)'
+
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', build_version=_read_build_version())
 
 
 # ---------------------------------------------------------------------------

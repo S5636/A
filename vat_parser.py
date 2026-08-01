@@ -332,6 +332,7 @@ def get_vat_half_detail(db_path, year, half):
         })
         grand_month_totals = [a + b for a, b in zip(grand_month_totals, subtotal_months)]
 
+    market_groups.sort(key=lambda g: g['row_total'], reverse=True)
     grand_total = sum(grand_month_totals)
 
     return {
