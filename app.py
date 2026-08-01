@@ -44,7 +44,7 @@ def handle_uncaught_error(e):
     raise e
 
 
-def _save_with_retry(fstorage, fp, retries=8, delay=0.4):
+def _save_with_retry(fstorage, fp, retries=20, delay=0.6):
     # 윈도우 디펜더가 방금 만든 임시파일을 순간적으로 잠가서 저장 자체가
     # PermissionError로 실패하는 경우가 있어 짧게 재시도한다.
     last_err = None

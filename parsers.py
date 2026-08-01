@@ -8,7 +8,7 @@ import pandas as pd
 from calc_engine import clean_id, safe_float, STATUS_CODE_MAP
 
 
-def _retry_on_lock(fn, retries=8, delay=0.4):
+def _retry_on_lock(fn, retries=20, delay=0.6):
     """윈도우 디펜더 등 백신이 방금 생성된 임시 엑셀 파일을 순간적으로 잠가서
     'PermissionError: [WinError 32] 다른 프로세스가 파일을 사용 중' 이 나는 경우가 있다.
     보통 1초 안에 풀리는 일시적인 잠금이라 짧게 재시도한다."""

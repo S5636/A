@@ -5,12 +5,67 @@
 
 다팔자는 웹사이트가 아니라 설치형 윈도우 프로그램이라 브라우저 자동화(Playwright)가
 아니라 윈도우 UI 자동화(pywinauto)로 창의 버튼을 이름으로 찾아서 클릭하는 방식이다.
-실사용 환경(사용자 PC)에서 검증이 안 된 1차 버전이라, 각 단계를 전부 로그로 남겨서
-어느 단계에서 막혔는지 화면에 그대로 보여준다.
+실사용 환경(사용자 PC)에서 검증이 안 된 1차 버전이라, 각 단계를 전부 로그로 남기고,
+버튼을 못 찾으면 그 화면에 실제로 존재하는 컨트롤 이름들을 함께 로그에 남겨서
+다음에 정확히 어떤 이름/타입으로 고쳐야 하는지 바로 알 수 있게 한다.
 """
 import os
 import platform
+import re
 import time
+
+
+def _find_control(win, title, control_type=None):
+    """정확한 title+control_type 매칭을 먼저 시도하고, 안 되면 점점 느슨하게 찾는다."""
+    if control_type:
+        try:
+            ctrl = win.child_window(title=title, control_type=control_type)
+            if ctrl.exists(timeout=1):
+                return ctrl
+        except Exception:
+            pass
+    try:
+        ctrl = win.child_window(title=title)
+        if ctrl.exists(timeout=1):
+            return ctrl
+    except Exception:
+        pass
+    try:
+        ctrl = win.child_window(title_re=f'.*{re.escape(title)}.*')
+        if ctrl.exists(timeout=1):
+            return ctrl
+    except Exception:
+        pass
+    return None
+
+
+def _dump_controls(win, limit=50):
+    try:
+        texts = []
+        for c in win.descendants():
+            try:
+                t = c.window_text().strip()
+            except Exception:
+                continue
+            if t:
+                texts.append(t)
+        seen = []
+        for t in texts:
+            if t not in seen:
+                seen.append(t)
+        return seen[:limit]
+    except Exception as e:
+        return [f'(진단정보 수집도 실패: {e})']
+
+
+def _click(win, title, control_type=None, log=None):
+    ctrl = _find_control(win, title, control_type)
+    if ctrl is None:
+        if log is not None:
+            visible = _dump_controls(win)
+            log(f"'{title}' 버튼(컨트롤)을 찾지 못했습니다. 지금 이 화면에 보이는 글자들: {visible}")
+        raise RuntimeError(f"'{title}'를 찾지 못했습니다.")
+    ctrl.click_input()
 
 
 def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.xlsx', wait_after_collect=10):
@@ -38,35 +93,32 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
 
         try:
             L("'주문관리' 탭 클릭...")
-            win.child_window(title='주문관리', control_type='TabItem').click_input()
-        except Exception:
-            try:
-                win.child_window(title='주문관리').click_input()
-            except Exception as e:
-                L(f"'주문관리' 탭을 못 찾았습니다 (이미 열려있으면 무시해도 됨): {e}")
+            _click(win, '주문관리', 'TabItem', L)
+        except Exception as e:
+            L(f"'주문관리' 탭을 못 찾았습니다 (이미 열려있으면 무시해도 됨): {e}")
         time.sleep(1)
 
         L("기간을 '1개월'로 설정...")
-        win.child_window(title='1개월', control_type='Button').click_input()
+        _click(win, '1개월', 'Button', L)
         time.sleep(1)
 
         L("'조회' 버튼 클릭...")
-        win.child_window(title='조회', control_type='Button').click_input()
+        _click(win, '조회', 'Button', L)
         time.sleep(2)
 
         L("'주문수집 및 통합화' 버튼 클릭...")
-        win.child_window(title='주문수집 및 통합화', control_type='Button').click_input()
+        _click(win, '주문수집 및 통합화', 'Button', L)
         L(f'수집이 끝날 때까지 {wait_after_collect}초 대기...')
         time.sleep(wait_after_collect)
 
         L("'엑셀' 버튼 클릭...")
-        win.child_window(title='엑셀', control_type='Button').click_input()
+        _click(win, '엑셀', 'Button', L)
         time.sleep(1)
 
         L("'엑셀 다운로드' 창에서 '전체 다운로드' 클릭...")
         dl_win = Desktop(backend='uia').window(title='엑셀 다운로드')
         dl_win.wait('visible', timeout=10)
-        dl_win.child_window(title='전체 다운로드', control_type='Button').click_input()
+        _click(dl_win, '전체 다운로드', 'Button', L)
         time.sleep(1.5)
 
         L('파일 저장 대화상자를 찾는 중...')
@@ -84,13 +136,13 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         except Exception as e:
             L(f'저장 경로 입력에 실패해서 다팔자가 제안한 기본 파일명으로 저장을 진행합니다: {e}')
 
-        save_win.child_window(title='저장(S)', control_type='Button').click_input()
+        _click(save_win, '저장(S)', 'Button', L)
         time.sleep(1)
         try:
             confirm = Desktop(backend='uia').window(title_re='.*(덮어쓰|같은 이름).*')
             if confirm.exists(timeout=2):
                 L('같은 이름 파일 덮어쓰기 확인창에서 예 클릭...')
-                confirm.child_window(title='예', control_type='Button').click_input()
+                _click(confirm, '예', 'Button', L)
         except Exception:
             pass
 

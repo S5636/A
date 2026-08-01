@@ -847,26 +847,28 @@
       return;
     }
     const log = document.getElementById('vat-upload-log');
-    log.innerHTML = '<div class="hint">업로드 처리 중...</div>';
-    const jobs = vatStagedFiles.map((file, idx) => uploadOneVatFile(file, selects[idx].value));
-    const outcomes = await Promise.allSettled(jobs);
-
     log.innerHTML = '';
-    outcomes.forEach((outcome, idx) => {
+    // 여러 파일을 한꺼번에 병렬로 올리면 윈도우 백신이 방금 생성된 임시파일들을
+    // 동시에 스캔하려다 서로 경합해서 잠금이 오래가는 경우가 있어, 한 번에 하나씩
+    // 순서대로 올린다 (느리지만 훨씬 안정적).
+    for (let idx = 0; idx < vatStagedFiles.length; idx++) {
       const file = vatStagedFiles[idx];
+      const market = selects[idx].value;
       const item = document.createElement('div');
-      if (outcome.status === 'rejected') {
-        item.className = 'upload-log-item err';
-        item.innerHTML = `<span>${file.name}</span><span>${outcome.reason.message}</span>`;
-      } else {
-        const { market, result } = outcome.value;
+      item.className = 'upload-log-item';
+      item.innerHTML = `<span>${file.name}</span><span>처리 중...</span>`;
+      log.appendChild(item);
+      try {
+        const { result } = await uploadOneVatFile(file, market);
         item.className = `upload-log-item ${result.error ? 'err' : ''}`;
         item.innerHTML = result.error
           ? `<span>${result.filename}</span><span>${result.error}</span>`
           : `<span>${result.filename} <span class="tag">(${market})</span></span><span>인식: ${result.months.join(', ')}</span>`;
+      } catch (e) {
+        item.className = 'upload-log-item err';
+        item.innerHTML = `<span>${file.name}</span><span>${e.message}</span>`;
       }
-      log.appendChild(item);
-    });
+    }
 
     toast('부가세 자료가 반영되었습니다.', 'ok');
     vatStagedFiles = [];
