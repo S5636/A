@@ -62,12 +62,24 @@ def _find_smallest_text_match(win, title, log=None, descendants=None):
             except Exception:
                 continue
             if t == title or title in t:
+                # 화면에 실제로 보이지 않는(숨겨진/제거 대기중인) 요소는 좌표가
+                # 남아있는 유령 요소일 수 있다 - 이런 걸 '면적이 작다'고 골라서
+                # 클릭하면 그 좌표에 실제로 떠 있는 엉뚱한 화면 요소(예: 사이드바의
+                # 다른 마켓 항목)가 대신 눌린다. 그래서 안 보이는 요소는 아예 제외한다.
+                try:
+                    if not c.is_visible():
+                        continue
+                except Exception:
+                    pass
                 try:
                     r = c.rectangle()
                     area = max(0, r.width()) * max(0, r.height())
                 except Exception:
                     area = float('inf')
-                candidates.append((area, len(t), c))
+                if area <= 0:
+                    continue
+                exact = (t == title)
+                candidates.append((0 if exact else 1, area, len(t), c))
     except Exception as e:
         if log is not None:
             log(f"'{title}' 요소 탐색 중 오류: {type(e).__name__}: {e}")
@@ -76,11 +88,13 @@ def _find_smallest_text_match(win, title, log=None, descendants=None):
         if log is not None:
             log(f"'{title}' 글자를 포함하는 요소를 하나도 못 찾았습니다 (총 {len(descendants) if descendants else 0}개 요소 중).")
         return None
-    candidates.sort(key=lambda x: (x[0], x[1]))
+    # 이름이 정확히 일치하는 요소를 우선하고(부분 일치 텍스트 덩어리보다 신뢰도가
+    # 높음), 그다음 면적이 작은 순으로 고른다.
+    candidates.sort(key=lambda x: (x[0], x[1], x[2]))
     if log is not None:
-        top = [(round(a), n) for a, n, _ in candidates[:5]]
-        log(f"'{title}' 텍스트를 포함하는 요소 {len(candidates)}개 중 면적 작은 순 상위: {top}")
-    return candidates[0][2]
+        top = [(ex, round(a), n) for ex, a, n, _ in candidates[:5]]
+        log(f"'{title}' 텍스트를 포함하는 요소 {len(candidates)}개 중 정확일치/면적 작은 순 상위 (0=정확일치): {top}")
+    return candidates[0][3]
 
 
 def _dump_controls(win, limit=50, descendants=None):
