@@ -42,6 +42,39 @@ def _find_control(win, title, control_type=None):
     return None
 
 
+def _find_smallest_text_match(win, title, log=None):
+    """다팔자 화면이 버튼 하나하나를 따로 노출하는 게 아니라, 화면 전체 글자를
+    큰 덩어리 하나(웹뷰 컨테이너)로 노출하고 있을 수 있다. pywinauto의
+    child_window 이름 매칭은 정확한 하나의 컨트롤을 찾는 방식이라 이런 큰 덩어리
+    안에 파묻힌 글자는 못 찾는다. 그래서 화면의 모든 요소를 직접 훑어서 title을
+    포함하는 요소들을 전부 모으고, 그 중 화면에서 차지하는 면적이 제일 작은 것을
+    고른다 (작을수록 그 버튼 자체일 가능성이 높고, 큰 덩어리를 클릭하면 엉뚱한
+    위치를 누르게 된다)."""
+    candidates = []
+    try:
+        for c in win.descendants():
+            try:
+                t = c.window_text().strip()
+            except Exception:
+                continue
+            if t == title or title in t:
+                try:
+                    r = c.rectangle()
+                    area = max(0, r.width()) * max(0, r.height())
+                except Exception:
+                    area = float('inf')
+                candidates.append((area, len(t), c))
+    except Exception:
+        pass
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: (x[0], x[1]))
+    if log is not None:
+        top = [(round(a), n) for a, n, _ in candidates[:5]]
+        log(f"'{title}' 텍스트를 포함하는 요소 {len(candidates)}개 중 면적 작은 순 상위: {top}")
+    return candidates[0][2]
+
+
 def _dump_controls(win, limit=50):
     try:
         texts = []
@@ -83,6 +116,8 @@ def _dump_structure(win):
 
 def _click(win, title, control_type=None, log=None):
     ctrl = _find_control(win, title, control_type)
+    if ctrl is None:
+        ctrl = _find_smallest_text_match(win, title, log)
     if ctrl is None:
         if log is not None:
             visible = _dump_controls(win)
