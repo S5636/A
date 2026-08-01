@@ -2,9 +2,24 @@
 """엑셀/CSV 업로드 파싱 (스펙 5.1) + HL 수기 매입처 텍스트 파싱 (부록 C)"""
 import re
 import sqlite3
+import time
 import pandas as pd
 
 from calc_engine import clean_id, safe_float, STATUS_CODE_MAP
+
+
+def _retry_on_lock(fn, retries=8, delay=0.4):
+    """윈도우 디펜더 등 백신이 방금 생성된 임시 엑셀 파일을 순간적으로 잠가서
+    'PermissionError: [WinError 32] 다른 프로세스가 파일을 사용 중' 이 나는 경우가 있다.
+    보통 1초 안에 풀리는 일시적인 잠금이라 짧게 재시도한다."""
+    last_err = None
+    for _ in range(retries):
+        try:
+            return fn()
+        except PermissionError as e:
+            last_err = e
+            time.sleep(delay)
+    raise last_err
 
 
 def _clamp_ship_fee(val):
@@ -95,10 +110,10 @@ def _normalize_header(cols):
 def read_upload_file(fp, filename):
     if filename.lower().endswith('.csv'):
         try:
-            return pd.read_csv(fp, encoding='utf-8-sig', dtype=str, engine='python', on_bad_lines='skip')
+            return _retry_on_lock(lambda: pd.read_csv(fp, encoding='utf-8-sig', dtype=str, engine='python', on_bad_lines='skip'))
         except Exception:
-            return pd.read_csv(fp, encoding='cp949', dtype=str, engine='python', on_bad_lines='skip')
-    return pd.read_excel(fp, dtype=str)
+            return _retry_on_lock(lambda: pd.read_csv(fp, encoding='cp949', dtype=str, engine='python', on_bad_lines='skip'))
+    return _retry_on_lock(lambda: pd.read_excel(fp, dtype=str))
 
 
 def process_upload(db_path, fp, filename):

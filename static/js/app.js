@@ -556,7 +556,8 @@
       }
       if (data.ok && data.upload && !data.upload.error) {
         toast('다팔자 자동 수집 및 반영이 완료되었습니다.', 'ok');
-        state.loadedTabs.delete('summary'); state.loadedTabs.delete('dashboard');
+        state.loadedTabs.delete('summary');
+        loadDashOrders();
       } else if (data.ok && data.upload && data.upload.error) {
         toast(`파일은 저장했지만 반영 중 오류: ${data.upload.error}`, 'err');
       } else {
@@ -775,24 +776,33 @@
     tbody.innerHTML = '';
 
     const headTr = document.createElement('tr');
-    headTr.innerHTML = `<th style="text-align:left;">마켓</th>` +
+    headTr.innerHTML = `<th style="text-align:left;">마켓 / 구분</th>` +
       data.months.map(m => `<th>${m}월</th>`).join('') + `<th>합계</th>`;
     thead.appendChild(headTr);
 
-    for (const row of data.matrix) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${row.market}</td>` +
-        row.months.map(v => `<td>${num(v)}</td>`).join('') +
-        `<td style="font-weight:700;">${num(row.row_total)}</td>`;
-      tbody.appendChild(tr);
-    }
-
-    const totalTr = document.createElement('tr');
-    totalTr.style.borderTop = '2px solid var(--border-strong)';
-    totalTr.innerHTML = `<td style="font-weight:700;">합계</td>` +
-      data.col_totals.map(v => `<td style="font-weight:700;">${num(v)}</td>`).join('') +
+    const grandTr = document.createElement('tr');
+    grandTr.innerHTML = `<td style="font-weight:700;">총합계</td>` +
+      data.grand_month_totals.map(v => `<td style="font-weight:700;">${num(v)}</td>`).join('') +
       `<td style="font-weight:700; color:var(--good);">${num(data.grand_total)}</td>`;
-    tbody.appendChild(totalTr);
+    tbody.appendChild(grandTr);
+
+    for (const group of data.market_groups) {
+      const subTr = document.createElement('tr');
+      subTr.style.borderTop = '2px solid var(--border-strong)';
+      subTr.innerHTML = `<td style="font-weight:700;">${group.market} 소계</td>` +
+        group.months.map(v => `<td style="font-weight:700;">${num(v)}</td>`).join('') +
+        `<td style="font-weight:700;">${num(group.row_total)}</td>`;
+      tbody.appendChild(subTr);
+
+      for (const catKey of ['credit', 'cash', 'mobile', 'other']) {
+        const cat = group.categories[catKey];
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td style="padding-left:22px; color:var(--text-secondary); font-weight:400;">${cat.label}</td>` +
+          cat.months.map(v => `<td>${num(v)}</td>`).join('') +
+          `<td>${num(cat.row_total)}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
   }
 
   async function loadVatView() {
@@ -800,7 +810,7 @@
     const table = document.getElementById('vat-half-table');
     document.getElementById('vat-half-label').textContent = `${vatState.year}년 ${vatState.half === 1 ? '상반기 (1~6월)' : '하반기 (7~12월)'}`;
     const data = await api(`/api/vat/half?${qs({ year: vatState.year, half: vatState.half })}`);
-    if (data.matrix.length === 0) {
+    if (data.market_groups.length === 0) {
       emptyHint.style.display = '';
       table.style.display = 'none';
       return;

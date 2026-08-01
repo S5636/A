@@ -7,6 +7,7 @@ import os
 import json
 import sqlite3
 import tempfile
+import time
 import traceback
 
 from flask import Flask, request, jsonify, render_template, send_from_directory
@@ -41,6 +42,20 @@ def handle_uncaught_error(e):
         traceback.print_exc()
         return jsonify({'error': f'{type(e).__name__}: {e}'}), 500
     raise e
+
+
+def _save_with_retry(fstorage, fp, retries=8, delay=0.4):
+    # 윈도우 디펜더가 방금 만든 임시파일을 순간적으로 잠가서 저장 자체가
+    # PermissionError로 실패하는 경우가 있어 짧게 재시도한다.
+    last_err = None
+    for _ in range(retries):
+        try:
+            fstorage.save(fp)
+            return
+        except PermissionError as e:
+            last_err = e
+            time.sleep(delay)
+    raise last_err
 
 
 def init_db():
@@ -202,7 +217,7 @@ def api_upload():
                 # 있었음 - 저장용 경로는 항상 안전한 이름을 새로 만들어 쓴다.
                 ext = os.path.splitext(f.filename)[1]
                 fp = os.path.join(tmp, f"upload_{i}{ext}")
-                f.save(fp)
+                _save_with_retry(f, fp)
                 res = parsers.process_upload(DB_PATH, fp, f.filename)
             except Exception as e:
                 res = {'error': str(e)}
@@ -250,7 +265,7 @@ def api_vat_upload():
             try:
                 ext = os.path.splitext(f.filename)[1]
                 fp = os.path.join(tmp, f"upload_{i}{ext}")
-                f.save(fp)
+                _save_with_retry(f, fp)
                 res = vat.process_vat_upload(DB_PATH, fp, f.filename, market)
             except Exception as e:
                 res = {'error': str(e)}

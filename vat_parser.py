@@ -12,7 +12,22 @@
 """
 import re
 import sqlite3
+import time
 import pandas as pd
+
+
+def _retry_on_lock(fn, retries=8, delay=0.4):
+    """윈도우 디펜더 등 백신이 방금 생성된 임시 엑셀 파일을 순간적으로 잠가서
+    'PermissionError: [WinError 32] 다른 프로세스가 파일을 사용 중' 이 나는 경우가 있다.
+    보통 1초 안에 풀리는 일시적인 잠금이라 짧게 재시도한다."""
+    last_err = None
+    for _ in range(retries):
+        try:
+            return fn()
+        except PermissionError as e:
+            last_err = e
+            time.sleep(delay)
+    raise last_err
 
 CATEGORIES = ['credit', 'cash', 'mobile', 'other']
 CATEGORY_LABEL = {'credit': '신용카드', 'cash': '현금', 'mobile': '휴대폰', 'other': '기타'}
@@ -237,12 +252,13 @@ def _read_raw_sheets(fp, filename):
     """(시트이름, header=None 원본 DataFrame) 리스트. csv는 시트 1개짜리로 취급."""
     if filename.lower().endswith('.csv'):
         try:
-            raw_df = pd.read_csv(fp, header=None, dtype=str, encoding='utf-8-sig')
+            raw_df = _retry_on_lock(lambda: pd.read_csv(fp, header=None, dtype=str, encoding='utf-8-sig'))
         except UnicodeDecodeError:
-            raw_df = pd.read_csv(fp, header=None, dtype=str, encoding='cp949')
+            raw_df = _retry_on_lock(lambda: pd.read_csv(fp, header=None, dtype=str, encoding='cp949'))
         return [('CSV', raw_df)]
-    xl = pd.ExcelFile(fp)
-    return [(sheet, pd.read_excel(fp, sheet_name=sheet, header=None, dtype=str)) for sheet in xl.sheet_names]
+    xl = _retry_on_lock(lambda: pd.ExcelFile(fp))
+    return [(sheet, _retry_on_lock(lambda s=sheet: pd.read_excel(fp, sheet_name=s, header=None, dtype=str)))
+            for sheet in xl.sheet_names]
 
 
 def process_vat_upload(db_path, fp, filename, market):
@@ -281,32 +297,42 @@ def process_vat_upload(db_path, fp, filename, market):
 
 
 def get_vat_half_detail(db_path, year, half):
-    """half(1=상반기 1~6월, 2=하반기 7~12월)를 '부가세 통합 엑셀'처럼 마켓을 행, 월을 열로
-    둔 피벗 표로 반환. 셀 값은 결제수단 4종을 합친 그 달 총액이고, 오른쪽 끝에 마켓별
-    합계열, 맨 아래에 월별 합계행, 우하단에 전체 총합계를 둔다."""
+    """half(1=상반기 1~6월, 2=하반기 7~12월)를 '부가세 통합 엑셀'처럼 마켓별로 묶고,
+    그 안에서 다시 결제수단(신용카드/현금/휴대폰/기타)별로 나눠서 월별 금액을 보여주는
+    표로 반환한다. 마켓마다 [소계 + 결제수단 4줄], 오른쪽 끝엔 합계열, 맨 위엔 전체
+    총합계를 둔다."""
     months = list(range(1, 7)) if half == 1 else list(range(7, 13))
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     placeholders = ','.join('?' * len(months))
-    cur.execute(f"""SELECT market, month, SUM(amount) FROM vat_summary
-        WHERE year=? AND month IN ({placeholders}) GROUP BY market, month""", [year, *months])
+    cur.execute(f"""SELECT market, month, category, SUM(amount) FROM vat_summary
+        WHERE year=? AND month IN ({placeholders}) GROUP BY market, month, category""", [year, *months])
     rows = cur.fetchall()
     cur.execute("SELECT DISTINCT year FROM vat_summary ORDER BY year")
     available_years = [r[0] for r in cur.fetchall()]
     conn.close()
 
-    markets = sorted({market for market, _, _ in rows})
-    cell = {(market, m): int(amt or 0) for market, m, amt in rows}
+    markets = sorted({market for market, _, _, _ in rows})
+    cell = {(market, m, cat): int(amt or 0) for market, m, cat, amt in rows}
 
-    matrix = []
+    market_groups = []
+    grand_month_totals = [0] * len(months)
     for market in markets:
-        month_amounts = [cell.get((market, m), 0) for m in months]
-        matrix.append({'market': market, 'months': month_amounts, 'row_total': sum(month_amounts)})
+        categories = {}
+        subtotal_months = [0] * len(months)
+        for cat in CATEGORIES:
+            cat_months = [cell.get((market, m, cat), 0) for m in months]
+            categories[cat] = {'label': CATEGORY_LABEL[cat], 'months': cat_months, 'row_total': sum(cat_months)}
+            subtotal_months = [a + b for a, b in zip(subtotal_months, cat_months)]
+        market_groups.append({
+            'market': market, 'categories': categories,
+            'months': subtotal_months, 'row_total': sum(subtotal_months),
+        })
+        grand_month_totals = [a + b for a, b in zip(grand_month_totals, subtotal_months)]
 
-    col_totals = [sum(cell.get((market, m), 0) for market in markets) for m in months]
-    grand_total = sum(col_totals)
+    grand_total = sum(grand_month_totals)
 
     return {
-        'months': months, 'matrix': matrix, 'col_totals': col_totals,
+        'months': months, 'market_groups': market_groups, 'grand_month_totals': grand_month_totals,
         'grand_total': grand_total, 'available_years': available_years,
     }
