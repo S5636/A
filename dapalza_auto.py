@@ -195,14 +195,27 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         # desktop.windows()가 돌려주는 건 WindowSpecification이 아니라 UIAWrapper라서
         # .wait()가 없다 - 이미 존재가 확인된 요소이니 포커스만 주면 된다.
         win.set_focus()
-        time.sleep(1.5)
         L('다팔자 창을 찾았습니다.')
 
-        try:
-            initial_descendants = win.descendants()
-        except Exception as e:
-            initial_descendants = None
-            L(f'화면 요소 목록을 가져오는 데 실패했습니다: {type(e).__name__}: {e}')
+        # 다팔자는 클래스명이 Chrome_WidgetWin_1(Electron/Chromium 기반)이다.
+        # Electron 앱은 접근성 트리를 처음부터 만들어두지 않고, 윈도우 접근성
+        # 도구(UIA 등)가 창을 건드려야 그때부터 만들기 시작하는 경우가 많아서
+        # 몇 초 정도 걸릴 수 있다. 요소 개수가 초기값(제목표시줄 정도인 11개
+        # 안팎)보다 뚜렷하게 늘어날 때까지 반복 확인하면서 기다린다.
+        L('창 접근성 정보가 완전히 준비될 때까지 확인하는 중 (Electron 앱은 시간이 걸릴 수 있음)...')
+        initial_descendants = []
+        for i in range(10):
+            time.sleep(1.5)
+            try:
+                initial_descendants = win.descendants()
+                cnt = len(initial_descendants)
+            except Exception as e:
+                cnt = -1
+                L(f'  - {round((i + 1) * 1.5, 1)}초 경과, 조회 실패: {type(e).__name__}: {e}')
+                continue
+            L(f'  - {round((i + 1) * 1.5, 1)}초 경과, 하위 요소 {cnt}개 확인됨')
+            if cnt > 20:
+                break
         visible_now = _dump_controls(win, descendants=initial_descendants)
         L(f'창을 찾은 직후 화면에 보이는 글자들 (참고용): {visible_now}')
         cls, desc_count, structure = _dump_structure(win, descendants=initial_descendants)
