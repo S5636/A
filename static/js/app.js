@@ -778,44 +778,42 @@
     thead.innerHTML = '';
     tbody.innerHTML = '';
 
-    const groupBorder = 'border-left:2px solid var(--border-strong);';
+    const headTr = document.createElement('tr');
+    headTr.innerHTML = `<th style="text-align:left;">구분</th>` +
+      data.market_groups.map(g => `<th>${g.market}</th>`).join('') + `<th>합계</th>`;
+    thead.appendChild(headTr);
 
-    const headTr1 = document.createElement('tr');
-    headTr1.innerHTML = `<th rowspan="2" style="text-align:left; vertical-align:bottom;">월</th>` +
-      data.market_groups.map(g => `<th colspan="5" style="${groupBorder} text-align:center;">${g.market}</th>`).join('') +
-      `<th rowspan="2" style="${groupBorder}">총합계</th>`;
-    thead.appendChild(headTr1);
-
-    const headTr2 = document.createElement('tr');
-    headTr2.innerHTML = data.market_groups.map(() =>
-      `<th style="${groupBorder}">소계</th>` + VAT_CAT_KEYS.map(k => `<th>${VAT_CAT_SHORT[k]}</th>`).join('')
-    ).join('');
-    thead.appendChild(headTr2);
-
-    function buildRowCells(monthIdx) {
-      let cells = '';
-      for (const g of data.market_groups) {
-        const subtotal = monthIdx === null ? g.row_total : g.months[monthIdx];
-        cells += `<td style="${groupBorder} font-weight:700;">${num(subtotal)}</td>`;
-        for (const k of VAT_CAT_KEYS) {
-          const catVal = monthIdx === null ? g.categories[k].row_total : g.categories[k].months[monthIdx];
-          cells += `<td>${num(catVal)}</td>`;
-        }
-      }
-      const grand = monthIdx === null ? data.grand_total : data.grand_month_totals[monthIdx];
-      return cells + `<td style="${groupBorder} font-weight:700; color:var(--good);">${num(grand)}</td>`;
+    function subtotalOf(monthIdx) {
+      return monthIdx === null ? data.grand_total : data.grand_month_totals[monthIdx];
+    }
+    function catTotalOf(catKey, monthIdx) {
+      return data.market_groups.reduce((sum, g) =>
+        sum + (monthIdx === null ? g.categories[catKey].row_total : g.categories[catKey].months[monthIdx]), 0);
     }
 
-    const totalTr = document.createElement('tr');
-    totalTr.style.borderBottom = '2px solid var(--border-strong)';
-    totalTr.innerHTML = `<td style="font-weight:700;">총합계</td>` + buildRowCells(null);
-    tbody.appendChild(totalTr);
+    function buildGroup(label, monthIdx) {
+      const subTr = document.createElement('tr');
+      subTr.style.borderTop = '2px solid var(--border-strong)';
+      const subCells = data.market_groups.map(g => {
+        const v = monthIdx === null ? g.row_total : g.months[monthIdx];
+        return `<td style="font-weight:700;">${num(v)}</td>`;
+      }).join('');
+      subTr.innerHTML = `<td style="font-weight:700;">${label}</td>${subCells}<td style="font-weight:700; color:var(--good);">${num(subtotalOf(monthIdx))}</td>`;
+      tbody.appendChild(subTr);
 
-    data.months.forEach((m, idx) => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td style="font-weight:700;">${m}월</td>` + buildRowCells(idx);
-      tbody.appendChild(tr);
-    });
+      for (const catKey of VAT_CAT_KEYS) {
+        const tr = document.createElement('tr');
+        const cells = data.market_groups.map(g => {
+          const v = monthIdx === null ? g.categories[catKey].row_total : g.categories[catKey].months[monthIdx];
+          return `<td>${num(v)}</td>`;
+        }).join('');
+        tr.innerHTML = `<td style="padding-left:16px; color:var(--text-secondary); font-weight:400;">${VAT_CAT_SHORT[catKey]}</td>${cells}<td>${num(catTotalOf(catKey, monthIdx))}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    buildGroup('합계', null);
+    data.months.forEach((m, idx) => buildGroup(`${m}월`, idx));
   }
 
   async function loadVatView() {

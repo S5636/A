@@ -194,8 +194,8 @@ table.summary-table th:first-child { text-align: left; }
 table.summary-table td { text-align: right; padding: 10.5px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 table.summary-table td:first-child { text-align: left; font-weight: 700; white-space: nowrap; }
 table.summary-table td.rate-pos { color: var(--good); font-weight: 700; }
-table.summary-table.compact { width: auto; font-size: 12.5px; }
-table.summary-table.compact th, table.summary-table.compact td { padding: 3px 6px; white-space: nowrap; }
+table.summary-table.compact { width: auto; font-size: 12px; }
+table.summary-table.compact th, table.summary-table.compact td { padding: 1px 6px; line-height: 1.5; white-space: nowrap; }
 .table-wrap-x { overflow-x: auto; }
 
 /* ---------- Calendar ---------- */
