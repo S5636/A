@@ -88,14 +88,25 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         L('다팔자 창을 찾는 중...')
         desktop = Desktop(backend='uia')
         win = None
-        for _ in range(6):
+        for attempt in range(6):
             try:
-                candidate = desktop.window(title_re='.*다팔자.*')
-                if candidate.exists(timeout=5):
-                    win = candidate
-                    break
+                candidates = [w for w in desktop.windows() if '다팔자' in w.window_text()]
             except Exception:
-                pass
+                candidates = []
+            if candidates:
+                # 제목에 '다팔자'가 들어간 창이 여러 개(알림창 등)일 수 있어서,
+                # 그 중 화면에 차지하는 면적이 가장 큰 것을 실제 메인 창으로 간주한다.
+                def _area(w):
+                    try:
+                        r = w.rectangle()
+                        return max(0, r.width()) * max(0, r.height())
+                    except Exception:
+                        return 0
+                candidates.sort(key=_area, reverse=True)
+                L(f"'다팔자'가 제목에 들어간 창 {len(candidates)}개 발견 (면적 큰 순): " +
+                  str([(c.window_text(), _area(c)) for c in candidates]))
+                win = candidates[0]
+                break
             time.sleep(2)
         if win is None:
             try:
@@ -106,7 +117,11 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             return {'ok': False, 'log': log}
         win.wait('visible', timeout=15)
         win.set_focus()
+        time.sleep(1.5)
         L('다팔자 창을 찾았습니다.')
+
+        visible_now = _dump_controls(win)
+        L(f'창을 찾은 직후 화면에 보이는 글자들 (참고용): {visible_now}')
 
         try:
             L("'주문관리' 탭 클릭...")

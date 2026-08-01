@@ -184,7 +184,9 @@ def _parse_format_c(df):
             method = str(_scalar(row.get(method_col)) or '').strip()
             if '카드' in method or '신용' in method:
                 cat = 'credit'
-            elif '현금' in method:
+            elif '현금' in method or '머니' in method:
+                # TOSS의 '토스머니'/'토스페이머니'는 선불충전금 결제로, 국세청 기준
+                # 현금영수증 발행 대상인 현금성 결제라 '현금'으로 분류한다.
                 cat = 'cash'
             elif '휴대' in method or '폰' in method:
                 cat = 'mobile'
