@@ -61,9 +61,11 @@ def setup_login(start_url, wait_seconds=300):
             L('로그인용 브라우저 창을 여는 중... (창이 뜨면 직접 로그인해주세요)')
             context = p.chromium.launch_persistent_context(
                 PROFILE_DIR, headless=False,
-                args=['--start-maximized'], no_viewport=True,
+                args=['--start-maximized', '--disable-blink-features=AutomationControlled'],
+                no_viewport=True,
             )
             page = context.pages[0] if context.pages else context.new_page()
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
             L('브라우저 창에서 오너클랜에 직접 로그인해주세요. 로그인하시면 자동으로 감지해서 창을 닫습니다 (최대 5분 대기).')
 
@@ -123,8 +125,23 @@ def collect_and_upload(order_url, save_folder=None, save_filename='오너클랜.
     try:
         with sync_playwright() as p:
             L('오너클랜 페이지를 여는 중 (백그라운드)...')
-            context = p.chromium.launch_persistent_context(PROFILE_DIR, headless=True)
+            # headless=True(완전히 안 보이는 모드)로 실행했더니 오너클랜이 이걸
+            # 자동화 프로그램으로 감지해서 로그인 세션을 계속 무효화시키고 매번
+            # 비밀번호를 다시 요구하는 문제가 실제로 발생했다 (headless 크롬은
+            # navigator.webdriver 같은 값으로 쉽게 구분됨). 그래서 화면에는 안
+            # 보이지만(창을 화면 밖 좌표로 띄움) 기술적으로는 '진짜 브라우저'로
+            # 인식되는 방식으로 바꿨다 - 로그인 세션이 훨씬 안정적으로 유지된다.
+            context = p.chromium.launch_persistent_context(
+                PROFILE_DIR, headless=False,
+                args=[
+                    '--window-position=-32000,-32000',
+                    '--window-size=1280,900',
+                    '--disable-blink-features=AutomationControlled',
+                ],
+                no_viewport=True,
+            )
             page = context.pages[0] if context.pages else context.new_page()
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             page.on('dialog', lambda d: d.accept())
             page.goto(order_url, wait_until='domcontentloaded', timeout=30000)
             page.wait_for_timeout(1500)
