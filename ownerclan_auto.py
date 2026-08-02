@@ -327,6 +327,26 @@ def _collect_impl(order_url, target_path, L):
     return True
 
 
+def _ensure_background_impl():
+    page = _get_or_launch_page(None, launch_if_missing=False)
+    if page is not None:
+        _set_window_state(page, 'minimized', None)
+
+
+def ensure_background():
+    """다팔자 자동화처럼 화면 좌표를 더듬는 다른 자동화가 시작되기 직전에
+    호출한다. 오너클랜 창이 화면에 로그인 등으로 떠 있는 상태(예: 사용자가
+    로그인 완료를 기다리다가 마무리 안 하고 다른 작업으로 넘어간 경우)라면,
+    그 창이 다른 프로그램의 창을 가리고 있을 수 있고 - 가려진(occluded)
+    Electron/Chromium 창은 접근성 트리 생성이 멈추는 경우가 실제로 있었다.
+    오너클랜 브라우저가 살아있으면 무조건 먼저 최소화해서 이 위험을 없앤다.
+    브라우저가 아예 없으면(로그인 안 한 상태) 그냥 조용히 넘어간다."""
+    try:
+        _run_on_worker(_ensure_background_impl)
+    except Exception:
+        pass
+
+
 def collect_and_upload(order_url, save_folder=None, save_filename='oc.xlsx'):
     """로그인 설정 때 띄워놓고 백그라운드로 보낸 그 브라우저 창을 그대로 재사용해서
     조회기간을 1개월로 맞추고 엑셀다운로드를 눌러 발주내역 파일을 받는다."""

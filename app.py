@@ -264,6 +264,14 @@ def api_upload():
 
 @app.route('/api/dapalza/collect', methods=['POST'])
 def api_dapalza_collect():
+    # 오너클랜 창이 로그인 등으로 화면에 떠서 다팔자 창을 가리고 있으면,
+    # 가려진 Electron 창의 접근성 트리 갱신이 멈춰서 다팔자 자동화가 탭/버튼을
+    # 하나도 못 찾는 사고로 이어질 수 있다 - 다팔자를 건드리기 전에 오너클랜
+    # 창부터 항상 최소화해서 이 위험을 없앤다.
+    try:
+        ownerclan_auto.ensure_background()
+    except Exception:
+        pass
     result = dapalza_auto.collect_and_upload(
         save_folder=SETTLEMENT_UPLOAD_DIR,
         save_filename='다팔자.xlsx',
