@@ -458,7 +458,13 @@ def _check_one_stock(page, order_url, code, L):
         return '확인실패'
 
     try:
-        has_buy_now = page.get_by_text('바로구매', exact=True).count() > 0
+        # exact=True로 '바로구매' 글자만 딱 맞춰서 찾다가, 버튼 안에 보이지
+        # 않는 여백/아이콘이 같이 들어있는 경우 매칭이 실패해서 있는데도
+        # 없다고 오판할 위험이 있었다(다팔자 자동화에서 텍스트 정확매칭 때문에
+        # 여러 번 고생한 것과 같은 종류의 문제). exact=False로 완화한다 -
+        # '바로구매' 버튼이 있으면 그게 최우선으로 '정상' 판정되니(아래 순서),
+        # 이 문구가 다른 곳에 잘못 걸릴 걱정은 크지 않다.
+        has_buy_now = page.get_by_text('바로구매', exact=False).count() > 0
         has_soldout = page.get_by_text('품절', exact=False).count() > 0
     except Exception as e:
         L(f"[{code}] 상품 페이지 상태 확인 실패: {type(e).__name__}: {e}")
