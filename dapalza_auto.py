@@ -259,18 +259,28 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         # 몇 초 정도 걸릴 수 있다. 요소 개수가 초기값(제목표시줄 정도인 11개
         # 안팎)보다 뚜렷하게 늘어날 때까지 반복 확인하면서 기다린다.
         L('창 접근성 정보가 완전히 준비될 때까지 확인하는 중 (Electron 앱은 시간이 걸릴 수 있음)...')
+        # 예전엔 최대 15초(10x1.5초)만 기다렸는데, 다팔자가 자체 자동동기화
+        # 중이면(화면 하단에 '자동동기화 상태 갱신...' 토스트가 뜨는 그 상황)
+        # 렌더러가 바빠서 15초 안에도 접근성 트리가 안 열릴 수 있다는 게
+        # 실제 로그로 확인됐다 (11개에서 15초 내내 안 늘어남). 최대 60초까지
+        # 훨씬 여유있게 기다리도록 늘렸다.
         initial_descendants = []
-        for i in range(10):
+        last_wait_log = 0
+        for i in range(40):
             time.sleep(1.5)
+            elapsed = round((i + 1) * 1.5, 1)
             try:
                 initial_descendants = win.descendants()
                 cnt = len(initial_descendants)
             except Exception as e:
                 cnt = -1
-                L(f'  - {round((i + 1) * 1.5, 1)}초 경과, 조회 실패: {type(e).__name__}: {e}')
+                L(f'  - {elapsed}초 경과, 조회 실패: {type(e).__name__}: {e}')
                 continue
-            L(f'  - {round((i + 1) * 1.5, 1)}초 경과, 하위 요소 {cnt}개 확인됨')
+            if elapsed - last_wait_log >= 6:
+                L(f'  - {elapsed}초 경과, 하위 요소 {cnt}개 확인됨')
+                last_wait_log = elapsed
             if cnt > 20:
+                L(f'  - {elapsed}초 경과, 하위 요소 {cnt}개로 늘어남 - 준비 완료.')
                 break
         visible_now = _dump_controls(win, descendants=initial_descendants)
         L(f'창을 찾은 직후 화면에 보이는 글자들 (참고용): {visible_now}')
