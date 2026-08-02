@@ -248,20 +248,47 @@ def _collect_impl(order_url, target_path, L):
         L(f"'1개월' 버튼을 못 찾았습니다 (기본 기간으로 진행합니다): {_friendly_error(e)}")
     page.wait_for_timeout(500)
 
-    # 사용자가 실제로 해보니 '조회하기'는 안 눌러도 되고(1개월만 설정하면 바로
-    # 엑셀다운로드가 됨), 엑셀 파일을 서버에서 만드는 데 시간이 좀 걸린다고
-    # 확인해줬다. exact=True로 '엑셀다운로드'만 찾다가 못 찾은 적이 있어서
-    # (다팔자 때와 같은 이유로, 실제 버튼 이름이 공백이나 아이콘이 섞여있을 수
-    # 있음) exact=False로 느슨하게 찾고, 파일 생성 시간을 감안해 다운로드
-    # 대기시간도 넉넉히(2분) 늘렸다.
+    page.wait_for_timeout(500)
+
+    # exact=False('엑셀다운로드' 부분일치)로도 15초 안에 못 찾고 바로 실패하는
+    # 걸 실제로 확인했다 - 파일 생성 대기(2분)까지 가지도 못하고 버튼 클릭
+    # 자체가 안 되는 것이니, 버튼 이름 자체가 다르다는 뜻이다. 그래서 '엑셀'만
+    # 들어가면 찾도록 더 느슨하게 한 번 더 시도하고, 그래도 안 되면 그 순간
+    # 화면에 실제로 있는 버튼/링크 글자들을 전부 로그로 남겨서 진짜 이름을
+    # 바로 알 수 있게 한다 (다팔자 때 이 방식으로 여러 번 문제를 잡았다).
+    excel_btn = None
+    for candidate_text in ('엑셀다운로드', '엑셀 다운로드', '엑셀'):
+        try:
+            loc = page.get_by_text(candidate_text, exact=False).first
+            if loc.count() > 0:
+                excel_btn = loc
+                break
+        except Exception:
+            continue
+
+    if excel_btn is None:
+        try:
+            texts = page.locator('button, a, [role="button"]').all_inner_texts()
+            texts = [t.strip() for t in texts if t.strip()]
+        except Exception as e:
+            texts = [f'(조회 실패: {_friendly_error(e)})']
+        L(f"'엑셀' 글자가 들어간 버튼을 하나도 못 찾았습니다. 지금 화면의 버튼/링크 글자들: {texts[:80]}")
+        return False
+
     L("'엑셀다운로드' 버튼 클릭 및 다운로드 대기 (파일 생성에 시간이 걸릴 수 있어 최대 2분 기다림)...")
     try:
         with page.expect_download(timeout=120000) as download_info:
-            page.get_by_text('엑셀다운로드', exact=False).first.click(timeout=15000)
+            excel_btn.click(timeout=15000)
         download = download_info.value
         download.save_as(target_path)
     except Exception as e:
         L(f"엑셀 다운로드에 실패했습니다: {_friendly_error(e)}")
+        try:
+            texts = page.locator('button, a, [role="button"]').all_inner_texts()
+            texts = [t.strip() for t in texts if t.strip()]
+            L(f"진단정보 - 지금 화면의 버튼/링크 글자들: {texts[:80]}")
+        except Exception as e2:
+            L(f'진단정보 수집도 실패: {_friendly_error(e2)}')
         return False
 
     return True
