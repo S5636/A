@@ -248,17 +248,16 @@ def _collect_impl(order_url, target_path, L):
         L(f"'1개월' 버튼을 못 찾았습니다 (기본 기간으로 진행합니다): {_friendly_error(e)}")
     page.wait_for_timeout(500)
 
+    # 사용자가 실제로 해보니 '조회하기'는 안 눌러도 되고(1개월만 설정하면 바로
+    # 엑셀다운로드가 됨), 엑셀 파일을 서버에서 만드는 데 시간이 좀 걸린다고
+    # 확인해줬다. exact=True로 '엑셀다운로드'만 찾다가 못 찾은 적이 있어서
+    # (다팔자 때와 같은 이유로, 실제 버튼 이름이 공백이나 아이콘이 섞여있을 수
+    # 있음) exact=False로 느슨하게 찾고, 파일 생성 시간을 감안해 다운로드
+    # 대기시간도 넉넉히(2분) 늘렸다.
+    L("'엑셀다운로드' 버튼 클릭 및 다운로드 대기 (파일 생성에 시간이 걸릴 수 있어 최대 2분 기다림)...")
     try:
-        page.get_by_text('조회하기', exact=True).first.click(timeout=10000)
-        L("'조회하기' 버튼 클릭 완료.")
-        page.wait_for_timeout(1500)
-    except Exception as e:
-        L(f"'조회하기' 버튼을 못 찾았습니다 (그냥 다음 단계로 진행합니다): {_friendly_error(e)}")
-
-    L("'엑셀다운로드' 버튼 클릭 및 다운로드 대기...")
-    try:
-        with page.expect_download(timeout=60000) as download_info:
-            page.get_by_text('엑셀다운로드', exact=True).first.click(timeout=10000)
+        with page.expect_download(timeout=120000) as download_info:
+            page.get_by_text('엑셀다운로드', exact=False).first.click(timeout=15000)
         download = download_info.value
         download.save_as(target_path)
     except Exception as e:
@@ -268,7 +267,7 @@ def _collect_impl(order_url, target_path, L):
     return True
 
 
-def collect_and_upload(order_url, save_folder=None, save_filename='오너클랜.xlsx'):
+def collect_and_upload(order_url, save_folder=None, save_filename='oc.xlsx'):
     """로그인 설정 때 띄워놓고 백그라운드로 보낸 그 브라우저 창을 그대로 재사용해서
     조회기간을 1개월로 맞추고 엑셀다운로드를 눌러 발주내역 파일을 받는다."""
     log = []

@@ -273,7 +273,7 @@ def api_ownerclan_collect():
     result = ownerclan_auto.collect_and_upload(
         settings.get('ownerclan_url', ''),
         save_folder=SETTLEMENT_UPLOAD_DIR,
-        save_filename='오너클랜.xlsx',
+        save_filename='oc.xlsx',
     )
     if not result.get('ok'):
         return jsonify(result)
