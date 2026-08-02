@@ -248,41 +248,26 @@ def _collect_impl(order_url, target_path, L):
         L(f"'1개월' 버튼을 못 찾았습니다 (기본 기간으로 진행합니다): {_friendly_error(e)}")
     page.wait_for_timeout(500)
 
-    page.wait_for_timeout(500)
-
-    # exact=False('엑셀다운로드' 부분일치)로도 15초 안에 못 찾고 바로 실패하는
-    # 걸 실제로 확인했다 - 파일 생성 대기(2분)까지 가지도 못하고 버튼 클릭
-    # 자체가 안 되는 것이니, 버튼 이름 자체가 다르다는 뜻이다. 그래서 '엑셀'만
-    # 들어가면 찾도록 더 느슨하게 한 번 더 시도하고, 그래도 안 되면 그 순간
-    # 화면에 실제로 있는 버튼/링크 글자들을 전부 로그로 남겨서 진짜 이름을
-    # 바로 알 수 있게 한다 (다팔자 때 이 방식으로 여러 번 문제를 잡았다).
-    excel_btn = None
-    for candidate_text in ('엑셀다운로드', '엑셀 다운로드', '엑셀'):
-        try:
-            loc = page.get_by_text(candidate_text, exact=False).first
-            if loc.count() > 0:
-                excel_btn = loc
-                break
-        except Exception:
-            continue
-
-    if excel_btn is None:
-        try:
-            texts = page.locator('button, a, [role="button"]').all_inner_texts()
-            texts = [t.strip() for t in texts if t.strip()]
-        except Exception as e:
-            texts = [f'(조회 실패: {_friendly_error(e)})']
-        L(f"'엑셀' 글자가 들어간 버튼을 하나도 못 찾았습니다. 지금 화면의 버튼/링크 글자들: {texts[:80]}")
-        return False
-
-    L("'엑셀다운로드' 버튼 클릭 및 다운로드 대기 (파일 생성에 시간이 걸릴 수 있어 최대 2분 기다림)...")
+    # 사용자가 실제 페이지 소스에서 직접 확인해준 정보: 엑셀 다운로드 링크는
+    # 텍스트로 찾을 버튼이 아니라 href="javascript:getOrderListExcel();" 형태의
+    # 링크였다 - '엑셀'이 들어간 텍스트로 찾으면 전혀 다른 기능인 '엑셀 주문하기'
+    # 버튼이 걸려서 안 보이는 상태로 클릭 재시도만 반복하다 실패했다. 그래서
+    # 그 버튼을 화면에서 찾아 클릭하는 대신, 페이지에 있는 그 자바스크립트
+    # 함수를 직접 호출한다 - 링크를 클릭했을 때와 결과가 동일하면서, 화면에
+    # 보이는지/눌리는지 같은 문제 자체가 생기지 않는다.
+    L("엑셀 다운로드 함수(getOrderListExcel) 직접 호출 및 다운로드 대기 (파일 생성에 시간이 걸릴 수 있어 최대 2분 기다림)...")
     try:
         with page.expect_download(timeout=120000) as download_info:
-            excel_btn.click(timeout=15000)
+            page.evaluate('getOrderListExcel()')
         download = download_info.value
         download.save_as(target_path)
     except Exception as e:
         L(f"엑셀 다운로드에 실패했습니다: {_friendly_error(e)}")
+        try:
+            has_func = page.evaluate("typeof getOrderListExcel")
+            L(f"진단정보 - 페이지에 getOrderListExcel 함수가 있는지: {has_func}")
+        except Exception as e2:
+            L(f'진단정보 수집도 실패: {_friendly_error(e2)}')
         try:
             texts = page.locator('button, a, [role="button"]').all_inner_texts()
             texts = [t.strip() for t in texts if t.strip()]
