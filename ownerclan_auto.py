@@ -31,7 +31,8 @@ import platform
 import queue
 import threading
 import time
-from urllib.parse import urlsplit
+import re
+from urllib.parse import urlsplit, quote
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile')
@@ -323,63 +324,54 @@ def collect_and_upload(order_url, save_folder=None, save_filename='oc.xlsx'):
     return {'ok': True, 'log': log, 'file_path': target_path}
 
 
-def _site_home_url(order_url):
+def _search_url_for_code(order_url, code):
+    """검색창을 눌러서 찾는 대신, 사용자가 직접 검색해보고 확인해준 주소 형식을
+    그대로 써서 바로 그 결과 페이지로 이동한다 - topSearchType=selfcode가
+    '판매사 상품코드' 기준 검색이라 코드 하나당 결과가 정확히 좁혀진다."""
     try:
         parts = urlsplit(order_url)
-        return f'{parts.scheme}://{parts.netloc}/'
+        base = f'{parts.scheme}://{parts.netloc}'
     except Exception:
-        return 'https://ownerclan.com/'
+        base = 'https://www.ownerclan.com'
+    return (f'{base}/V2/product/search.php?topSearchKeywordInfo='
+            f'&topSearchKeyword={quote(code)}&topSearchType=selfcode')
 
 
-def _check_one_stock(page, home_url, code, L):
-    """상품 하나(판매사상품코드)를 오너클랜에서 검색해서 재고상태를 확인한다.
-    옵션(사이즈 등) 단위까지는 못 보고 상품 전체 기준이다 - '바로구매' 버튼이
-    있으면(=적어도 하나는 살 수 있는 옵션이 있으면) '정상', 없고 '품절' 표시만
-    있으면 '품절', 둘 다 아니면(검색 실패 등) '확인실패'로 본다."""
+def _check_one_stock(page, order_url, code, L):
+    """판매사상품코드로 오너클랜 검색결과 페이지에 직접 이동해서(검색창을 직접
+    누르지 않고) 재고상태를 확인한다. 옵션(사이즈 등) 단위까지는 못 보고 상품
+    전체 기준이다 - '바로구매' 버튼이 있으면(=적어도 하나는 살 수 있는 옵션이
+    있으면) '정상', 없고 '품절' 표시만 있으면 '품절', 둘 다 아니면(검색 결과
+    자체가 없는 등) '확인실패'로 본다."""
+    url = _search_url_for_code(order_url, code)
     try:
-        page.goto(home_url, wait_until='domcontentloaded', timeout=30000)
+        page.goto(url, wait_until='domcontentloaded', timeout=30000)
+        page.wait_for_timeout(800)
     except Exception as e:
-        L(f"[{code}] 오너클랜 홈 이동 실패: {type(e).__name__}: {e}")
-        return '확인실패'
-
-    search_box = None
-    for placeholder_guess in ('최저가 핫딜', '통합검색', '검색어를 입력'):
-        try:
-            loc = page.get_by_placeholder(placeholder_guess, exact=False)
-            if loc.count() > 0:
-                search_box = loc.first
-                break
-        except Exception:
-            continue
-    if search_box is None:
-        try:
-            loc = page.locator('input[type="text"], input[type="search"]').first
-            if loc.count() > 0:
-                search_box = loc
-        except Exception:
-            pass
-    if search_box is None:
-        L(f"[{code}] 검색창을 못 찾았습니다.")
+        L(f"[{code}] 검색 페이지 이동 실패: {type(e).__name__}: {e}")
         return '확인실패'
 
     try:
-        search_box.fill(code)
-        search_box.press('Enter')
-        page.wait_for_timeout(1500)
+        body_text = page.locator('body').inner_text()
     except Exception as e:
-        L(f"[{code}] 검색 실행 실패: {type(e).__name__}: {e}")
+        L(f"[{code}] 검색결과 페이지 읽기 실패: {type(e).__name__}: {e}")
         return '확인실패'
 
-    # 검색 결과 목록에서 이 상품코드로 가는 링크를 찾아 들어간다. 코드 자체가
-    # 결과 페이지 어딘가(링크 텍스트나 URL)에 보통 노출되니 그걸로 찾고, 못
-    # 찾으면 첫 번째 상품 링크로 대체한다(검색이 이미 이 코드로 좁혀졌으므로).
+    m = re.search(r'총\s*([\d,]+)\s*개의\s*상품', body_text)
+    if m and m.group(1).replace(',', '') == '0':
+        L(f"[{code}] 검색결과 0건입니다 - 코드가 오너클랜에 없거나 판매중지된 상품일 수 있습니다.")
+        return '확인실패'
+
+    # 검색결과 목록에서 이 상품코드로 가는 카드를 찾아 상세페이지로 들어간다.
+    # selfcode 검색이라 보통 정확히 1건만 나오지만, 혹시 여러 건이면 코드
+    # 텍스트가 보이는 카드를 우선한다.
     try:
         code_link = page.get_by_text(code, exact=False).first
         if code_link.count() > 0:
             code_link.click(timeout=10000)
         else:
             page.locator('a[href*="product"]').first.click(timeout=10000)
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(1200)
     except Exception as e:
         L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e).__name__}: {e}")
         return '확인실패'
@@ -405,13 +397,12 @@ def _check_stock_impl(order_url, codes, L):
         L("아직 로그인된 브라우저가 없습니다 - 먼저 '오너클랜 로그인 설정'을 눌러 로그인해주세요.")
         return {}
 
-    home_url = _site_home_url(order_url)
     results = {}
     for code in codes:
         if not code:
             continue
         L(f"[{code}] 오너클랜에서 재고상태 확인 중...")
-        status = _check_one_stock(page, home_url, code, L)
+        status = _check_one_stock(page, order_url, code, L)
         results[code] = status
         L(f"[{code}] → {status}")
     return results
