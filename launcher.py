@@ -31,6 +31,11 @@ def main():
         print("[오류] 설치 중 문제가 발생했습니다. 위 내용을 캡처해서 보내주세요.")
         return False
 
+    print("오너클랜 자동 수집에 쓰는 브라우저를 확인/설치하는 중입니다... (처음 한 번만 시간이 걸려요)")
+    pw_result = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"])
+    if pw_result.returncode != 0:
+        print("[안내] 브라우저 설치에 실패했습니다 - 오너클랜 자동 수집만 안 될 뿐, 나머지 기능은 정상 동작합니다.")
+
     print()
     print("설치 완료. 서버를 시작합니다.")
     print("잠시 후 브라우저가 자동으로 열립니다. (안 열리면 http://127.0.0.1:5000 직접 접속하세요)")

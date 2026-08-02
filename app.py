@@ -17,11 +17,13 @@ import calc_engine as ce
 import parsers
 import vat_parser as vat
 import dapalza_auto
+import ownerclan_auto
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'shop_data.db')
 FEES_PATH = os.path.join(BASE_DIR, 'fees_config.json')
 SETTINGS_PATH = os.path.join(BASE_DIR, 'settings.json')
+SETTLEMENT_UPLOAD_DIR = r'C:\Users\SEONG\Desktop\이유상점_정산\정산_업로드_대기'
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
@@ -243,13 +245,39 @@ def api_upload():
 @app.route('/api/dapalza/collect', methods=['POST'])
 def api_dapalza_collect():
     result = dapalza_auto.collect_and_upload(
-        save_folder=r'C:\Users\SEONG\Desktop\이유상점_정산\정산_업로드_대기',
+        save_folder=SETTLEMENT_UPLOAD_DIR,
         save_filename='다팔자.xlsx',
     )
     if not result.get('ok'):
         return jsonify(result)
     try:
         # 다팔자가 직접 디스크에 저장한 파일이라 메모리로 못 우회함 - 읽기만 재시도.
+        buf = io.BytesIO(_read_with_retry(result['file_path']))
+        upload_res = parsers.process_upload(DB_PATH, buf, os.path.basename(result['file_path']))
+    except Exception as e:
+        upload_res = {'error': _friendly_error(e)}
+    result['upload'] = upload_res
+    return jsonify(result)
+
+
+@app.route('/api/ownerclan/setup_login', methods=['POST'])
+def api_ownerclan_setup_login():
+    settings = load_settings()
+    result = ownerclan_auto.setup_login(settings.get('ownerclan_url', ''))
+    return jsonify(result)
+
+
+@app.route('/api/ownerclan/collect', methods=['POST'])
+def api_ownerclan_collect():
+    settings = load_settings()
+    result = ownerclan_auto.collect_and_upload(
+        settings.get('ownerclan_url', ''),
+        save_folder=SETTLEMENT_UPLOAD_DIR,
+        save_filename='오너클랜.xlsx',
+    )
+    if not result.get('ok'):
+        return jsonify(result)
+    try:
         buf = io.BytesIO(_read_with_retry(result['file_path']))
         upload_res = parsers.process_upload(DB_PATH, buf, os.path.basename(result['file_path']))
     except Exception as e:
