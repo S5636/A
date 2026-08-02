@@ -101,6 +101,27 @@ def _cleanup_on_exit():
         pass
 
 
+def _mark_profile_clean_exit():
+    """이 프로필 폴더가 이전에 비정상 종료(예: 마진보드 프로그램을 새 버전으로
+    다시 켜느라 이전 파이썬 프로세스가 정리 코드 없이 죽은 경우)된 걸로 남아있으면,
+    다음에 크롬을 켤 때 '페이지를 복원하시겠습니까?' 알림이 뜨면서 창이 화면
+    앞으로 강제로 나오는 걸 실제로 확인했다 - 그러면 백그라운드로 숨겨둔 의미가
+    없어진다. 프로필의 종료 상태를 미리 '정상 종료'로 표시해두면 이 알림 자체가
+    안 뜬다."""
+    pref_path = os.path.join(PROFILE_DIR, 'Default', 'Preferences')
+    try:
+        import json
+        if not os.path.exists(pref_path):
+            return
+        with open(pref_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        data.setdefault('profile', {})['exit_type'] = 'Normal'
+        with open(pref_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
 def _get_or_launch_page(L, launch_if_missing=True):
     """반드시 워커 스레드 안에서만 호출한다. 이미 살아있는 브라우저 페이지가
     있으면 그대로 재사용하고, 없으면(그리고 launch_if_missing이면) 새로 띄운다."""
@@ -118,10 +139,18 @@ def _get_or_launch_page(L, launch_if_missing=True):
 
     from playwright.sync_api import sync_playwright
     os.makedirs(PROFILE_DIR, exist_ok=True)
+    _mark_profile_clean_exit()
     pw = sync_playwright().start()
     context = pw.chromium.launch_persistent_context(
         PROFILE_DIR, headless=False,
-        args=['--disable-blink-features=AutomationControlled'],
+        args=[
+            '--disable-blink-features=AutomationControlled',
+            # 로그인 세션 유지를 위해 창을 완전히 닫지 않고 계속 띄워두는데,
+            # 화면에 절대 안 보여야 하므로(사용자 화면을 침범하면 안 된다는
+            # 요구사항) 최소화뿐 아니라 애초에 화면 밖 좌표에 띄운다.
+            '--window-position=-32000,-32000',
+            '--disable-session-crashed-bubble',
+        ],
         no_viewport=True,
     )
     page = context.pages[0] if context.pages else context.new_page()
@@ -130,6 +159,7 @@ def _get_or_launch_page(L, launch_if_missing=True):
     _state['pw'] = pw
     _state['context'] = context
     _state['page'] = page
+    _set_window_state(page, 'minimized', L)
     return page
 
 
@@ -351,6 +381,20 @@ def _check_one_stock(page, order_url, code, L):
         L(f"[{code}] 검색 페이지 이동 실패: {type(e).__name__}: {e}")
         return '확인실패'
 
+    # 이동이 '성공'으로 처리돼도 실제로는 엉뚱한 페이지(예: 브라우저가 이전
+    # 비정상종료 복원 알림 때문에 원래 열려있던 다른 페이지에 머물러 있는 등)에
+    # 머물러 있을 수 있다 - 그 상태에서 아래 로직을 계속 진행하면 그 엉뚱한
+    # 페이지에서 아무 상품이나 클릭해 엉뚱한 재고상태를 결과로 내는 사고가
+    # 실제로 있었다. 주소가 우리가 요청한 검색 주소로 실제 바뀌었는지부터
+    # 확인하고, 아니면 여기서 확인실패로 멈춘다.
+    try:
+        current_url = page.url
+    except Exception:
+        current_url = ''
+    if 'search.php' not in current_url or 'topSearchKeyword' not in current_url:
+        L(f"[{code}] 검색 페이지로 이동한 것 같지 않습니다(현재 주소: {current_url}) - 브라우저가 다른 페이지에 머물러 있을 수 있어요.")
+        return '확인실패'
+
     try:
         body_text = page.locator('body').inner_text()
     except Exception as e:
@@ -363,14 +407,15 @@ def _check_one_stock(page, order_url, code, L):
         return '확인실패'
 
     # 검색결과 목록에서 이 상품코드로 가는 카드를 찾아 상세페이지로 들어간다.
-    # selfcode 검색이라 보통 정확히 1건만 나오지만, 혹시 여러 건이면 코드
-    # 텍스트가 보이는 카드를 우선한다.
+    # selfcode 검색이라 보통 정확히 1건만 나오는데, 코드 텍스트를 못 찾으면
+    # (엉뚱한 페이지에 있는 등) 아무 상품이나 클릭하는 대신 확인실패로
+    # 처리한다 - 엉뚱한 상품의 재고상태를 잘못 보고하는 사고를 막기 위해서다.
     try:
         code_link = page.get_by_text(code, exact=False).first
-        if code_link.count() > 0:
-            code_link.click(timeout=10000)
-        else:
-            page.locator('a[href*="product"]').first.click(timeout=10000)
+        if code_link.count() == 0:
+            L(f"[{code}] 검색결과 화면에서 이 코드가 안 보입니다 - 엉뚱한 페이지일 위험이 있어 여기서 멈춥니다.")
+            return '확인실패'
+        code_link.click(timeout=10000)
         page.wait_for_timeout(1200)
     except Exception as e:
         L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e).__name__}: {e}")

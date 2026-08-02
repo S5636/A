@@ -56,13 +56,6 @@ def _wrap_hwnd_uia(hwnd):
     return UIAWrapper(UIAElementInfo(hwnd))
 
 
-def _escape_keys(s):
-    """pywinauto의 type_keys()는 +^%~(){} 를 특수 키 문법으로 해석하므로,
-    실제 경로 문자열에 그런 문자가 섞여 있어도 있는 그대로 입력되도록 감싸준다."""
-    special = '+^%~(){}'
-    return ''.join(('{' + ch + '}') if ch in special else ch for ch in s)
-
-
 def _find_control(win, title, control_type=None):
     """정확한 title+control_type 매칭을 먼저 시도하고, 안 되면 점점 느슨하게 찾는다.
     같은 이름의 컨트롤이 여러 개면 pywinauto가 ElementAmbiguousError를 던지는데,
@@ -548,124 +541,36 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         os.makedirs(target_dir, exist_ok=True)
         target_path = os.path.join(target_dir, save_filename)
 
-        # 같은 이름의 파일이 이미 그 폴더에 남아있으면(예전엔 업로드 후 지우는
-        # 구조였는데 이번엔 안 지워서 계속 쌓였었음), 저장창이 그 파일을 이름
-        # 바꾸기 상태로 잘못 건드리는 등 엉뚱하게 동작하는 사고가 실제로
-        # 있었다. 새로 저장하기 전에 미리 지워서 그 여지를 아예 없앤다.
+        # 같은 이름의 파일이 이미 그 폴더에 남아있으면 나중에 이름 바꿀 때
+        # 걸리니 미리 지운다.
         if os.path.exists(target_path):
             try:
                 os.remove(target_path)
                 L(f'기존에 남아있던 같은 이름의 파일을 먼저 정리했습니다: {target_path}')
-                # 방금 지운 파일이 저장창 뒤에 열려있는 폴더 목록에 반영되면서
-                # 탐색기가 목록을 새로고침하는데, 그 직후에 컨트롤을 붙잡으면
-                # 막 새로고침되는 중이라 참조가 곧바로 무효화되는 경우가 있었다.
-                # 잠깐 안정될 시간을 준다.
-                time.sleep(0.7)
             except Exception as e:
                 L(f'기존 파일 정리 실패(무시하고 진행): {type(e).__name__}: {e}')
 
-        L(f'저장 경로를 지정: {target_path}')
-        # 키보드 입력(Enter 포함)은 pywinauto로 어느 컨트롤을 지정해서 보내든
-        # 실제로는 그 순간 윈도우 화면에서 포커스를 가진(맨 앞에 있는) 창으로
-        # 들어간다. 저장창을 다시 한번 맨 앞으로 가져와서, 혹시 사용자가 그
-        # 사이에 다른 창(탐색기 등)을 클릭해서 포커스가 넘어가 있었더라도
-        # Enter가 엉뚱한 곳으로 새는 걸 최대한 막는다.
+        # 저장창의 '파일 이름' 칸을 직접 조작해서 우리가 원하는 경로를 넣는
+        # 방식은 여러 번 사고가 났다 - 값 설정이 COM 에러로 실패 -> 예비로
+        # 그 칸을 클릭하는데 그 좌표가 낡아서 목록의 다른 파일을 잘못 클릭 ->
+        # 윈도우가 그걸 '이름 바꾸기' 시작으로 오인 -> 거기에 경로 문자열
+        # (콜론/역슬래시)을 넣으니 '파일 이름에 이 문자는 못 쓴다'는 오류가
+        # 반복해서 났다. 그래서 아예 그 칸을 절대 건드리지 않기로 바꿨다:
+        # 다팔자가 제안하는 기본 파일명 그대로 Enter만 눌러 저장시키고,
+        # 저장이 끝난 뒤 폴더에 새로 생긴 파일을 파이썬 os.replace()로
+        # 우리가 원하는 이름으로 바꾼다 - 이건 화면을 전혀 건드리지 않는
+        # 순수 파일시스템 작업이라 이런 종류의 사고 자체가 날 수가 없다.
         try:
-            save_win.set_focus()
+            before_files = {f for f in os.listdir(target_dir) if f.lower().endswith('.xlsx')}
         except Exception:
-            pass
-        # 저장 대화상자 안에는 Edit 컨트롤이 수십 개(주소창, 검색창, 사이드바
-        # 즐겨찾기 항목 등)까지 잡힐 수 있어서, '.xlsx가 들어있는 칸' 이나
-        # '마지막 칸' 같은 추측으로 고르면 실제로 검색창을 잘못 고르는 사고가
-        # 났었다. 윈도우 표준 저장 대화상자에서 파일이름 칸은 항상 고정된
-        # automation ID '1148'을 갖는다 (윈도우 공용 대화상자 컨트롤 ID) - 이걸로
-        # 먼저 정확히 찾고, 혹시 안 되면(버전 차이 등) 예전 방식을 예비로만 쓴다.
-        edit_ctrl = None
-        try:
-            edit_ctrl = save_win.child_window(auto_id='1148', control_type='Edit')
-            if not edit_ctrl.exists(timeout=2):
-                edit_ctrl = None
-        except Exception:
-            edit_ctrl = None
+            before_files = set()
 
-        if edit_ctrl is not None:
-            L("파일이름 칸을 고정 ID(1148)로 정확히 찾았습니다.")
-        else:
-            L("고정 ID로 못 찾아서 '.xlsx' 값이 들어있는 칸으로 재시도합니다...")
-            try:
-                edits = list(save_win.descendants(control_type='Edit'))
-                for e in edits:
-                    try:
-                        val = e.get_value()
-                    except Exception:
-                        try:
-                            val = e.window_text()
-                        except Exception:
-                            val = ''
-                    if '.xlsx' in val.lower():
-                        edit_ctrl = e
-                        break
-                if edit_ctrl is None:
-                    L(f"'.xlsx'가 포함된 칸도 못 찾았습니다 (Edit 컨트롤 {len(edits)}개 확인함) - 파일이름 칸 지정을 포기하고 다팔자 기본 파일명으로 진행합니다.")
-            except Exception as ex:
-                L(f'파일이름 입력칸 탐색 중 오류: {type(ex).__name__}: {ex}')
-
-        path_entered = False
-        if edit_ctrl is not None:
-            try:
-                edit_ctrl.set_edit_text(target_path)
-                path_entered = True
-            except Exception as e:
-                L(f"파일이름 칸에 직접 값 설정 실패({type(e).__name__}: {e}) - 키보드 입력으로 재시도...")
-                # 방금 실패한 edit_ctrl 참조는 낡았을 수 있으니(방금 값 설정이
-                # 실패한 이유가 그거일 가능성이 큼) 재사용하지 않고 새로 다시
-                # 찾는다. 그리고 그렇게 새로 찾은 게 진짜 '입력칸'이 맞는지
-                # control_type을 확인한 뒤에만 클릭한다 - 확인 없이 클릭하면
-                # 낡은 좌표가 목록의 파일 항목을 잘못 클릭해서 그 파일이
-                # '이름 바꾸기' 모드로 들어가버리는 사고가 실제로 있었다
-                # (거기에 경로 문자열을 치면 콜론/역슬래시 때문에 윈도우가
-                # '이름에 이 문자를 쓸 수 없다'는 오류창을 띄운다).
-                fresh_edit = None
-                try:
-                    fresh_edit = save_win.child_window(auto_id='1148', control_type='Edit')
-                    if not fresh_edit.exists(timeout=2):
-                        fresh_edit = None
-                    elif fresh_edit.element_info.control_type != 'Edit':
-                        L(f"새로 찾은 칸이 입력칸이 아니라({fresh_edit.element_info.control_type}) 안전을 위해 클릭을 건너뜁니다.")
-                        fresh_edit = None
-                except Exception:
-                    fresh_edit = None
-                if fresh_edit is None:
-                    L('입력칸을 다시 확실하게 찾지 못해서, 잘못된 곳을 클릭하는 위험을 피하려고 키보드 입력은 포기합니다.')
-                else:
-                    try:
-                        fresh_edit.click_input()
-                        time.sleep(0.2)
-                        fresh_edit.type_keys('^a', pause=0.05)
-                        fresh_edit.type_keys(_escape_keys(target_path), with_spaces=True, pause=0.01)
-                        path_entered = True
-                    except Exception as e2:
-                        L(f'키보드 입력도 실패했습니다: {type(e2).__name__}: {e2}')
-                    finally:
-                        _dismiss_invalid_filename_dialog(L)
-        else:
-            L('파일이름 입력칸을 못 찾았습니다.')
-
-        if not path_entered:
-            L('저장 경로 지정에 실패해서 다팔자가 제안한 기본 파일명/위치로 저장을 진행합니다.')
-        time.sleep(0.3)
-
-        # '저장(S)' 버튼을 이름으로 찾아 클릭하는 대신, 윈도우 표준 동작인
-        # Enter키로 기본 버튼(저장)을 실행한다 - 버튼 이름 매칭이 실패해도
-        # (실제로 실패한 적이 있었음) 항상 동작하는 훨씬 안정적인 방법이다.
-        _dismiss_invalid_filename_dialog(L)
+        L('저장창의 파일이름 칸은 건드리지 않고, 다팔자가 제안하는 기본 파일명 그대로 저장한 뒤 파이썬으로 안전하게 이름을 바꿉니다...')
         try:
             save_win.set_focus()
         except Exception:
             pass
         try:
-            # edit_ctrl로 Enter를 보내면 그게 낡은 참조일 때 엉뚱하게 실패하니,
-            # 이미 맨 앞으로 가져온 저장창 전체로 보내는 게 더 안전하다.
             save_win.type_keys('{ENTER}')
             L('Enter로 저장 실행.')
         except Exception as e:
@@ -681,18 +586,37 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         except Exception:
             pass
 
-        L('파일이 실제로 저장됐는지 확인하는 중...')
-        saved = False
+        def _find_new_xlsx():
+            try:
+                now_files = {f for f in os.listdir(target_dir) if f.lower().endswith('.xlsx')}
+            except Exception:
+                return None
+            candidates = []
+            for f in (now_files - before_files):
+                p = os.path.join(target_dir, f)
+                try:
+                    if (time.time() - os.path.getmtime(p)) < 90:
+                        candidates.append(p)
+                except Exception:
+                    continue
+            if not candidates:
+                return None
+            candidates.sort(key=os.path.getmtime, reverse=True)
+            return candidates[0]
+
+        L('새로 저장된 파일을 찾는 중...')
+        new_file_path = None
         for _ in range(20):
-            if os.path.exists(target_path) and (time.time() - os.path.getmtime(target_path)) < 60:
-                saved = True
+            new_file_path = _find_new_xlsx()
+            if new_file_path:
                 break
             time.sleep(1)
-        if not saved:
+
+        if new_file_path is None:
             # Enter가 다른 창(사용자가 그 사이 클릭한 다른 프로그램 등)으로 샜을
             # 수 있으니, 저장창이 아직 열려있다면 이번엔 '저장' 버튼을 직접 찾아서
             # 마지막으로 한 번 더 시도해본다.
-            L('아직 저장이 안 된 것 같습니다 - 저장창이 남아있으면 저장 버튼을 직접 클릭해서 재시도합니다...')
+            L('아직 새 파일을 못 찾았습니다 - 저장창이 남아있으면 저장 버튼을 직접 클릭해서 재시도합니다...')
             try:
                 try:
                     still_there = save_win.exists(timeout=2)
@@ -704,6 +628,7 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                     save_win.set_focus()
                     _click(save_win, '저장', 'Button', L)
                     time.sleep(1)
+                    _dismiss_invalid_filename_dialog(L)
                     try:
                         confirm = Desktop(backend='uia').window(title_re='.*(덮어쓰|같은 이름).*')
                         if confirm.exists(timeout=2):
@@ -711,17 +636,24 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                     except Exception:
                         pass
                     for _ in range(10):
-                        if os.path.exists(target_path) and (time.time() - os.path.getmtime(target_path)) < 60:
-                            saved = True
+                        new_file_path = _find_new_xlsx()
+                        if new_file_path:
                             break
                         time.sleep(1)
             except Exception as e:
                 L(f'재시도 중 오류: {type(e).__name__}: {e}')
-        if not saved:
-            L(f'저장된 파일을 끝내 못 찾았습니다: {target_path} (자동화 중 다른 창을 조작하면 Enter/클릭이 엉뚱한 곳으로 샐 수 있어요 - 자동화가 끝날 때까지 다른 창은 건드리지 말아주세요)')
+        if new_file_path is None:
+            L(f'저장된 파일을 끝내 못 찾았습니다: {target_dir} 폴더에 새 xlsx 파일이 안 보입니다 (자동화 중 다른 창을 조작하면 Enter/클릭이 엉뚱한 곳으로 샐 수 있어요 - 자동화가 끝날 때까지 다른 창은 건드리지 말아주세요)')
             return {'ok': False, 'log': log}
 
-        L(f'파일 저장 확인 완료: {target_path}')
+        try:
+            if os.path.exists(target_path):
+                os.remove(target_path)
+            os.replace(new_file_path, target_path)
+            L(f'파일 저장 확인 완료 - 원하는 이름으로 바꿨습니다: {target_path}')
+        except Exception as e:
+            L(f'파일은 저장됐지만 이름 바꾸기에 실패({type(e).__name__}: {e}) - 원래 이름 그대로 사용합니다: {new_file_path}')
+            target_path = new_file_path
 
         # 다팔자 자체가 저장 완료 후 '전체 주문관리 엑셀이 저장되었습니다' 같은
         # 확인 팝업을 추가로 띄운다. 이걸 안 닫아두면 다음번 '지금 수집' 실행이
