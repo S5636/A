@@ -242,6 +242,28 @@ def _click(win, title, control_type=None, log=None):
     ctrl.click_input()
 
 
+def _dismiss_invalid_filename_dialog(log=None):
+    """저장창의 파일 목록에서 이미 선택돼 있는 항목을 실수로 한 번 더 클릭하면
+    윈도우 탐색기가 그걸 '이름 바꾸기' 시작 신호로 받아들여서, 그 상태에서
+    경로 문자열(콜론/역슬래시 포함)을 입력하면 '파일 이름에는 다음 문자를
+    사용할 수 없습니다' 오류창이 뜬다. 이 오류가 뜬 시점엔 실제 파일은
+    아직 바뀌지 않은 상태(취소 대기)라, 확인을 눌러 닫아주기만 하면 안전하다."""
+    try:
+        dlg = Desktop(backend='uia').window(title_re='.*이름\\s*바꾸기.*')
+        if dlg.exists(timeout=1):
+            if log is not None:
+                log('실수로 파일 목록의 항목이 "이름 바꾸기" 모드로 들어가 오류창이 떴습니다 (파일은 바뀌지 않았습니다) - 닫고 계속 진행합니다.')
+            try:
+                _click(dlg, '확인', 'Button', log)
+            except Exception:
+                dlg.type_keys('{ENTER}')
+            time.sleep(0.3)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.xlsx', wait_after_collect=10):
     log = []
 
@@ -534,6 +556,11 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             try:
                 os.remove(target_path)
                 L(f'기존에 남아있던 같은 이름의 파일을 먼저 정리했습니다: {target_path}')
+                # 방금 지운 파일이 저장창 뒤에 열려있는 폴더 목록에 반영되면서
+                # 탐색기가 목록을 새로고침하는데, 그 직후에 컨트롤을 붙잡으면
+                # 막 새로고침되는 중이라 참조가 곧바로 무효화되는 경우가 있었다.
+                # 잠깐 안정될 시간을 준다.
+                time.sleep(0.7)
             except Exception as e:
                 L(f'기존 파일 정리 실패(무시하고 진행): {type(e).__name__}: {e}')
 
@@ -590,14 +617,37 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                 path_entered = True
             except Exception as e:
                 L(f"파일이름 칸에 직접 값 설정 실패({type(e).__name__}: {e}) - 키보드 입력으로 재시도...")
+                # 방금 실패한 edit_ctrl 참조는 낡았을 수 있으니(방금 값 설정이
+                # 실패한 이유가 그거일 가능성이 큼) 재사용하지 않고 새로 다시
+                # 찾는다. 그리고 그렇게 새로 찾은 게 진짜 '입력칸'이 맞는지
+                # control_type을 확인한 뒤에만 클릭한다 - 확인 없이 클릭하면
+                # 낡은 좌표가 목록의 파일 항목을 잘못 클릭해서 그 파일이
+                # '이름 바꾸기' 모드로 들어가버리는 사고가 실제로 있었다
+                # (거기에 경로 문자열을 치면 콜론/역슬래시 때문에 윈도우가
+                # '이름에 이 문자를 쓸 수 없다'는 오류창을 띄운다).
+                fresh_edit = None
                 try:
-                    edit_ctrl.click_input()
-                    time.sleep(0.2)
-                    edit_ctrl.type_keys('^a', pause=0.05)
-                    edit_ctrl.type_keys(_escape_keys(target_path), with_spaces=True, pause=0.01)
-                    path_entered = True
-                except Exception as e2:
-                    L(f'키보드 입력도 실패했습니다: {type(e2).__name__}: {e2}')
+                    fresh_edit = save_win.child_window(auto_id='1148', control_type='Edit')
+                    if not fresh_edit.exists(timeout=2):
+                        fresh_edit = None
+                    elif fresh_edit.element_info.control_type != 'Edit':
+                        L(f"새로 찾은 칸이 입력칸이 아니라({fresh_edit.element_info.control_type}) 안전을 위해 클릭을 건너뜁니다.")
+                        fresh_edit = None
+                except Exception:
+                    fresh_edit = None
+                if fresh_edit is None:
+                    L('입력칸을 다시 확실하게 찾지 못해서, 잘못된 곳을 클릭하는 위험을 피하려고 키보드 입력은 포기합니다.')
+                else:
+                    try:
+                        fresh_edit.click_input()
+                        time.sleep(0.2)
+                        fresh_edit.type_keys('^a', pause=0.05)
+                        fresh_edit.type_keys(_escape_keys(target_path), with_spaces=True, pause=0.01)
+                        path_entered = True
+                    except Exception as e2:
+                        L(f'키보드 입력도 실패했습니다: {type(e2).__name__}: {e2}')
+                    finally:
+                        _dismiss_invalid_filename_dialog(L)
         else:
             L('파일이름 입력칸을 못 찾았습니다.')
 
@@ -608,20 +658,21 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         # '저장(S)' 버튼을 이름으로 찾아 클릭하는 대신, 윈도우 표준 동작인
         # Enter키로 기본 버튼(저장)을 실행한다 - 버튼 이름 매칭이 실패해도
         # (실제로 실패한 적이 있었음) 항상 동작하는 훨씬 안정적인 방법이다.
+        _dismiss_invalid_filename_dialog(L)
         try:
             save_win.set_focus()
         except Exception:
             pass
         try:
-            if edit_ctrl is not None:
-                edit_ctrl.type_keys('{ENTER}')
-            else:
-                save_win.type_keys('{ENTER}')
+            # edit_ctrl로 Enter를 보내면 그게 낡은 참조일 때 엉뚱하게 실패하니,
+            # 이미 맨 앞으로 가져온 저장창 전체로 보내는 게 더 안전하다.
+            save_win.type_keys('{ENTER}')
             L('Enter로 저장 실행.')
         except Exception as e:
             L(f'Enter 입력 실패({type(e).__name__}: {e}) - 저장 버튼을 직접 찾아 클릭 시도...')
             _click(save_win, '저장', 'Button', L)
         time.sleep(1)
+        _dismiss_invalid_filename_dialog(L)
         try:
             confirm = Desktop(backend='uia').window(title_re='.*(덮어쓰|같은 이름).*')
             if confirm.exists(timeout=2):
