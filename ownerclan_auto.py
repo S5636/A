@@ -69,11 +69,16 @@ def setup_login(start_url, wait_seconds=300):
             page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
             L('브라우저 창에서 오너클랜에 직접 로그인해주세요. 로그인하시면 자동으로 감지해서 창을 닫습니다 (최대 5분 대기).')
 
+            # 로그인 후 마이페이지 영역 제목이 한글 '마이페이지'가 아니라
+            # 영문 'MY PAGE'로 표시된다는 걸 사용자 스크린샷으로 확인했다 - 한글
+            # 텍스트로만 찾다가 실제로 로그인해도 "로그인 상태가 아니다"로 계속
+            # 잘못 판정하는 사고가 났었다. '안녕하세요 OOO님!' 인사말도 로그인
+            # 상태에서만 보이는 문구라 같이 확인한다.
             logged_in = False
             deadline = time.time() + wait_seconds
             while time.time() < deadline:
                 try:
-                    if page.locator('text=마이페이지').count() > 0 or page.locator('text=로그아웃').count() > 0:
+                    if page.get_by_text('MY PAGE', exact=False).count() > 0 or page.get_by_text('안녕하세요', exact=False).count() > 0:
                         logged_in = True
                         break
                 except Exception:
@@ -146,8 +151,27 @@ def collect_and_upload(order_url, save_folder=None, save_filename='오너클랜.
             page.goto(order_url, wait_until='domcontentloaded', timeout=30000)
             page.wait_for_timeout(1500)
 
-            if page.locator('text=로그인').count() > 0 and page.locator('text=마이페이지').count() == 0:
+            # setup_login()과 같은 기준(영문 'MY PAGE' / '안녕하세요' 인사말)으로
+            # 로그인 여부를 확인한다. 이전엔 한글 '마이페이지'로 찾다가 실제
+            # 화면 문구('MY PAGE')와 안 맞아서 로그인해놓고도 계속 '로그인 안
+            # 됨'으로 잘못 판정하는 사고가 있었다.
+            logged_in = page.get_by_text('MY PAGE', exact=False).count() > 0 or page.get_by_text('안녕하세요', exact=False).count() > 0
+            if not logged_in:
+                try:
+                    page_title = page.title()
+                except Exception:
+                    page_title = '(제목 조회 실패)'
+                try:
+                    current_url = page.url
+                except Exception:
+                    current_url = '(주소 조회 실패)'
+                try:
+                    body_text = page.locator('body').inner_text()[:300]
+                except Exception:
+                    body_text = '(본문 조회 실패)'
                 L("로그인 상태가 아닌 것 같습니다 (로그인 유지기간이 끝났을 수 있어요) - '오너클랜 로그인 설정'을 다시 눌러 재로그인해주세요.")
+                L(f"진단정보 - 페이지 제목: '{page_title}' / 주소: {current_url}")
+                L(f"진단정보 - 화면에 보이는 글자(앞부분 300자): {body_text}")
                 context.close()
                 return {'ok': False, 'log': log}
 
