@@ -4,38 +4,115 @@
 
 다팔자는 설치형 윈도우 프로그램이라 화면 좌표를 더듬는 방식(pywinauto)이
 필요했지만, 오너클랜은 그냥 웹사이트라서 Playwright로 HTML 요소를 이름/텍스트로
-직접 찾아 조작한다 - 다팔자 자동화 때 겪은 "버튼을 못 찾는다" 류 문제가 훨씬
-덜 발생하고, 화면에 아무것도 안 띄우고(headless) 완전히 백그라운드로 돌릴 수
-있다는 게 가장 큰 차이다.
+직접 찾아 조작한다.
 
-로그인은 최초 1회만 눈에 보이는(headed) 브라우저로 사용자가 직접 로그인하면,
-그 로그인 상태(쿠키 등)를 이 파일 옆의 ownerclan_profile 폴더에 저장해서
-재사용한다. 그 다음부터는 화면에 안 보이는 브라우저로 백그라운드에서 동작한다.
+로그인 세션 유지 방식(중요): 처음엔 "로그인 → 브라우저 닫기 → 나중에 그 프로필
+폴더로 새 브라우저 열기"로 세션을 재사용하려 했는데, 실제로 테스트해보니 로그인
+직후에 브라우저를 완전히 닫으면(프로세스 종료) 오너클랜 로그인 세션 자체가
+사라지는 걸로 확인됐다 - 이 사이트는 순수 세션 쿠키를 쓰는 것으로 보이고, 로그인
+화면에도 '로그인 상태 유지' 같은 체크박스가 없다. 그래서 브라우저 프로세스를
+아예 닫지 않고, 마진보드 프로그램(app.py)이 켜져있는 동안 계속 그 브라우저를
+살려두는 방식으로 바꿨다: 로그인 성공 후 창을 닫는 대신 최소화만 해서 백그라운드로
+남겨두고, '지금 수집'을 누를 때마다 그 살아있는 창을 그대로 재사용한다. 마진보드
+프로그램을 껐다 켜면(=이 브라우저 프로세스도 같이 죽으므로) 로그인을 다시 한 번
+해줘야 한다 - 매번 클릭할 때마다 로그인이 풀리는 것보다는 훨씬 낫다.
 
 주의: ownerclan_profile 폴더는 로그인 세션이 들어있는 사용자의 로컬 상태라,
 shop_data.db/fees_config.json/settings.json과 마찬가지로 업데이트 zip을 만들
-때 절대 포함하면 안 된다 (포함하면 로그인 세션이 날아가서 매번 다시 로그인해야
-함)."""
+때 절대 포함하면 안 된다."""
+import atexit
 import os
 import platform
+import threading
 import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile')
 
-ORDER_PAGE_PATH_HINTS = ('orderShippingSearch', 'order', '주문')
+_lock = threading.Lock()
+_state = {'pw': None, 'context': None, 'page': None}
 
 
 def _friendly_error(e):
     return f'{type(e).__name__}: {e}'
 
 
+def _cleanup_locked():
+    """이미 _lock을 잡은 상태에서만 호출한다."""
+    try:
+        if _state['context'] is not None:
+            _state['context'].close()
+    except Exception:
+        pass
+    try:
+        if _state['pw'] is not None:
+            _state['pw'].stop()
+    except Exception:
+        pass
+    _state['pw'] = None
+    _state['context'] = None
+    _state['page'] = None
+
+
+@atexit.register
+def _cleanup_on_exit():
+    with _lock:
+        _cleanup_locked()
+
+
+def _get_or_launch_page(L, launch_if_missing=True):
+    """이미 살아있는 브라우저 페이지가 있으면 그대로 재사용하고, 없으면(그리고
+    launch_if_missing이면) 새로 띄운다. 살아있는지는 실제로 명령을 하나 날려봐서
+    확인한다 - 사용자가 그 창을 실수로 직접 닫아버렸을 수도 있어서."""
+    with _lock:
+        if _state['page'] is not None:
+            try:
+                _state['page'].evaluate('1')
+                return _state['page']
+            except Exception:
+                L('이전에 열려있던 브라우저 창이 닫혀있어서 다시 엽니다...')
+                _cleanup_locked()
+
+        if not launch_if_missing:
+            return None
+
+        from playwright.sync_api import sync_playwright
+        os.makedirs(PROFILE_DIR, exist_ok=True)
+        pw = sync_playwright().start()
+        context = pw.chromium.launch_persistent_context(
+            PROFILE_DIR, headless=False,
+            args=['--disable-blink-features=AutomationControlled'],
+            no_viewport=True,
+        )
+        page = context.pages[0] if context.pages else context.new_page()
+        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        page.on('dialog', lambda d: d.accept())
+        _state['pw'] = pw
+        _state['context'] = context
+        _state['page'] = page
+        return page
+
+
+def _set_window_state(page, state, L=None):
+    """창을 닫지 않고 최소화(minimized)/복원(normal)만 한다 - 로그인 세션은
+    브라우저 프로세스가 살아있는 한 유지되므로, 닫는 대신 이 방식으로 화면에
+    보였다 안 보였다만 시킨다."""
+    try:
+        cdp = page.context.new_cdp_session(page)
+        info = cdp.send('Browser.getWindowForTarget')
+        cdp.send('Browser.setWindowBounds', {
+            'windowId': info['windowId'],
+            'bounds': {'windowState': state},
+        })
+    except Exception as e:
+        if L is not None:
+            L(f'창 상태 변경에는 실패했지만 로그인/수집 자체엔 영향 없습니다: {_friendly_error(e)}')
+
+
 def setup_login(start_url, wait_seconds=300):
-    """화면에 보이는(headed) 브라우저를 띄워서 사용자가 직접 로그인하게 하고,
-    로그인 상태를 저장한다. 로그인 완료를 자동으로 감지하면 바로 닫고, 감지가
-    안 되더라도 wait_seconds가 지나면 그때까지의 상태를 그대로 저장하고 닫는다
-    (사용자가 이미 로그인해놓고 다른 걸 하고 있었을 수도 있으니, 못 찾았다고
-    실패 처리하지 않는다)."""
+    """브라우저 창을 열어서(이미 열려있으면 그 창을 그대로 씀) 사용자가 직접
+    로그인하게 하고, 로그인 완료를 감지하면 그 창을 닫지 않고 최소화만 해서
+    백그라운드에 계속 살려둔다."""
     log = []
 
     def L(msg):
@@ -50,47 +127,41 @@ def setup_login(start_url, wait_seconds=300):
         return {'ok': False, 'log': log}
 
     try:
-        from playwright.sync_api import sync_playwright
+        import playwright  # noqa: F401
     except ImportError:
         L("playwright가 설치되어 있지 않습니다. START.bat을 다시 실행하면 자동으로 설치됩니다.")
         return {'ok': False, 'log': log}
 
     try:
-        os.makedirs(PROFILE_DIR, exist_ok=True)
-        with sync_playwright() as p:
-            L('로그인용 브라우저 창을 여는 중... (창이 뜨면 직접 로그인해주세요)')
-            context = p.chromium.launch_persistent_context(
-                PROFILE_DIR, headless=False,
-                args=['--start-maximized', '--disable-blink-features=AutomationControlled'],
-                no_viewport=True,
-            )
-            page = context.pages[0] if context.pages else context.new_page()
-            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
-            L('★ 지금 새로 뜬 이 창(평소 쓰시는 크롬 창이 아니라 방금 새로 뜬 별도 창)에서 직접 로그인해주세요. 평소 쓰는 브라우저에 로그인해도 여기엔 반영되지 않습니다. 로그인하시면 자동으로 감지해서 창을 닫습니다 (최대 5분 대기).')
+        L('로그인용 브라우저 창을 여는 중... (이미 백그라운드에 떠있었다면 그 창을 다시 씁니다)')
+        page = _get_or_launch_page(L)
+        page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
+        # 이전에 최소화해서 백그라운드로 보내둔 창일 수 있으니, 로그인하려면
+        # 다시 화면에 보이게 복원한다.
+        _set_window_state(page, 'normal', L)
+        L('★ 지금 새로 뜨거나 앞으로 나온 이 창(평소 쓰시는 크롬 창이 아닙니다)에서 직접 로그인해주세요. 로그인하시면 자동으로 감지해서 창을 최소화하고 백그라운드로 보냅니다 (최대 5분 대기).')
 
-            # 로그인 후 마이페이지 영역 제목이 한글 '마이페이지'가 아니라
-            # 영문 'MY PAGE'로 표시된다는 걸 사용자 스크린샷으로 확인했다 - 한글
-            # 텍스트로만 찾다가 실제로 로그인해도 "로그인 상태가 아니다"로 계속
-            # 잘못 판정하는 사고가 났었다. '안녕하세요 OOO님!' 인사말도 로그인
-            # 상태에서만 보이는 문구라 같이 확인한다.
-            logged_in = False
-            deadline = time.time() + wait_seconds
-            while time.time() < deadline:
-                try:
-                    if page.get_by_text('MY PAGE', exact=False).count() > 0 or page.get_by_text('안녕하세요', exact=False).count() > 0:
-                        logged_in = True
-                        break
-                except Exception:
-                    pass
-                time.sleep(2)
+        # 로그인 후 마이페이지 영역 제목이 한글 '마이페이지'가 아니라 영문
+        # 'MY PAGE'로 표시된다는 걸 사용자 스크린샷으로 확인했다 - 한글로만
+        # 찾다가 로그인해도 계속 '안 됨'으로 잘못 판정하는 사고가 있었다.
+        logged_in = False
+        deadline = time.time() + wait_seconds
+        while time.time() < deadline:
+            try:
+                if page.get_by_text('MY PAGE', exact=False).count() > 0 or page.get_by_text('안녕하세요', exact=False).count() > 0:
+                    logged_in = True
+                    break
+            except Exception:
+                pass
+            time.sleep(2)
 
-            if logged_in:
-                L('로그인이 확인됐습니다. 로그인 상태를 저장하고 창을 닫습니다.')
-            else:
-                L(f'{wait_seconds}초 동안 로그인 완료를 자동으로 확인하지 못했습니다 - 그래도 지금까지의 상태를 저장합니다 (이미 로그인하셨다면 문제 없습니다).')
+        if logged_in:
+            L('로그인이 확인됐습니다. 창은 닫지 않고 최소화해서 백그라운드로 보냅니다 (마진보드 프로그램이 켜져있는 동안 로그인이 유지됩니다).')
+            _set_window_state(page, 'minimized', L)
+        else:
+            L(f'{wait_seconds}초 동안 로그인 완료를 자동으로 확인하지 못했습니다 - 이미 로그인하셨다면 문제 없으니 그냥 최소화합니다.')
+            _set_window_state(page, 'minimized', L)
 
-            context.close()
         return {'ok': logged_in, 'log': log}
     except Exception as e:
         L(f'로그인 설정 중 오류 발생 - {_friendly_error(e)}')
@@ -98,8 +169,8 @@ def setup_login(start_url, wait_seconds=300):
 
 
 def collect_and_upload(order_url, save_folder=None, save_filename='오너클랜.xlsx'):
-    """저장된 로그인 상태로 백그라운드(headless) 브라우저를 띄워서 조회기간을
-    1개월로 맞추고 엑셀다운로드를 눌러 발주내역 파일을 받는다."""
+    """로그인 설정 때 띄워놓고 백그라운드로 보낸 그 브라우저 창을 그대로 재사용해서
+    조회기간을 1개월로 맞추고 엑셀다운로드를 눌러 발주내역 파일을 받는다."""
     log = []
 
     def L(msg):
@@ -113,14 +184,15 @@ def collect_and_upload(order_url, save_folder=None, save_filename='오너클랜.
         L("오너클랜 주소가 설정되어 있지 않습니다. '데이터 업로드' 탭에서 '바로가기 주소 설정'으로 오너클랜 발주내역 페이지 주소를 먼저 저장해주세요.")
         return {'ok': False, 'log': log}
 
-    if not os.path.isdir(PROFILE_DIR):
-        L("아직 오너클랜 로그인이 설정되어 있지 않습니다. 먼저 '오너클랜 로그인 설정'을 눌러 1회 로그인해주세요.")
-        return {'ok': False, 'log': log}
-
     try:
-        from playwright.sync_api import sync_playwright
+        import playwright  # noqa: F401
     except ImportError:
         L("playwright가 설치되어 있지 않습니다. START.bat을 다시 실행하면 자동으로 설치됩니다.")
+        return {'ok': False, 'log': log}
+
+    page = _get_or_launch_page(L, launch_if_missing=False)
+    if page is None:
+        L("아직 로그인된 브라우저가 없습니다 - 먼저 '오너클랜 로그인 설정'을 눌러 로그인해주세요. (마진보드 프로그램을 새로 켰다면 로그인을 다시 한 번 해주셔야 합니다.)")
         return {'ok': False, 'log': log}
 
     target_dir = save_folder or os.path.join(os.path.expanduser('~'), 'Downloads')
@@ -128,79 +200,52 @@ def collect_and_upload(order_url, save_folder=None, save_filename='오너클랜.
     target_path = os.path.join(target_dir, save_filename)
 
     try:
-        with sync_playwright() as p:
-            L('오너클랜 페이지를 여는 중 (백그라운드)...')
-            # headless=True(완전히 안 보이는 모드)로 실행했더니 오너클랜이 이걸
-            # 자동화 프로그램으로 감지해서 로그인 세션을 계속 무효화시키고 매번
-            # 비밀번호를 다시 요구하는 문제가 실제로 발생했다 (headless 크롬은
-            # navigator.webdriver 같은 값으로 쉽게 구분됨). 그래서 화면에는 안
-            # 보이지만(창을 화면 밖 좌표로 띄움) 기술적으로는 '진짜 브라우저'로
-            # 인식되는 방식으로 바꿨다 - 로그인 세션이 훨씬 안정적으로 유지된다.
-            context = p.chromium.launch_persistent_context(
-                PROFILE_DIR, headless=False,
-                args=[
-                    '--window-position=-32000,-32000',
-                    '--window-size=1280,900',
-                    '--disable-blink-features=AutomationControlled',
-                ],
-                no_viewport=True,
-            )
-            page = context.pages[0] if context.pages else context.new_page()
-            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            page.on('dialog', lambda d: d.accept())
-            page.goto(order_url, wait_until='domcontentloaded', timeout=30000)
+        L('오너클랜 페이지를 여는 중 (백그라운드, 로그인 설정 때 열어둔 창을 그대로 씁니다)...')
+        page.goto(order_url, wait_until='domcontentloaded', timeout=30000)
+        page.wait_for_timeout(1500)
+
+        logged_in = page.get_by_text('MY PAGE', exact=False).count() > 0 or page.get_by_text('안녕하세요', exact=False).count() > 0
+        if not logged_in:
+            try:
+                page_title = page.title()
+            except Exception:
+                page_title = '(제목 조회 실패)'
+            try:
+                current_url = page.url
+            except Exception:
+                current_url = '(주소 조회 실패)'
+            try:
+                body_text = page.locator('body').inner_text()[:300]
+            except Exception:
+                body_text = '(본문 조회 실패)'
+            L("로그인 상태가 아닌 것 같습니다 - 페이지가 로그인 폼으로 넘어갔습니다. '오너클랜 로그인 설정'을 다시 눌러 재로그인해주세요.")
+            L(f"진단정보 - 페이지 제목: '{page_title}' / 주소: {current_url}")
+            L(f"진단정보 - 화면에 보이는 글자(앞부분 300자): {body_text}")
+            return {'ok': False, 'log': log}
+
+        L("조회기간을 '1개월'로 설정...")
+        try:
+            page.get_by_text('1개월', exact=True).first.click(timeout=10000)
+        except Exception as e:
+            L(f"'1개월' 버튼을 못 찾았습니다 (기본 기간으로 진행합니다): {_friendly_error(e)}")
+        page.wait_for_timeout(500)
+
+        try:
+            page.get_by_text('조회하기', exact=True).first.click(timeout=10000)
+            L("'조회하기' 버튼 클릭 완료.")
             page.wait_for_timeout(1500)
+        except Exception as e:
+            L(f"'조회하기' 버튼을 못 찾았습니다 (그냥 다음 단계로 진행합니다): {_friendly_error(e)}")
 
-            # setup_login()과 같은 기준(영문 'MY PAGE' / '안녕하세요' 인사말)으로
-            # 로그인 여부를 확인한다. 이전엔 한글 '마이페이지'로 찾다가 실제
-            # 화면 문구('MY PAGE')와 안 맞아서 로그인해놓고도 계속 '로그인 안
-            # 됨'으로 잘못 판정하는 사고가 있었다.
-            logged_in = page.get_by_text('MY PAGE', exact=False).count() > 0 or page.get_by_text('안녕하세요', exact=False).count() > 0
-            if not logged_in:
-                try:
-                    page_title = page.title()
-                except Exception:
-                    page_title = '(제목 조회 실패)'
-                try:
-                    current_url = page.url
-                except Exception:
-                    current_url = '(주소 조회 실패)'
-                try:
-                    body_text = page.locator('body').inner_text()[:300]
-                except Exception:
-                    body_text = '(본문 조회 실패)'
-                L("로그인 상태가 아닌 것 같습니다 - 페이지가 로그인 폼으로 넘어갔습니다. '오너클랜 로그인 설정'을 다시 눌러 재로그인해주세요. 이번엔 로그인 화면에 '로그인 상태 유지'나 '자동로그인' 같은 체크박스가 있으면 꼭 체크해주세요 - 체크 안 하면 세션이 브라우저 창을 닫는 순간 사라져서 매번 다시 로그인해야 할 수 있습니다.")
-                L(f"진단정보 - 페이지 제목: '{page_title}' / 주소: {current_url}")
-                L(f"진단정보 - 화면에 보이는 글자(앞부분 300자): {body_text}")
-                context.close()
-                return {'ok': False, 'log': log}
-
-            L("조회기간을 '1개월'로 설정...")
-            try:
-                page.get_by_text('1개월', exact=True).first.click(timeout=10000)
-            except Exception as e:
-                L(f"'1개월' 버튼을 못 찾았습니다 (기본 기간으로 진행합니다): {_friendly_error(e)}")
-            page.wait_for_timeout(500)
-
-            try:
-                page.get_by_text('조회하기', exact=True).first.click(timeout=10000)
-                L("'조회하기' 버튼 클릭 완료.")
-                page.wait_for_timeout(1500)
-            except Exception as e:
-                L(f"'조회하기' 버튼을 못 찾았습니다 (그냥 다음 단계로 진행합니다): {_friendly_error(e)}")
-
-            L("'엑셀다운로드' 버튼 클릭 및 다운로드 대기...")
-            try:
-                with page.expect_download(timeout=60000) as download_info:
-                    page.get_by_text('엑셀다운로드', exact=True).first.click(timeout=10000)
-                download = download_info.value
-                download.save_as(target_path)
-            except Exception as e:
-                L(f"엑셀 다운로드에 실패했습니다: {_friendly_error(e)}")
-                context.close()
-                return {'ok': False, 'log': log}
-
-            context.close()
+        L("'엑셀다운로드' 버튼 클릭 및 다운로드 대기...")
+        try:
+            with page.expect_download(timeout=60000) as download_info:
+                page.get_by_text('엑셀다운로드', exact=True).first.click(timeout=10000)
+            download = download_info.value
+            download.save_as(target_path)
+        except Exception as e:
+            L(f"엑셀 다운로드에 실패했습니다: {_friendly_error(e)}")
+            return {'ok': False, 'log': log}
 
         if not os.path.exists(target_path):
             L(f'다운로드는 진행됐는데 파일을 못 찾았습니다: {target_path}')
