@@ -47,9 +47,13 @@ def _find_hwnds_by_class(class_name, exclude_handles=None):
 
 
 def _wrap_hwnd_uia(hwnd):
+    # UIAElementInfo의 실제 생성자 매개변수 이름은 'handle'이 아니라
+    # 'handle_or_elem'이다 (이걸 몰라서 handle=hwnd로 호출했다가 매 시도마다
+    # TypeError가 나서 저장창을 찾고도 못 쓰는 사고가 실제로 발생했다).
+    # 위치 인자로 넘기면 pywinauto 버전별 매개변수 이름 차이와도 상관없다.
     from pywinauto.uia_element_info import UIAElementInfo
     from pywinauto.controls.uiawrapper import UIAWrapper
-    return UIAWrapper(UIAElementInfo(handle=hwnd))
+    return UIAWrapper(UIAElementInfo(hwnd))
 
 
 def _escape_keys(s):
