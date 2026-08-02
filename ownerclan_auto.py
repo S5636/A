@@ -122,6 +122,36 @@ def _mark_profile_clean_exit():
         pass
 
 
+def _kill_stray_browser_processes(L=None):
+    """이 프로그램 전용 프로필(PROFILE_DIR)로 떠 있는 크롬 프로세스가 있으면
+    전부 종료한다. 마진보드를 새 버전으로 재시작할 때 이전 파이썬 프로세스가
+    브라우저를 정상적으로 안 닫고 죽으면, 그 크롬이 고아 프로세스로 남아서
+    다음 실행이 새로 띄우려 해도 그 낡은 프로세스에 그대로 붙어버리는 사고가
+    반복됐다(비정상종료 복원 알림이 계속 뜨고, 방금 고친 코드가 전혀 반영 안
+    된 낡은 창을 계속 쓰게 됨). --user-data-dir에 이 프로그램 전용 폴더
+    경로가 들어있는 chrome 프로세스만 정확히 골라서 종료하므로, 사용자가
+    평소 쓰는 크롬은 절대 안 건드린다."""
+    try:
+        import psutil
+    except ImportError:
+        return
+    target = os.path.normcase(os.path.abspath(PROFILE_DIR))
+    killed = 0
+    for proc in psutil.process_iter(['name', 'cmdline']):
+        try:
+            name = (proc.info.get('name') or '').lower()
+            if 'chrome' not in name:
+                continue
+            cmdline = proc.info.get('cmdline') or []
+            if any(target in os.path.normcase(arg) for arg in cmdline):
+                proc.kill()
+                killed += 1
+        except Exception:
+            continue
+    if killed and L is not None:
+        L(f'이전에 남아있던 오너클랜 전용 크롬 프로세스 {killed}개를 정리하고 새로 띄웁니다.')
+
+
 def _get_or_launch_page(L, launch_if_missing=True):
     """반드시 워커 스레드 안에서만 호출한다. 이미 살아있는 브라우저 페이지가
     있으면 그대로 재사용하고, 없으면(그리고 launch_if_missing이면) 새로 띄운다."""
@@ -139,6 +169,10 @@ def _get_or_launch_page(L, launch_if_missing=True):
 
     from playwright.sync_api import sync_playwright
     os.makedirs(PROFILE_DIR, exist_ok=True)
+    # 지금 이 파이썬 프로세스 안에서는 브라우저를 한 번도 띄운 적이 없는데도
+    # 여기 도달했다는 건, 이전 실행(이전 버전 등)이 남긴 고아 크롬 프로세스가
+    # 있을 수 있다는 뜻이다 - 새로 띄우기 전에 먼저 정리한다.
+    _kill_stray_browser_processes(L)
     _mark_profile_clean_exit()
     pw = sync_playwright().start()
     # 화면 밖 좌표(--window-position=-32000,-32000)에 띄우는 방법도 써봤는데,

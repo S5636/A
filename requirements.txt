@@ -4,3 +4,4 @@ openpyxl>=3.1
 xlrd>=2.0.1
 pywinauto>=0.6.8; sys_platform == 'win32'
 playwright>=1.40
+psutil>=5.9
