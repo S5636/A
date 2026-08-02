@@ -67,7 +67,7 @@ def setup_login(start_url, wait_seconds=300):
             page = context.pages[0] if context.pages else context.new_page()
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
-            L('브라우저 창에서 오너클랜에 직접 로그인해주세요. 로그인하시면 자동으로 감지해서 창을 닫습니다 (최대 5분 대기).')
+            L('★ 지금 새로 뜬 이 창(평소 쓰시는 크롬 창이 아니라 방금 새로 뜬 별도 창)에서 직접 로그인해주세요. 평소 쓰는 브라우저에 로그인해도 여기엔 반영되지 않습니다. 로그인하시면 자동으로 감지해서 창을 닫습니다 (최대 5분 대기).')
 
             # 로그인 후 마이페이지 영역 제목이 한글 '마이페이지'가 아니라
             # 영문 'MY PAGE'로 표시된다는 걸 사용자 스크린샷으로 확인했다 - 한글
