@@ -406,42 +406,45 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         time.sleep(2)
 
         L('파일 저장 대화상자를 찾는 중...')
-        # 제목으로 찾는 방식(정확한 제목이든 느슨한 정규식이든)은 사용자가 이미
-        # 열어둔 다른 탐색기 창(예: 압축파일을 미리 열어본 창)을 잘못 잡는 사고가
-        # 반복됐다. 그래서 제목이 뭐든 상관없이, '전체 다운로드'를 누르기 직전에
-        # 이미 열려있던 창(pre_download_handles)은 아예 후보에서 제외하고, 그
-        # 이후에 새로 나타난 창만 저장창 후보로 삼는다 - 기존 창을 잘못 잡는 게
-        # 구조적으로 불가능해진다.
+        # 제목이 뭐든 상관없이 '이미 열려있던 창을 잘못 잡는' 사고가 여러 번
+        # 반복됐다 (사용자가 미리 열어둔 다운로드 폴더 탐색기 창 등). 그래서 이제
+        # '다운로드/저장'처럼 느슨한 제목으로 아무 창이나 잡는 최후수단은 코드에서
+        # 완전히 없앴다 - 그런 fallback이 있으면 결국 또 엉뚱한 창을 잡게 된다.
+        # 대신 두 가지 안전한 방법만 같이, 더 오래(최대 60초) 반복해서 확인한다:
+        # (1) 다운로드 클릭 전에는 없었던 '새로 생긴 창', (2) 정확한 제목(대소문자
+        # 무관)에 맞는 창. 이 둘 다 실패하면 억지로 아무 창이나 잡지 않고 그냥
+        # 실패로 끝낸다 - 틀린 창을 잡고 진행하는 것보다 훨씬 안전하다.
         save_win = None
-        diff_error = None
-        for _ in range(30):
+        for i in range(60):
             try:
                 new_windows = [w for w in Desktop(backend='uia').windows()
                                 if w.handle not in pre_download_handles]
-            except Exception as e:
+            except Exception:
                 new_windows = []
-                diff_error = f'{type(e).__name__}: {e}'
             if new_windows:
-                # 새로 생긴 창이 여러 개면 그 중 이름에 저장/다운로드/엑셀이
-                # 들어간 걸 우선한다.
                 named = [w for w in new_windows
                          if any(k in w.window_text() for k in ('다운로드', '저장', '엑셀'))]
                 save_win = named[0] if named else new_windows[0]
                 L(f"새로 나타난 창 발견: '{save_win.window_text()}' - 이걸 저장창으로 사용합니다.")
                 break
+            try:
+                titled = Desktop(backend='uia').window(title_re='(?i).*주문.*(엑셀|excel).*다운로드.*')
+                if titled.exists(timeout=0):
+                    save_win = titled
+                    L(f"정확한 제목으로 저장창 발견: '{save_win.window_text()}'.")
+                    break
+            except Exception:
+                pass
+            if i == 20:
+                try:
+                    all_titles = [w.window_text() for w in Desktop(backend='uia').windows() if w.window_text().strip()]
+                except Exception as e:
+                    all_titles = [f'(조회 실패: {e})']
+                L(f'아직 저장창을 못 찾았습니다 (20초 경과). 지금 열려있는 창 제목들: {all_titles}')
             time.sleep(1)
         if save_win is None:
-            if diff_error is not None:
-                L(f'새 창 탐지 중 오류가 반복됐습니다: {diff_error}')
-            try:
-                all_titles = [w.window_text() for w in Desktop(backend='uia').windows() if w.window_text().strip()]
-            except Exception as e:
-                all_titles = [f'(조회 실패: {e})']
-            L(f"새로 나타난 창을 못 찾았습니다. 지금 열려있는 창 제목들: {all_titles}")
-            L("제목 매칭(대소문자 구분 없이)으로 마지막 시도를 합니다...")
-            save_win = Desktop(backend='uia').window(title_re='(?i).*주문.*(엑셀|excel).*다운로드.*')
-            if not save_win.exists(timeout=3):
-                save_win = Desktop(backend='uia').window(title_re='.*(다운로드|저장).*')
+            L('60초 안에 저장창을 못 찾았습니다 - 엉뚱한 창을 잘못 잡느니 여기서 멈춥니다.')
+            raise RuntimeError('저장 대화상자를 찾지 못했습니다.')
         save_win.wait('visible', timeout=30)
 
         target_dir = save_folder or os.path.join(os.path.expanduser('~'), 'Downloads')
@@ -458,32 +461,41 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             save_win.set_focus()
         except Exception:
             pass
-        # 저장 대화상자 안에는 Edit 컨트롤이 여러 개(주소창, 검색창, 파일이름 칸)
-        # 있을 수 있어서 found_index=0으로 아무거나 집으면 엉뚱한 칸(검색창 등)을
-        # 잘못 건드릴 수 있다. 다팔자가 기본으로 제안하는 파일명(.xlsx로 끝남)이
-        # 들어있는 칸을 찾아서 그 칸만 수정한다.
+        # 저장 대화상자 안에는 Edit 컨트롤이 수십 개(주소창, 검색창, 사이드바
+        # 즐겨찾기 항목 등)까지 잡힐 수 있어서, '.xlsx가 들어있는 칸' 이나
+        # '마지막 칸' 같은 추측으로 고르면 실제로 검색창을 잘못 고르는 사고가
+        # 났었다. 윈도우 표준 저장 대화상자에서 파일이름 칸은 항상 고정된
+        # automation ID '1148'을 갖는다 (윈도우 공용 대화상자 컨트롤 ID) - 이걸로
+        # 먼저 정확히 찾고, 혹시 안 되면(버전 차이 등) 예전 방식을 예비로만 쓴다.
         edit_ctrl = None
         try:
-            edits = list(save_win.descendants(control_type='Edit'))
-            for e in edits:
-                try:
-                    val = e.get_value()
-                except Exception:
+            edit_ctrl = save_win.child_window(auto_id='1148', control_type='Edit')
+            if not edit_ctrl.exists(timeout=2):
+                edit_ctrl = None
+        except Exception:
+            edit_ctrl = None
+
+        if edit_ctrl is not None:
+            L("파일이름 칸을 고정 ID(1148)로 정확히 찾았습니다.")
+        else:
+            L("고정 ID로 못 찾아서 '.xlsx' 값이 들어있는 칸으로 재시도합니다...")
+            try:
+                edits = list(save_win.descendants(control_type='Edit'))
+                for e in edits:
                     try:
-                        val = e.window_text()
+                        val = e.get_value()
                     except Exception:
-                        val = ''
-                if '.xlsx' in val.lower():
-                    edit_ctrl = e
-                    break
-            if edit_ctrl is None and edits:
-                # 탐색기 설정에 따라 파일이름 칸에 확장자가 안 보일 수도 있어서
-                # (.xlsx로 못 찾은 경우), 표준 저장창에서 파일이름 칸이 보통
-                # 마지막 위치에 있는 Edit라는 점을 이용해 마지막 것을 사용한다.
-                edit_ctrl = edits[-1]
-                L(f"'.xlsx'가 포함된 칸을 못 찾아서 Edit 컨트롤 {len(edits)}개 중 마지막 걸 파일이름 칸으로 사용합니다.")
-        except Exception as ex:
-            L(f'파일이름 입력칸 탐색 중 오류: {type(ex).__name__}: {ex}')
+                        try:
+                            val = e.window_text()
+                        except Exception:
+                            val = ''
+                    if '.xlsx' in val.lower():
+                        edit_ctrl = e
+                        break
+                if edit_ctrl is None:
+                    L(f"'.xlsx'가 포함된 칸도 못 찾았습니다 (Edit 컨트롤 {len(edits)}개 확인함) - 파일이름 칸 지정을 포기하고 다팔자 기본 파일명으로 진행합니다.")
+            except Exception as ex:
+                L(f'파일이름 입력칸 탐색 중 오류: {type(ex).__name__}: {ex}')
 
         path_entered = False
         if edit_ctrl is not None:
