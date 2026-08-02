@@ -169,7 +169,7 @@ def collect_and_upload(order_url, save_folder=None, save_filename='오너클랜.
                     body_text = page.locator('body').inner_text()[:300]
                 except Exception:
                     body_text = '(본문 조회 실패)'
-                L("로그인 상태가 아닌 것 같습니다 (로그인 유지기간이 끝났을 수 있어요) - '오너클랜 로그인 설정'을 다시 눌러 재로그인해주세요.")
+                L("로그인 상태가 아닌 것 같습니다 - 페이지가 로그인 폼으로 넘어갔습니다. '오너클랜 로그인 설정'을 다시 눌러 재로그인해주세요. 이번엔 로그인 화면에 '로그인 상태 유지'나 '자동로그인' 같은 체크박스가 있으면 꼭 체크해주세요 - 체크 안 하면 세션이 브라우저 창을 닫는 순간 사라져서 매번 다시 로그인해야 할 수 있습니다.")
                 L(f"진단정보 - 페이지 제목: '{page_title}' / 주소: {current_url}")
                 L(f"진단정보 - 화면에 보이는 글자(앞부분 300자): {body_text}")
                 context.close()

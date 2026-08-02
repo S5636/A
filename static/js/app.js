@@ -539,21 +539,26 @@
     toast('바로가기 주소가 저장되었습니다.', 'ok');
   });
 
+  function renderCollectLog(logId, data) {
+    const log = document.getElementById(logId);
+    log.innerHTML = '';
+    for (const line of (data.log || [])) {
+      const item = document.createElement('div');
+      item.className = 'upload-log-item';
+      item.innerHTML = `<span>${line}</span>`;
+      log.appendChild(item);
+    }
+  }
+
   document.getElementById('btn-dapalza-collect').addEventListener('click', async () => {
     const btn = document.getElementById('btn-dapalza-collect');
-    const log = document.getElementById('dapalza-collect-log');
+    const log = document.getElementById('collect-log');
     btn.disabled = true;
-    btn.textContent = '⏳ 수집 중... (다팔자 창을 건드리지 마세요)';
-    log.innerHTML = '<div class="hint">다팔자 자동화를 시작합니다...</div>';
+    btn.textContent = '⏳';
+    log.innerHTML = '<div class="hint">다팔자 자동화를 시작합니다... (다팔자 창을 건드리지 마세요)</div>';
     try {
       const data = await api('/api/dapalza/collect', { method: 'POST' });
-      log.innerHTML = '';
-      for (const line of (data.log || [])) {
-        const item = document.createElement('div');
-        item.className = 'upload-log-item';
-        item.innerHTML = `<span>${line}</span>`;
-        log.appendChild(item);
-      }
+      renderCollectLog('collect-log', data);
       if (data.ok && data.upload && !data.upload.error) {
         toast('다팔자 자동 수집 및 반영이 완료되었습니다.', 'ok');
         state.loadedTabs.delete('summary');
@@ -568,19 +573,8 @@
       toast('자동 수집 요청이 실패했습니다.', 'err');
     }
     btn.disabled = false;
-    btn.textContent = '🖱️ 지금 수집 (다팔자 자동화)';
+    btn.textContent = 'DPJ';
   });
-
-  function renderOwnerclanLog(data) {
-    const log = document.getElementById('ownerclan-collect-log');
-    log.innerHTML = '';
-    for (const line of (data.log || [])) {
-      const item = document.createElement('div');
-      item.className = 'upload-log-item';
-      item.innerHTML = `<span>${line}</span>`;
-      log.appendChild(item);
-    }
-  }
 
   document.getElementById('btn-ownerclan-login').addEventListener('click', async () => {
     const btn = document.getElementById('btn-ownerclan-login');
@@ -590,7 +584,7 @@
     log.innerHTML = '<div class="hint">로그인용 브라우저 창을 여는 중...</div>';
     try {
       const data = await api('/api/ownerclan/setup_login', { method: 'POST' });
-      renderOwnerclanLog(data);
+      renderCollectLog('ownerclan-collect-log', data);
       toast(data.ok ? '오너클랜 로그인이 저장됐습니다.' : '로그인 완료를 확인 못했어요. 아래 로그를 확인해주세요.', data.ok ? 'ok' : 'err');
     } catch (e) {
       log.innerHTML = `<div class="upload-log-item err"><span>${e.message}</span></div>`;
@@ -602,13 +596,13 @@
 
   document.getElementById('btn-ownerclan-collect').addEventListener('click', async () => {
     const btn = document.getElementById('btn-ownerclan-collect');
-    const log = document.getElementById('ownerclan-collect-log');
+    const log = document.getElementById('collect-log');
     btn.disabled = true;
-    btn.textContent = '⏳ 수집 중... (백그라운드, 화면은 안 뜹니다)';
-    log.innerHTML = '<div class="hint">오너클랜 자동화를 시작합니다...</div>';
+    btn.textContent = '⏳';
+    log.innerHTML = '<div class="hint">오너클랜 자동화를 시작합니다... (백그라운드, 화면은 안 뜹니다)</div>';
     try {
       const data = await api('/api/ownerclan/collect', { method: 'POST' });
-      renderOwnerclanLog(data);
+      renderCollectLog('collect-log', data);
       if (data.ok && data.upload && !data.upload.error) {
         toast('오너클랜 자동 수집 및 반영이 완료되었습니다.', 'ok');
         state.loadedTabs.delete('summary');
@@ -623,7 +617,7 @@
       toast('자동 수집 요청이 실패했습니다.', 'err');
     }
     btn.disabled = false;
-    btn.textContent = '📦 지금 수집 (오너클랜 매입)';
+    btn.textContent = 'OC';
   });
 
   const dropzone = document.getElementById('dropzone');

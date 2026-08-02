@@ -14,11 +14,11 @@
       <h1 id="app-logo" role="button" tabindex="0">이유상점 Margin Board</h1>
     </div>
     <nav class="tab-bar">
-      <button class="tab-btn active" data-tab="summary">👑 요약 리포트</button>
-      <button class="tab-btn" data-tab="dashboard">📊 대시보드</button>
-      <button class="tab-btn" data-tab="vat">🧾 부가세 통합</button>
-      <button class="tab-btn" data-tab="upload">📥 데이터 업로드</button>
-      <button class="tab-btn" data-tab="fees">⚙️ 수수료 설정</button>
+      <button class="tab-btn active" data-tab="summary">REPORT</button>
+      <button class="tab-btn" data-tab="dashboard">BOARD</button>
+      <button class="tab-btn" data-tab="vat">TAX</button>
+      <button class="tab-btn" data-tab="upload">UPLOAD</button>
+      <button class="tab-btn" data-tab="fees">OPTION</button>
     </nav>
   </header>
 
@@ -58,12 +58,13 @@
       <div class="filter-row" style="justify-content:space-between;">
         <div class="card-title" style="margin:0;"><span class="dot"></span>필터 및 실시간 요약</div>
         <div style="display:flex; align-items:center; gap:10px;">
-          <button class="btn secondary" id="btn-dapalza-collect" title="다팔자에서 기간 1개월 설정 → 주문수집 → 엑셀 다운로드 → 마진보드 반영까지 자동으로 시도합니다.">🖱️ 지금 수집</button>
+          <button class="btn secondary" id="btn-dapalza-collect" title="다팔자에서 기간 1개월 설정 → 주문수집 → 엑셀 다운로드 → 마진보드 반영까지 자동으로 시도합니다.">DPJ</button>
+          <button class="btn secondary" id="btn-ownerclan-collect" title="오너클랜에서 기간 1개월 설정 → 엑셀다운로드 → 마진보드 반영까지 백그라운드로 자동 시도합니다.">OC</button>
           <input type="text" class="search-input" id="dash-search" placeholder="상품명·주문번호·상품ID·판매사상품코드 검색" style="width:280px;">
         </div>
       </div>
       <div class="filter-row" id="dash-filters" style="margin-top:12px;"></div>
-      <div class="upload-log" id="dapalza-collect-log"></div>
+      <div class="upload-log" id="collect-log"></div>
       <div class="grid-row" id="dash-kpi" style="margin-top:14px;"></div>
     </div>
 
@@ -143,7 +144,6 @@
       </div>
       <div class="quick-links" style="margin-top:10px;">
         <button class="btn secondary" id="btn-ownerclan-login" title="최초 1회, 브라우저 창이 뜨면 오너클랜에 직접 로그인해주세요. 그 다음부터는 자동으로 로그인된 상태로 백그라운드에서 수집합니다.">🔑 오너클랜 로그인 설정 (최초 1회)</button>
-        <button class="btn secondary" id="btn-ownerclan-collect" title="오너클랜에서 기간 1개월 설정 → 엑셀다운로드 → 마진보드 반영까지 백그라운드로 자동 시도합니다.">📦 지금 수집 (오너클랜 매입)</button>
       </div>
       <div class="upload-log" id="ownerclan-collect-log"></div>
     </div>
