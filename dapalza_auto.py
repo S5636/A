@@ -526,6 +526,17 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         os.makedirs(target_dir, exist_ok=True)
         target_path = os.path.join(target_dir, save_filename)
 
+        # 같은 이름의 파일이 이미 그 폴더에 남아있으면(예전엔 업로드 후 지우는
+        # 구조였는데 이번엔 안 지워서 계속 쌓였었음), 저장창이 그 파일을 이름
+        # 바꾸기 상태로 잘못 건드리는 등 엉뚱하게 동작하는 사고가 실제로
+        # 있었다. 새로 저장하기 전에 미리 지워서 그 여지를 아예 없앤다.
+        if os.path.exists(target_path):
+            try:
+                os.remove(target_path)
+                L(f'기존에 남아있던 같은 이름의 파일을 먼저 정리했습니다: {target_path}')
+            except Exception as e:
+                L(f'기존 파일 정리 실패(무시하고 진행): {type(e).__name__}: {e}')
+
         L(f'저장 경로를 지정: {target_path}')
         # 키보드 입력(Enter 포함)은 pywinauto로 어느 컨트롤을 지정해서 보내든
         # 실제로는 그 순간 윈도우 화면에서 포커스를 가진(맨 앞에 있는) 창으로

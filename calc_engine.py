@@ -214,6 +214,12 @@ def compute_dataset(db_path, fees_path):
 
     purchase_dict = _build_purchase_dict(cur)
     bundle_to_owner = _build_owner_matches(cur, oid_to_bundle, purchase_dict)
+    stock_map = {}
+    try:
+        cur.execute("SELECT vendor_prod_id, status FROM stock_check")
+        stock_map = {row[0]: row[1] for row in cur.fetchall()}
+    except sqlite3.OperationalError:
+        pass  # 아직 stock_check 테이블이 없는 예전 DB일 수 있음
     conn.close()
 
     order_counts = {}
@@ -345,6 +351,7 @@ def compute_dataset(db_path, fees_path):
             'fee_amt': fee_amt,
             'settle_amt': settle_amt,
             'vendor_prod_id': m['vendor_prod_id'],
+            'stock_status': stock_map.get(m['vendor_prod_id'], ''),
             'buy_cost': int(display_buy_cost),
             'buy_ship_fee': int(display_buy_ship),
             'buy_total': int(display_buy_cost + display_buy_ship),

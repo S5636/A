@@ -103,6 +103,11 @@ def init_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS vat_summary (
         market TEXT, year INTEGER, month INTEGER, category TEXT, amount INTEGER,
         PRIMARY KEY (market, year, month, category))""")
+    # 판매사상품코드별 오너클랜 재고상태('정상'/'품절'/'확인실패') 캐시.
+    # 상품코드 단위로 확인하는 거라 옵션(사이즈 등) 단위까지는 아직 못 보고,
+    # 그 상품에 하나라도 판매중인 옵션이 있으면 '정상'으로 본다 (STOCK 버튼).
+    cur.execute("""CREATE TABLE IF NOT EXISTS stock_check (
+        vendor_prod_id TEXT PRIMARY KEY, status TEXT, checked_at TEXT)""")
     conn.commit()
     conn.close()
     if not os.path.exists(FEES_PATH):
@@ -272,6 +277,16 @@ def api_dapalza_collect():
     except Exception as e:
         upload_res = {'error': _friendly_error(e)}
     result['upload'] = upload_res
+    # 예전 프로그램(PyQt5)은 업로드가 끝나면 파일을 지우는 구조였는데, 이번
+    # 자동화는 그걸 안 해서 정산_업로드_대기 폴더에 같은 이름(다팔자.xlsx)의
+    # 파일이 계속 남아있었다 - 그게 다음 저장 시도 때 윈도우 저장창에 '이미
+    # 있는 파일'로 걸려서 자동화가 엉뚱한 걸 건드리는 사고로 이어졌다. 반영이
+    # 실제로 성공했을 때만(실패했으면 재시도/확인용으로 남겨둠) 지운다.
+    if not upload_res.get('error'):
+        try:
+            os.remove(result['file_path'])
+        except Exception:
+            pass
     return jsonify(result)
 
 
@@ -298,6 +313,34 @@ def api_ownerclan_collect():
     except Exception as e:
         upload_res = {'error': _friendly_error(e)}
     result['upload'] = upload_res
+    if not upload_res.get('error'):
+        try:
+            os.remove(result['file_path'])
+        except Exception:
+            pass
+    return jsonify(result)
+
+
+@app.route('/api/ownerclan/check_stock', methods=['POST'])
+def api_ownerclan_check_stock():
+    settings = load_settings()
+    rows = ce.compute_dataset(DB_PATH, FEES_PATH)
+    # '신규주문' 건들의 판매사상품코드만 확인 대상으로 삼는다 (사용자 요청:
+    # 이미 확정/배송된 건은 재고 확인이 필요 없음). 같은 상품코드가 여러
+    # 주문에 걸쳐있으면 한 번만 확인한다.
+    codes = sorted({r['vendor_prod_id'] for r in rows
+                    if r.get('sell_status') == '신규주문' and r.get('vendor_prod_id')})
+    result = ownerclan_auto.check_stock(settings.get('ownerclan_url', ''), codes)
+    if result.get('ok') and result.get('results'):
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        for code, status in result['results'].items():
+            cur.execute("""INSERT OR REPLACE INTO stock_check (vendor_prod_id, status, checked_at)
+                VALUES (?, ?, ?)""", (code, status, now))
+        conn.commit()
+        conn.close()
+    result['checked'] = len(result.get('results') or {})
     return jsonify(result)
 
 

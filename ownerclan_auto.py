@@ -31,6 +31,7 @@ import platform
 import queue
 import threading
 import time
+from urllib.parse import urlsplit
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile')
@@ -320,3 +321,132 @@ def collect_and_upload(order_url, save_folder=None, save_filename='oc.xlsx'):
 
     L(f'파일 저장 확인 완료: {target_path}')
     return {'ok': True, 'log': log, 'file_path': target_path}
+
+
+def _site_home_url(order_url):
+    try:
+        parts = urlsplit(order_url)
+        return f'{parts.scheme}://{parts.netloc}/'
+    except Exception:
+        return 'https://ownerclan.com/'
+
+
+def _check_one_stock(page, home_url, code, L):
+    """상품 하나(판매사상품코드)를 오너클랜에서 검색해서 재고상태를 확인한다.
+    옵션(사이즈 등) 단위까지는 못 보고 상품 전체 기준이다 - '바로구매' 버튼이
+    있으면(=적어도 하나는 살 수 있는 옵션이 있으면) '정상', 없고 '품절' 표시만
+    있으면 '품절', 둘 다 아니면(검색 실패 등) '확인실패'로 본다."""
+    try:
+        page.goto(home_url, wait_until='domcontentloaded', timeout=30000)
+    except Exception as e:
+        L(f"[{code}] 오너클랜 홈 이동 실패: {type(e).__name__}: {e}")
+        return '확인실패'
+
+    search_box = None
+    for placeholder_guess in ('최저가 핫딜', '통합검색', '검색어를 입력'):
+        try:
+            loc = page.get_by_placeholder(placeholder_guess, exact=False)
+            if loc.count() > 0:
+                search_box = loc.first
+                break
+        except Exception:
+            continue
+    if search_box is None:
+        try:
+            loc = page.locator('input[type="text"], input[type="search"]').first
+            if loc.count() > 0:
+                search_box = loc
+        except Exception:
+            pass
+    if search_box is None:
+        L(f"[{code}] 검색창을 못 찾았습니다.")
+        return '확인실패'
+
+    try:
+        search_box.fill(code)
+        search_box.press('Enter')
+        page.wait_for_timeout(1500)
+    except Exception as e:
+        L(f"[{code}] 검색 실행 실패: {type(e).__name__}: {e}")
+        return '확인실패'
+
+    # 검색 결과 목록에서 이 상품코드로 가는 링크를 찾아 들어간다. 코드 자체가
+    # 결과 페이지 어딘가(링크 텍스트나 URL)에 보통 노출되니 그걸로 찾고, 못
+    # 찾으면 첫 번째 상품 링크로 대체한다(검색이 이미 이 코드로 좁혀졌으므로).
+    try:
+        code_link = page.get_by_text(code, exact=False).first
+        if code_link.count() > 0:
+            code_link.click(timeout=10000)
+        else:
+            page.locator('a[href*="product"]').first.click(timeout=10000)
+        page.wait_for_timeout(1500)
+    except Exception as e:
+        L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e).__name__}: {e}")
+        return '확인실패'
+
+    try:
+        has_buy_now = page.get_by_text('바로구매', exact=True).count() > 0
+        has_soldout = page.get_by_text('품절', exact=False).count() > 0
+    except Exception as e:
+        L(f"[{code}] 상품 페이지 상태 확인 실패: {type(e).__name__}: {e}")
+        return '확인실패'
+
+    if has_buy_now:
+        return '정상'
+    if has_soldout:
+        return '품절'
+    L(f"[{code}] '바로구매'도 '품절'도 못 찾았습니다 - 상품 페이지가 맞는지 확인 필요.")
+    return '확인실패'
+
+
+def _check_stock_impl(order_url, codes, L):
+    page = _get_or_launch_page(L, launch_if_missing=False)
+    if page is None:
+        L("아직 로그인된 브라우저가 없습니다 - 먼저 '오너클랜 로그인 설정'을 눌러 로그인해주세요.")
+        return {}
+
+    home_url = _site_home_url(order_url)
+    results = {}
+    for code in codes:
+        if not code:
+            continue
+        L(f"[{code}] 오너클랜에서 재고상태 확인 중...")
+        status = _check_one_stock(page, home_url, code, L)
+        results[code] = status
+        L(f"[{code}] → {status}")
+    return results
+
+
+def check_stock(order_url, codes):
+    """판매사상품코드 목록을 받아 각각 오너클랜에서 재고상태를 확인해서
+    {코드: '정상'|'품절'|'확인실패'} 딕셔너리로 돌려준다."""
+    log = []
+
+    def L(msg):
+        log.append(msg)
+
+    if platform.system() != 'Windows':
+        L('이 기능은 윈도우 PC에서만 동작합니다.')
+        return {'ok': False, 'log': log, 'results': {}}
+
+    if not order_url:
+        L("오너클랜 주소가 설정되어 있지 않습니다. '데이터 업로드' 탭에서 '바로가기 주소 설정'으로 오너클랜 발주내역 페이지 주소를 먼저 저장해주세요.")
+        return {'ok': False, 'log': log, 'results': {}}
+
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        L("playwright가 설치되어 있지 않습니다. START.bat을 다시 실행하면 자동으로 설치됩니다.")
+        return {'ok': False, 'log': log, 'results': {}}
+
+    if not codes:
+        L('확인할 판매사상품코드가 없습니다 (신규주문 건이 없는 것 같아요).')
+        return {'ok': True, 'log': log, 'results': {}}
+
+    try:
+        results = _run_on_worker(_check_stock_impl, order_url, codes, L)
+    except Exception as e:
+        L(f'자동화 중 오류 발생 - {_friendly_error(e)}')
+        return {'ok': False, 'log': log, 'results': {}}
+
+    return {'ok': True, 'log': log, 'results': results}

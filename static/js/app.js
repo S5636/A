@@ -19,7 +19,8 @@
     ['order_date', '주문\n일시', 'l', 6.5], ['prod_id', '상품ID', 'l', 4.3], ['prod_name', '상품명', 'l', 9.4],
     ['qty', '수량', 'r', 2.5], ['order_amt', '주문\n금액', 'r', 4.3], ['ship_fee', '배송비', 'r', 3.3],
     ['add_ship_fee', '추가\n배송비', 'r', 3.6], ['fee_rate_display', '수수료율', 'r', 4.0], ['fee_amt', '마켓\n수수료', 'r', 4.0],
-    ['settle_amt', '정산\n예정액', 'r', 4.3], ['vendor_prod_id', '판매사\n상품코드', 'l', 4.7], ['buy_cost', '매입가', 'r', 3.6],
+    ['settle_amt', '정산\n예정액', 'r', 4.3], ['vendor_prod_id', '판매사\n상품코드', 'l', 4.7],
+    ['stock_status', '재고\n상태', 'c', 3.0], ['buy_cost', '매입가', 'r', 3.6],
     ['buy_ship_fee', '매입\n배송비', 'r', 3.6], ['buy_total', '매입\n합계', 'r', 3.6], ['margin_amt', '최종\n마진', 'r', 4.0],
     ['margin_rate', '마진율', 'r', 3.3], ['margin_chk', '마진\n포함', 'c', 3.3], ['ad_chk', '광고', 'c', 2.9],
   ];
@@ -308,6 +309,13 @@
       case 'buy_status': {
         const v = row.buy_status || '-';
         return v.includes('[HL]') ? `<span class="pill hl">${v}</span>` : v;
+      }
+      case 'stock_status': {
+        const v = row.stock_status || '';
+        if (v === '정상') return `<span class="pill instock">판매중</span>`;
+        if (v === '품절') return `<span class="pill soldout">품절</span>`;
+        if (v === '확인실패') return `<span class="pill unchecked" title="자동 확인에 실패했습니다">확인실패</span>`;
+        return '-';
       }
       default:
         return row[key] || '-';
@@ -618,6 +626,29 @@
     }
     btn.disabled = false;
     btn.textContent = 'OC';
+  });
+
+  document.getElementById('btn-check-stock').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-check-stock');
+    const log = document.getElementById('collect-log');
+    btn.disabled = true;
+    btn.textContent = '⏳';
+    log.innerHTML = '<div class="hint">신규주문 건들의 재고상태를 오너클랜에서 백그라운드로 확인하는 중... (건수에 따라 시간이 걸릴 수 있어요)</div>';
+    try {
+      const data = await api('/api/ownerclan/check_stock', { method: 'POST' });
+      renderCollectLog('collect-log', data);
+      if (data.ok) {
+        toast(`재고상태 확인 완료 (${data.checked || 0}건).`, 'ok');
+        loadDashOrders();
+      } else {
+        toast('재고상태 확인이 중간에 멈췄어요. 아래 로그를 확인해주세요.', 'err');
+      }
+    } catch (e) {
+      log.innerHTML = `<div class="upload-log-item err"><span>${e.message}</span></div>`;
+      toast('재고상태 확인 요청이 실패했습니다.', 'err');
+    }
+    btn.disabled = false;
+    btn.textContent = 'STOCK';
   });
 
   const dropzone = document.getElementById('dropzone');
