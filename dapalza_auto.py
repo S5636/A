@@ -9,10 +9,47 @@
 버튼을 못 찾으면 그 화면에 실제로 존재하는 컨트롤 이름들을 함께 로그에 남겨서
 다음에 정확히 어떤 이름/타입으로 고쳐야 하는지 바로 알 수 있게 한다.
 """
+import ctypes
 import os
 import platform
 import re
 import time
+
+
+def _find_hwnds_by_class(class_name, exclude_handles=None):
+    """UI Automation의 Desktop(backend='uia').windows()가 특정 창(윈도우 표준
+    파일 저장 대화상자 등)을 목록에서 통째로 빠뜨리는 경우가 실제로 발생했다
+    (60초를 기다려도 계속 없다고 나왔는데, 사용자는 화면에서 그 창을 직접 보고
+    입력까지 하고 있었음). UIA 트리 열거에 의존하지 않는, 훨씬 더 원초적인
+    윈도우 API(EnumWindows)로 직접 찾으면 이런 누락 문제를 피할 수 있다.
+    윈도우 표준 파일 열기/저장 대화상자는 운영체제 버전에 상관없이 클래스명이
+    항상 '#32770'으로 고정되어 있다."""
+    exclude_handles = exclude_handles or set()
+    found = []
+
+    def _callback(hwnd, _lparam):
+        try:
+            if hwnd in exclude_handles:
+                return True
+            if not ctypes.windll.user32.IsWindowVisible(hwnd):
+                return True
+            buf = ctypes.create_unicode_buffer(256)
+            ctypes.windll.user32.GetClassNameW(hwnd, buf, 256)
+            if buf.value == class_name:
+                found.append(hwnd)
+        except Exception:
+            pass
+        return True
+
+    wndenumproc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)(_callback)
+    ctypes.windll.user32.EnumWindows(wndenumproc, 0)
+    return found
+
+
+def _wrap_hwnd_uia(hwnd):
+    from pywinauto.uia_element_info import UIAElementInfo
+    from pywinauto.controls.uiawrapper import UIAWrapper
+    return UIAWrapper(UIAElementInfo(handle=hwnd))
 
 
 def _escape_keys(s):
@@ -399,6 +436,10 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             pre_download_handles = set(w.handle for w in Desktop(backend='uia').windows())
         except Exception:
             pre_download_handles = set()
+        try:
+            pre_dialog_hwnds = set(_find_hwnds_by_class('#32770'))
+        except Exception:
+            pre_dialog_hwnds = set()
 
         if dl_ctrl is not None:
             L("메인 창 안에서 '전체 다운로드' 버튼 발견 - 클릭...")
@@ -416,16 +457,28 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         time.sleep(2)
 
         L('파일 저장 대화상자를 찾는 중...')
-        # 제목이 뭐든 상관없이 '이미 열려있던 창을 잘못 잡는' 사고가 여러 번
-        # 반복됐다 (사용자가 미리 열어둔 다운로드 폴더 탐색기 창 등). 그래서 이제
-        # '다운로드/저장'처럼 느슨한 제목으로 아무 창이나 잡는 최후수단은 코드에서
-        # 완전히 없앴다 - 그런 fallback이 있으면 결국 또 엉뚱한 창을 잡게 된다.
-        # 대신 두 가지 안전한 방법만 같이, 더 오래(최대 60초) 반복해서 확인한다:
-        # (1) 다운로드 클릭 전에는 없었던 '새로 생긴 창', (2) 정확한 제목(대소문자
-        # 무관)에 맞는 창. 이 둘 다 실패하면 억지로 아무 창이나 잡지 않고 그냥
-        # 실패로 끝낸다 - 틀린 창을 잡고 진행하는 것보다 훨씬 안전하다.
+        # 직전 시도에서 60초를 기다려도 Desktop(backend='uia').windows()가 이
+        # 저장창을 목록에서 아예 빠뜨리는 게 확인됐다 (사용자는 화면에서 그 창을
+        # 직접 보고 입력까지 하고 있었는데 로그는 '없다'고 나옴) - 이건 UI
+        # Automation 쪽 열거 방식 자체의 한계로 보인다. 그래서 훨씬 더 원초적인
+        # 방법을 최우선으로 쓴다: 윈도우 표준 파일 저장/열기 대화상자는 운영체제
+        # 버전에 상관없이 창 클래스명이 항상 '#32770'으로 고정돼 있다 - 이걸
+        # EnumWindows로 직접 찾으면 UIA 열거가 놓치는 경우도 잡을 수 있다.
+        # 그래도 안 되면 예전 방식(새로 생긴 창 / 정확한 제목)을 순서대로 더 써본다.
         save_win = None
         for i in range(60):
+            try:
+                new_dialogs = [h for h in _find_hwnds_by_class('#32770') if h not in pre_dialog_hwnds]
+            except Exception:
+                new_dialogs = []
+            if new_dialogs:
+                try:
+                    save_win = _wrap_hwnd_uia(new_dialogs[0])
+                    L(f"클래스명(#32770)으로 저장창 발견: '{save_win.window_text()}'.")
+                    break
+                except Exception as e:
+                    L(f'저장창을 UIA로 감싸는 데 실패: {type(e).__name__}: {e}')
+
             try:
                 new_windows = [w for w in Desktop(backend='uia').windows()
                                 if w.handle not in pre_download_handles]
@@ -437,6 +490,7 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                 save_win = named[0] if named else new_windows[0]
                 L(f"새로 나타난 창 발견: '{save_win.window_text()}' - 이걸 저장창으로 사용합니다.")
                 break
+
             try:
                 titled = Desktop(backend='uia').window(title_re='(?i).*주문.*(엑셀|excel).*다운로드.*')
                 if titled.exists(timeout=0):
@@ -445,6 +499,7 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                     break
             except Exception:
                 pass
+
             if i == 20:
                 try:
                     all_titles = [w.window_text() for w in Desktop(backend='uia').windows() if w.window_text().strip()]
@@ -455,7 +510,13 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         if save_win is None:
             L('60초 안에 저장창을 못 찾았습니다 - 엉뚱한 창을 잘못 잡느니 여기서 멈춥니다.')
             raise RuntimeError('저장 대화상자를 찾지 못했습니다.')
-        save_win.wait('visible', timeout=30)
+        # save_win이 WindowSpecification이면 .wait()가 있지만, EnumWindows나
+        # Desktop().windows()로 직접 찾은 경우는 UIAWrapper라서 .wait()가 없다
+        # (이미 찾은 시점에 존재/화면표시가 확인된 창이니 굳이 또 기다릴 필요도 없다).
+        try:
+            save_win.wait('visible', timeout=30)
+        except AttributeError:
+            pass
 
         target_dir = save_folder or os.path.join(os.path.expanduser('~'), 'Downloads')
         os.makedirs(target_dir, exist_ok=True)
@@ -567,7 +628,13 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             # 마지막으로 한 번 더 시도해본다.
             L('아직 저장이 안 된 것 같습니다 - 저장창이 남아있으면 저장 버튼을 직접 클릭해서 재시도합니다...')
             try:
-                if save_win.exists(timeout=2):
+                try:
+                    still_there = save_win.exists(timeout=2)
+                except AttributeError:
+                    # EnumWindows로 직접 찾은 경우는 UIAWrapper라서 .exists()가
+                    # 없다 - is_visible()로 대신 확인한다.
+                    still_there = save_win.is_visible()
+                if still_there:
                     save_win.set_focus()
                     _click(save_win, '저장', 'Button', L)
                     time.sleep(1)
