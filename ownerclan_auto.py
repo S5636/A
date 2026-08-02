@@ -161,7 +161,10 @@ def _get_or_launch_page(L, launch_if_missing=True):
     _state['pw'] = pw
     _state['context'] = context
     _state['page'] = page
-    _set_window_state(page, 'minimized', L)
+    # 여기서 곧바로 최소화하지 않는다 - 로그인 흐름(setup_login)이 이 직후에
+    # 직접 화면에 보이게 만드는데, 막 최소화한 창을 바로 다시 복원하는 게
+    # 꼬여서 창이 계속 안 보이는 사고가 있었다. 최소화는 각 흐름(로그인 완료
+    # 후, 수집 흐름 등)이 필요할 때 알아서 한다.
     return page
 
 
@@ -198,9 +201,15 @@ def _setup_login_impl(start_url, wait_seconds, L):
     page = _get_or_launch_page(L)
     page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
     # 이전에 최소화해서 백그라운드로 보내둔 창일 수 있으니, 로그인하려면
-    # 다시 화면에 보이게 복원한다.
+    # 다시 화면에 보이게 복원한다. CDP로 windowState/좌표를 바꾸는 것과
+    # 별개로, Playwright 자체 기능인 bring_to_front()도 같이 써서 탭이
+    # 확실히 맨 앞에 오게 한다(둘 중 하나가 막혀도 다른 하나로 보이도록).
     _set_window_state(page, 'normal', L)
-    L('★ 지금 새로 뜨거나 앞으로 나온 이 창(평소 쓰시는 크롬 창이 아닙니다)에서 직접 로그인해주세요. 로그인하시면 자동으로 감지해서 창을 최소화하고 백그라운드로 보냅니다 (최대 5분 대기).')
+    try:
+        page.bring_to_front()
+    except Exception:
+        pass
+    L('★ 지금 새로 뜨거나 앞으로 나온 이 창(평소 쓰시는 크롬 창이 아닙니다)에서 직접 로그인해주세요. 안 보이면 작업표시줄에서 크롬 아이콘을 클릭해보세요. 로그인하시면 자동으로 감지해서 창을 최소화하고 백그라운드로 보냅니다 (최대 5분 대기).')
 
     logged_in = False
     deadline = time.time() + wait_seconds
