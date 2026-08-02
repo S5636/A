@@ -446,7 +446,6 @@ def _check_one_stock(page, order_url, code, L):
     url = _search_url_for_code(order_url, code)
     try:
         page.goto(url, wait_until='domcontentloaded', timeout=30000)
-        page.wait_for_timeout(800)
     except Exception as e:
         L(f"[{code}] 검색 페이지 이동 실패: {type(e).__name__}: {e}")
         return '확인실패'
@@ -465,26 +464,28 @@ def _check_one_stock(page, order_url, code, L):
         L(f"[{code}] 검색 페이지로 이동한 것 같지 않습니다(현재 주소: {current_url}) - 브라우저가 다른 페이지에 머물러 있을 수 있어요.")
         return '확인실패'
 
-    try:
-        body_text = page.locator('body').inner_text()
-    except Exception as e:
-        L(f"[{code}] 검색결과 페이지 읽기 실패: {type(e).__name__}: {e}")
-        return '확인실패'
-
-    m = re.search(r'총\s*([\d,]+)\s*개의\s*상품', body_text)
-    if m and m.group(1).replace(',', '') == '0':
-        L(f"[{code}] 검색결과 0건입니다 - 코드가 오너클랜에 없거나 판매중지된 상품일 수 있습니다.")
-        return '확인실패'
-
     # 검색결과 목록에서 이 상품코드로 가는 카드를 찾아 상세페이지로 들어간다.
-    # selfcode 검색이라 보통 정확히 1건만 나오는데, 코드 텍스트를 못 찾으면
-    # (엉뚱한 페이지에 있는 등) 아무 상품이나 클릭하는 대신 확인실패로
-    # 처리한다 - 엉뚱한 상품의 재고상태를 잘못 보고하는 사고를 막기 위해서다.
+    # 검색결과는 페이지 이동 직후 곧바로 다 그려져 있는 게 아니라 뒤이어
+    # 비동기로 채워지는데, .count()는 그 순간 DOM 상태만 즉시 확인하고
+    # 기다려주지 않는다(Playwright의 흔한 함정) - 고정된 시간만 잠깐 잔 뒤에
+    # .count()로 확인하면, 아직 안 그려진 걸 '코드가 없다'고 오판하는 사고로
+    # 이어진다. wait_for로 실제 나타날 때까지(최대 15초) 제대로 기다린다.
     try:
         code_link = page.get_by_text(code, exact=False).first
-        if code_link.count() == 0:
-            L(f"[{code}] 검색결과 화면에서 이 코드가 안 보입니다 - 엉뚱한 페이지일 위험이 있어 여기서 멈춥니다.")
-            return '확인실패'
+        code_link.wait_for(state='attached', timeout=15000)
+    except Exception:
+        try:
+            body_text = page.locator('body').inner_text()
+        except Exception:
+            body_text = ''
+        m = re.search(r'총\s*([\d,]+)\s*개의\s*상품', body_text)
+        if m and m.group(1).replace(',', '') == '0':
+            L(f"[{code}] 검색결과 0건입니다 - 코드가 오너클랜에 없거나 판매중지된 상품일 수 있습니다.")
+        else:
+            L(f"[{code}] 15초를 기다려도 검색결과 화면에서 이 코드가 안 보입니다 - 엉뚱한 페이지일 위험이 있어 여기서 멈춥니다.")
+        return '확인실패'
+
+    try:
         code_link.click(timeout=10000)
         page.wait_for_timeout(1200)
     except Exception as e:
