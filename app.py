@@ -321,6 +321,14 @@ def api_ownerclan_collect():
     except Exception as e:
         upload_res = {'error': _friendly_error(e)}
     result['upload'] = upload_res
+    if not upload_res.get('error') and 'blank_ledger_rows' in upload_res:
+        # 합배송 매입상태 매칭 스펙(5.2)이 가정하는 '원장주문코드 빈 행' 구조가
+        # 지금 실제로 내려오는지 확인용 - 0이면 그 구조 자체가 지금 안 내려온단
+        # 뜻이라, 합배송 매입상태가 이상하게 보이는 문제의 단서가 될 수 있다.
+        result['log'].append(
+            f"진단정보 - 이번 발주내역 {upload_res.get('inserted', 0)}건 중 "
+            f"원장주문코드가 빈 행(합배송 하위/합산행) {upload_res['blank_ledger_rows']}건."
+        )
     if not upload_res.get('error'):
         try:
             os.remove(result['file_path'])

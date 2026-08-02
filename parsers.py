@@ -130,9 +130,17 @@ def process_upload(db_path, fp, filename):
 
     if '원장주문코드' in temp_df.columns:
         n_rows = 0
+        # 스펙 5.2가 가정하는 '합배송 3단계 구조'(원장주문코드 없는 빈 행이
+        # 하위상품/합산행으로 낀다)가 지금도 실제 다운로드 파일에 있는지
+        # 확인하려고 빈 원장주문코드 행 개수를 같이 세어둔다 - 이게 0이면
+        # 그 3단계 구조 자체가 지금 안 내려온다는 뜻이라, 합배송 매입상태
+        # 매칭이 안 맞는 문제의 원인일 수 있다.
+        n_blank_oid = 0
         for _, r in temp_df.iterrows():
             oid = clean_id(r.get('원장주문코드', ''))
             jcode = clean_id(r.get('주문코드', ''))
+            if not oid:
+                n_blank_oid += 1
             row_vals = []
             for c in OWNERCLAN_COLS:
                 if c == '주문코드':
@@ -153,7 +161,7 @@ def process_upload(db_path, fp, filename):
             n_rows += 1
         conn.commit()
         conn.close()
-        return {'type': '오너클랜 발주내역', 'inserted': n_rows, 'updated': 0}
+        return {'type': '오너클랜 발주내역', 'inserted': n_rows, 'updated': 0, 'blank_ledger_rows': n_blank_oid}
 
     df_map, source_type = detect_and_normalize(temp_df)
     if df_map is None or df_map.empty:

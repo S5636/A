@@ -487,10 +487,21 @@ def _check_one_stock(page, order_url, code, L):
 
     try:
         code_link.click(timeout=10000)
-        page.wait_for_timeout(1200)
     except Exception as e:
         L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e).__name__}: {e}")
         return '확인실패'
+
+    # 검색결과 페이지에서 겪었던 것과 같은 문제(.count()는 안 기다림)가
+    # 상세페이지에서도 똑같이 날 수 있다 - 고정 1.2초만 자고 바로 확인하면
+    # '바로구매' 버튼이 아직 안 그려진 순간을 '없다(=품절)'로 오판할 수
+    # 있다. '바로구매' 글자가(옵션이 있든 없든 상세페이지엔 결국 나타남)
+    # 나타날 때까지 최대 10초 제대로 기다려서, 페이지가 다 로드됐다는
+    # 신호로 쓴다 - 진짜 품절 상품이라 이 글자가 끝내 안 나타나는 경우도
+    # 있으니, 여기서 실패해도 무시하고 아래에서 마저 판정한다.
+    try:
+        page.get_by_text('바로구매', exact=False).first.wait_for(state='attached', timeout=10000)
+    except Exception:
+        pass
 
     # 옵션(사이즈 등)이 있는 상품은 '바로구매' 버튼이 옵션과 무관하게 항상 떠
     # 있어서, 텍스트로만 보면 특정 옵션이 품절이어도 못 잡는다. 사용자가 실제
@@ -516,6 +527,7 @@ def _check_one_stock(page, order_url, code, L):
         except Exception as e:
             L(f"[{code}] 옵션별 품절여부 확인 실패: {type(e).__name__}: {e}")
             return '확인실패'
+        L(f"[{code}] 옵션 {option_count}개 중 구매 가능한 옵션 {'있음' if any_available else '없음'}.")
         return '정상' if any_available else '품절'
 
     # 옵션 목록 자체가 없는 단일 상품은 페이지에 '바로구매' 버튼이 있는지로
@@ -529,6 +541,7 @@ def _check_one_stock(page, order_url, code, L):
         L(f"[{code}] 상품 페이지 상태 확인 실패: {type(e).__name__}: {e}")
         return '확인실패'
 
+    L(f"[{code}] 옵션 없는 단일상품 - 바로구매 버튼 {'있음' if has_buy_now else '없음'}, 품절 글자 {'있음' if has_soldout else '없음'}.")
     if has_buy_now:
         return '정상'
     if has_soldout:
