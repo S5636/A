@@ -45,6 +45,12 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* 탭마다 페이지 전체 높이가 달라서(BOARD는 표가 길고 UPLOAD는 짧음), 세로
+   스크롤바가 생겼다 없어졌다 하면서 그때마다 페이지 전체가 좌우로 살짝
+   흔들리는 문제가 있었다. 스크롤바 자리를 항상 미리 확보해둬서 있으나 없으나
+   레이아웃이 흔들리지 않게 한다. */
+html { scrollbar-gutter: stable; overflow-y: scroll; }
+
 body { padding-bottom: 40px; }
 
 a { color: inherit; }
