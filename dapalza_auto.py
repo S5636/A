@@ -660,6 +660,26 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             return {'ok': False, 'log': log}
 
         L(f'파일 저장 확인 완료: {target_path}')
+
+        # 다팔자 자체가 저장 완료 후 '전체 주문관리 엑셀이 저장되었습니다' 같은
+        # 확인 팝업을 추가로 띄운다. 이걸 안 닫아두면 다음번 '지금 수집' 실행이
+        # 이 팝업이 화면에 남아있는 상태로 시작하게 돼서 다음 자동화가 엉뚱하게
+        # 동작할 위험이 있다 - 여기서 확인/예 버튼을 찾아 눌러서 정리한다. 못
+        # 찾아도 실패로 처리하진 않는다 (파일 저장 자체는 이미 확인됐으므로).
+        try:
+            time.sleep(1)
+            descendants = win.descendants()
+            done_marker = _find_smallest_text_match(win, '저장되었습니다', None, descendants=descendants)
+            if done_marker is not None:
+                ok_ctrl = _find_near(done_marker, '예', L) or _find_near(done_marker, '확인', L)
+                if ok_ctrl is not None:
+                    ok_ctrl.click_input()
+                    L('저장 완료 팝업을 확인 눌러서 정리했습니다 (다음 실행에 영향 안 주도록).')
+                else:
+                    L('저장 완료 팝업은 보이는데 확인/예 버튼을 못 찾았습니다 - 수동으로 닫아주세요.')
+        except Exception as e:
+            L(f'저장 완료 팝업 정리 중 오류(파일 저장 자체는 이미 확인됐으니 무시해도 됨): {type(e).__name__}: {e}')
+
         return {'ok': True, 'log': log, 'file_path': target_path}
     except Exception as e:
         L(f'자동화 중 오류 발생 - {type(e).__name__}: {e}')
