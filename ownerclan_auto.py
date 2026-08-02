@@ -141,14 +141,16 @@ def _get_or_launch_page(L, launch_if_missing=True):
     os.makedirs(PROFILE_DIR, exist_ok=True)
     _mark_profile_clean_exit()
     pw = sync_playwright().start()
+    # 화면 밖 좌표(--window-position=-32000,-32000)에 띄우는 방법도 써봤는데,
+    # 그러면 로그인하려고 나중에 'normal'로 복원해도 windowState만 바뀌고
+    # 좌표는 화면 밖 그대로라 로그인창 자체가 안 보이는 사고가 났다(직접
+    # 재현 확인함). 그래서 화면 밖 배치는 포기하고, 아래에서 최소화만으로
+    # 백그라운드 처리한다 - 로그인 때는 _set_window_state가 명시적으로
+    # 화면 안쪽 좌표까지 같이 지정해서 확실히 보이게 만든다.
     context = pw.chromium.launch_persistent_context(
         PROFILE_DIR, headless=False,
         args=[
             '--disable-blink-features=AutomationControlled',
-            # 로그인 세션 유지를 위해 창을 완전히 닫지 않고 계속 띄워두는데,
-            # 화면에 절대 안 보여야 하므로(사용자 화면을 침범하면 안 된다는
-            # 요구사항) 최소화뿐 아니라 애초에 화면 밖 좌표에 띄운다.
-            '--window-position=-32000,-32000',
             '--disable-session-crashed-bubble',
         ],
         no_viewport=True,
@@ -166,13 +168,18 @@ def _get_or_launch_page(L, launch_if_missing=True):
 def _set_window_state(page, state, L=None):
     """창을 닫지 않고 최소화(minimized)/복원(normal)만 한다 - 로그인 세션은
     브라우저 프로세스가 살아있는 한 유지되므로, 닫는 대신 이 방식으로 화면에
-    보였다 안 보였다만 시킨다."""
+    보였다 안 보였다만 시킨다. 'normal'로 복원할 때는 화면 안쪽 좌표까지
+    같이 지정해서, 혹시 창이 어떤 이유로든 화면 밖에 있었더라도 확실히
+    사용자 눈에 보이는 위치로 오게 한다."""
     try:
         cdp = page.context.new_cdp_session(page)
         info = cdp.send('Browser.getWindowForTarget')
+        bounds = {'windowState': state}
+        if state == 'normal':
+            bounds.update({'left': 80, 'top': 80, 'width': 1280, 'height': 860})
         cdp.send('Browser.setWindowBounds', {
             'windowId': info['windowId'],
-            'bounds': {'windowState': state},
+            'bounds': bounds,
         })
     except Exception as e:
         if L is not None:
