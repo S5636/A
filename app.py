@@ -85,6 +85,21 @@ def init_db():
         원장주문코드 TEXT, 주문코드 TEXT, 주문일자 TEXT, 상품코드 TEXT, 상품명 TEXT, 배송상태 TEXT,
         주문수량 TEXT, 택배회사 TEXT, 송장번호 TEXT, 받는사람 TEXT, 보내는사람 TEXT, 총결제금액 TEXT,
         상품가격 TEXT, 배송비 TEXT, 택배송장메모 TEXT, 주문관리메모 TEXT)""")
+    # 오너클랜 발주내역을 재업로드할 때마다 같은 주문이 중복 행으로 계속
+    # 쌓이던 버그가 있었다 - 원장주문코드+주문코드 기준 유니크 제약이 없어서
+    # parsers.py의 INSERT OR REPLACE가 실제로는 그냥 INSERT처럼 동작했고,
+    # 그래서 오래된 상태(신규주문)가 나중에 조회될 때 최신 상태(결제완료)를
+    # 밀어내는 일이 생겼다. 기존에 이미 쌓인 중복은 가장 나중에 들어온
+    # (rowid가 큰) 행만 남기고 정리한 뒤, 다시는 중복이 안 쌓이게 유니크
+    # 인덱스를 건다.
+    try:
+        cur.execute("""DELETE FROM ownerclan_raw WHERE rowid NOT IN (
+            SELECT MAX(rowid) FROM ownerclan_raw GROUP BY 원장주문코드, 주문코드
+        )""")
+        cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_ownerclan_raw_key
+            ON ownerclan_raw(원장주문코드, 주문코드)""")
+    except Exception:
+        pass
     cur.execute("""CREATE TABLE IF NOT EXISTS vat_summary (
         market TEXT, year INTEGER, month INTEGER, category TEXT, amount INTEGER,
         PRIMARY KEY (market, year, month, category))""")
