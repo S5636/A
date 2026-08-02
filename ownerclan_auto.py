@@ -457,13 +457,37 @@ def _check_one_stock(page, order_url, code, L):
         L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e).__name__}: {e}")
         return '확인실패'
 
+    # 옵션(사이즈 등)이 있는 상품은 '바로구매' 버튼이 옵션과 무관하게 항상 떠
+    # 있어서, 텍스트로만 보면 특정 옵션이 품절이어도 못 잡는다. 사용자가 실제
+    # 상세페이지 HTML을 캡쳐해서 확인해준 구조: 각 옵션이
+    # <li class="option" option-soldout="0"|"1" ...> 형태로 품절 여부를
+    # 속성에 정확히 갖고 있다(품절이면 클래스에 soldout-option도 추가됨).
+    # 텍스트 추측이 아니라 이 속성으로 정확히 판정한다 - 옵션 중 하나라도
+    # 품절이 아니면(그 옵션으로는 살 수 있으면) '정상', 옵션이 있는데 전부
+    # 품절이면 '품절'.
     try:
-        # exact=True로 '바로구매' 글자만 딱 맞춰서 찾다가, 버튼 안에 보이지
-        # 않는 여백/아이콘이 같이 들어있는 경우 매칭이 실패해서 있는데도
-        # 없다고 오판할 위험이 있었다(다팔자 자동화에서 텍스트 정확매칭 때문에
-        # 여러 번 고생한 것과 같은 종류의 문제). exact=False로 완화한다 -
-        # '바로구매' 버튼이 있으면 그게 최우선으로 '정상' 판정되니(아래 순서),
-        # 이 문구가 다른 곳에 잘못 걸릴 걱정은 크지 않다.
+        option_lis = page.locator('li.option[option-soldout]')
+        option_count = option_lis.count()
+    except Exception as e:
+        L(f"[{code}] 옵션 목록 확인 실패: {type(e).__name__}: {e}")
+        return '확인실패'
+
+    if option_count > 0:
+        try:
+            any_available = any(
+                option_lis.nth(i).get_attribute('option-soldout') == '0'
+                for i in range(option_count)
+            )
+        except Exception as e:
+            L(f"[{code}] 옵션별 품절여부 확인 실패: {type(e).__name__}: {e}")
+            return '확인실패'
+        return '정상' if any_available else '품절'
+
+    # 옵션 목록 자체가 없는 단일 상품은 페이지에 '바로구매' 버튼이 있는지로
+    # 판단한다. exact=True로 '바로구매' 글자만 딱 맞춰서 찾다가, 버튼 안에
+    # 보이지 않는 여백/아이콘이 같이 들어있으면 매칭이 실패해서 있는데도
+    # 없다고 오판할 위험이 있어 exact=False로 완화했다.
+    try:
         has_buy_now = page.get_by_text('바로구매', exact=False).count() > 0
         has_soldout = page.get_by_text('품절', exact=False).count() > 0
     except Exception as e:
