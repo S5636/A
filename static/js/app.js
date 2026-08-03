@@ -566,14 +566,18 @@
     log.innerHTML = '<div class="hint">다팔자 자동화를 시작합니다... (다팔자 창을 건드리지 마세요)</div>';
     try {
       const data = await api('/api/dapalza/collect', { method: 'POST' });
-      renderCollectLog('collect-log', data);
       if (data.ok && data.upload && !data.upload.error) {
+        // 성공했을 때는 로그를 지저분하게 남기지 않고 깔끔하게 비운다 -
+        // 실패했을 때만 원인 파악용으로 로그를 보여준다.
+        log.innerHTML = '';
         toast('다팔자 자동 수집 및 반영이 완료되었습니다.', 'ok');
         state.loadedTabs.delete('summary');
         loadDashOrders();
       } else if (data.ok && data.upload && data.upload.error) {
+        renderCollectLog('collect-log', data);
         toast(`파일은 저장했지만 반영 중 오류: ${data.upload.error}`, 'err');
       } else {
+        renderCollectLog('collect-log', data);
         toast('자동 수집이 중간에 멈췄어요. 아래 로그를 확인해주세요.', 'err');
       }
     } catch (e) {

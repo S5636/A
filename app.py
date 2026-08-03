@@ -317,6 +317,13 @@ def api_dapalza_collect():
             os.remove(result['file_path'])
         except Exception:
             pass
+        # 자동화가 끝나면 다팔자 창이 화면 맨 앞에 그대로 남아서, 성공했는지
+        # 아닌지 바로 알기 어렵다는 피드백을 받았다 - 성공했을 때는 마진보드
+        # 브라우저 창을 다시 앞으로 가져와서 눈으로 바로 확인할 수 있게 한다.
+        try:
+            dapalza_auto.bring_marginboard_to_front()
+        except Exception:
+            pass
     return jsonify(result)
 
 

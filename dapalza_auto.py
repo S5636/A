@@ -46,6 +46,58 @@ def _find_hwnds_by_class(class_name, exclude_handles=None):
     return found
 
 
+def bring_marginboard_to_front(log=None):
+    """DPJ 자동화가 끝난 뒤 다팔자 창이 화면 맨 앞에 그대로 남아있으면,
+    사용자가 자동화가 끝났는지 아닌지 바로 알기 어렵다는 피드백을 받았다.
+    제목에 '이유상점 Margin Board'가 들어간 창(마진보드 브라우저 탭)을 찾아서
+    맨 앞으로 가져온다. 그냥 SetForegroundWindow만 부르면 백그라운드
+    프로세스가 호출한다는 이유로 윈도우 보안 정책 때문에 조용히 무시되는
+    경우가 많아서, AttachThreadInput으로 우회하는 표준 기법을 같이 쓴다."""
+    try:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        found = []
+
+        def _callback(hwnd, _lparam):
+            try:
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length == 0:
+                    return True
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                if '이유상점 Margin Board' in buf.value:
+                    found.append(hwnd)
+            except Exception:
+                pass
+            return True
+
+        wndenumproc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)(_callback)
+        user32.EnumWindows(wndenumproc, 0)
+        if not found:
+            if log is not None:
+                log("마진보드 브라우저 창을 찾지 못해 화면 앞으로 가져오지 못했습니다(무시하고 계속 진행).")
+            return False
+        hwnd = found[0]
+        SW_RESTORE = 9
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        fg_hwnd = user32.GetForegroundWindow()
+        fg_thread = user32.GetWindowThreadProcessId(fg_hwnd, None)
+        target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+        current_thread = kernel32.GetCurrentThreadId()
+        user32.AttachThreadInput(current_thread, fg_thread, True)
+        user32.AttachThreadInput(current_thread, target_thread, True)
+        user32.SetForegroundWindow(hwnd)
+        user32.AttachThreadInput(current_thread, fg_thread, False)
+        user32.AttachThreadInput(current_thread, target_thread, False)
+        return True
+    except Exception as e:
+        if log is not None:
+            log(f"창을 앞으로 가져오는 데 실패했지만 무시하고 계속 진행합니다: {type(e).__name__}: {e}")
+        return False
+
+
 def _wrap_hwnd_uia(hwnd):
     # UIAElementInfo의 실제 생성자 매개변수 이름은 'handle'이 아니라
     # 'handle_or_elem'이다 (이걸 몰라서 handle=hwnd로 호출했다가 매 시도마다
