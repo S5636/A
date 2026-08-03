@@ -77,7 +77,18 @@ def init_db():
         order_date TEXT, prod_id TEXT, prod_name TEXT, qty TEXT, order_amt TEXT, ship_fee TEXT,
         add_ship_fee TEXT, fee_rate TEXT, market_fee TEXT, settle_amt TEXT, vendor_prod_id TEXT,
         buy_cost TEXT, buy_ship_fee TEXT, buy_total TEXT, final_margin TEXT, margin_rate TEXT,
-        margin_chk TEXT DEFAULT 'AUTO', bundle_no TEXT DEFAULT '', ad_chk TEXT DEFAULT 'N')""")
+        margin_chk TEXT DEFAULT 'AUTO', bundle_no TEXT DEFAULT '', ad_chk TEXT DEFAULT 'N',
+        option_name TEXT DEFAULT '')""")
+    # 이미 만들어져 있던(예전 버전) merged_orders에는 option_name 컬럼이
+    # 없으므로, CREATE TABLE IF NOT EXISTS로는 안 생긴다 - 있는지 확인해서
+    # 없으면 추가한다 (재고상태를 상품코드 단위가 아니라 실제 주문된 옵션
+    # 단위로 정확히 확인하려면 이 컬럼이 꼭 있어야 함).
+    try:
+        cur.execute("PRAGMA table_info(merged_orders)")
+        if 'option_name' not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE merged_orders ADD COLUMN option_name TEXT DEFAULT ''")
+    except Exception:
+        pass
     cur.execute("""CREATE TABLE IF NOT EXISTS purchase_ledger (
         order_id TEXT, vendor_prod_id TEXT, buy_cost TEXT, buy_ship_fee TEXT, buy_total TEXT,
         buy_status TEXT, buy_time TEXT)""")
@@ -103,11 +114,22 @@ def init_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS vat_summary (
         market TEXT, year INTEGER, month INTEGER, category TEXT, amount INTEGER,
         PRIMARY KEY (market, year, month, category))""")
-    # 판매사상품코드별 오너클랜 재고상태('정상'/'품절'/'확인실패') 캐시.
-    # 상품코드 단위로 확인하는 거라 옵션(사이즈 등) 단위까지는 아직 못 보고,
-    # 그 상품에 하나라도 판매중인 옵션이 있으면 '정상'으로 본다 (STOCK 버튼).
+    # 판매사상품코드+주문된 옵션 단위 오너클랜 재고상태('정상'/'품절'/'확인실패')
+    # 캐시 (STOCK 버튼). 처음엔 상품코드 단위로만 확인해서 옵션이 여러 개인
+    # 상품은 하나라도 살아있으면 무조건 '정상'으로 잘못 나오는 문제가 있었다
+    # - 실제 주문에 찍힌 그 옵션 하나만 정확히 봐야 해서 키를 (상품코드,
+    # 옵션명) 조합으로 바꿨다. 예전 스키마(상품코드만 PK)로 이미 만들어져
+    # 있으면 캐시일 뿐이라 그냥 지우고 새로 만든다.
+    try:
+        cur.execute("PRAGMA table_info(stock_check)")
+        cols = {row[1] for row in cur.fetchall()}
+        if cols and 'option_name' not in cols:
+            cur.execute("DROP TABLE stock_check")
+    except Exception:
+        pass
     cur.execute("""CREATE TABLE IF NOT EXISTS stock_check (
-        vendor_prod_id TEXT PRIMARY KEY, status TEXT, checked_at TEXT)""")
+        vendor_prod_id TEXT, option_name TEXT, status TEXT, checked_at TEXT,
+        PRIMARY KEY (vendor_prod_id, option_name))""")
     conn.commit()
     conn.close()
     if not os.path.exists(FEES_PATH):
@@ -341,22 +363,24 @@ def api_ownerclan_collect():
 def api_ownerclan_check_stock():
     settings = load_settings()
     rows = ce.compute_dataset(DB_PATH, FEES_PATH)
-    # '신규주문' 건들의 판매사상품코드만 확인 대상으로 삼는다 (사용자 요청:
-    # 이미 확정/배송된 건은 재고 확인이 필요 없음). 같은 상품코드가 여러
-    # 주문에 걸쳐있으면 한 번만 확인한다.
-    codes = sorted({r['vendor_prod_id'] for r in rows
-                    if r.get('sell_status') == '신규주문' and r.get('vendor_prod_id')})
-    result = ownerclan_auto.check_stock(settings.get('ownerclan_url', ''), codes)
+    # '신규주문' 건들의 (판매사상품코드, 실제 주문된 옵션) 조합을 확인 대상으로
+    # 삼는다 (사용자 요청: 이미 확정/배송된 건은 재고 확인이 필요 없음).
+    # 예전엔 상품코드만 보고 '옵션 중 아무거나 하나라도 살아있으면 정상'으로
+    # 판정해서, 정작 주문된 그 옵션이 품절이어도 정상으로 잘못 나오는 문제가
+    # 있었다 - 반드시 주문에 찍힌 옵션 그대로 매칭해야 한다.
+    items = sorted({(r['vendor_prod_id'], r.get('option_name') or '') for r in rows
+                     if r.get('sell_status') == '신규주문' and r.get('vendor_prod_id')})
+    result = ownerclan_auto.check_stock(settings.get('ownerclan_url', ''), items)
     if result.get('ok') and result.get('results'):
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
         now = time.strftime('%Y-%m-%d %H:%M:%S')
-        for code, status in result['results'].items():
-            cur.execute("""INSERT OR REPLACE INTO stock_check (vendor_prod_id, status, checked_at)
-                VALUES (?, ?, ?)""", (code, status, now))
+        for entry in result['results']:
+            cur.execute("""INSERT OR REPLACE INTO stock_check (vendor_prod_id, option_name, status, checked_at)
+                VALUES (?, ?, ?, ?)""", (entry['vendor_prod_id'], entry['option_name'], entry['status'], now))
         conn.commit()
         conn.close()
-    result['checked'] = len(result.get('results') or {})
+    result['checked'] = len(result.get('results') or [])
     return jsonify(result)
 
 

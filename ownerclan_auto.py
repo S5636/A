@@ -437,12 +437,37 @@ def _search_url_for_code(order_url, code):
             f'&topSearchKeyword={quote(code)}&topSearchType=selfcode')
 
 
-def _check_one_stock(page, order_url, code, L):
+def _normalize_option_text(s):
+    return re.sub(r'\s+', '', str(s or '')).lower()
+
+
+def _find_matching_option_li(option_lis, option_count, target_option, code, L):
+    """옵션 목록 중 실제 주문에 찍힌 옵션(target_option)과 이름이 일치하는
+    항목을 찾는다. 오너클랜 옵션명에는 '07행운키링-말띠'처럼 우리 쪽 옵션
+    표기('말띠')에는 없는 접두어가 붙어있을 수 있어서, 정확히 같은지가
+    아니라 한쪽이 다른 쪽을 포함하는지로 비교한다(공백/대소문자 무시)."""
+    target_norm = _normalize_option_text(target_option)
+    names = []
+    for i in range(option_count):
+        li = option_lis.nth(i)
+        try:
+            name_attr = li.get_attribute('option-name') or ''
+        except Exception:
+            name_attr = ''
+        names.append(name_attr)
+        name_norm = _normalize_option_text(name_attr)
+        if target_norm and name_norm and (target_norm in name_norm or name_norm in target_norm):
+            return li, name_attr
+    L(f"[{code}] 주문된 옵션('{target_option}')과 일치하는 항목을 오너클랜 옵션 목록에서 못 찾았습니다. 오너클랜 옵션 목록: {names}")
+    return None, None
+
+
+def _check_one_stock(page, order_url, code, option, L):
     """판매사상품코드로 오너클랜 검색결과 페이지에 직접 이동해서(검색창을 직접
-    누르지 않고) 재고상태를 확인한다. 옵션(사이즈 등) 단위까지는 못 보고 상품
-    전체 기준이다 - '바로구매' 버튼이 있으면(=적어도 하나는 살 수 있는 옵션이
-    있으면) '정상', 없고 '품절' 표시만 있으면 '품절', 둘 다 아니면(검색 결과
-    자체가 없는 등) '확인실패'로 본다."""
+    누르지 않고) 재고상태를 확인한다. 상품에 옵션(색상/사이즈 등)이 있으면
+    '아무 옵션이나 하나 살아있으면 정상'이 아니라, 실제 주문에 찍힌 그 옵션
+    하나만 정확히 찾아서 그 옵션의 품절여부로 판정한다. 옵션 자체가 없는
+    단일상품은 '바로구매' 버튼 유무로 본다."""
     url = _search_url_for_code(order_url, code)
     try:
         page.goto(url, wait_until='domcontentloaded', timeout=30000)
@@ -507,14 +532,14 @@ def _check_one_stock(page, order_url, code, L):
     except Exception:
         pass
 
-    # 옵션(사이즈 등)이 있는 상품은 '바로구매' 버튼이 옵션과 무관하게 항상 떠
-    # 있어서, 텍스트로만 보면 특정 옵션이 품절이어도 못 잡는다. 사용자가 실제
-    # 상세페이지 HTML을 캡쳐해서 확인해준 구조: 각 옵션이
-    # <li class="option" option-soldout="0"|"1" ...> 형태로 품절 여부를
-    # 속성에 정확히 갖고 있다(품절이면 클래스에 soldout-option도 추가됨).
-    # 텍스트 추측이 아니라 이 속성으로 정확히 판정한다 - 옵션 중 하나라도
-    # 품절이 아니면(그 옵션으로는 살 수 있으면) '정상', 옵션이 있는데 전부
-    # 품절이면 '품절'.
+    # 옵션(사이즈/색상 등)이 있는 상품은 '바로구매' 버튼이 옵션과 무관하게
+    # 항상 떠 있어서, 텍스트로만 보면 특정 옵션이 품절이어도 못 잡는다.
+    # 사용자가 실제 상세페이지 HTML을 캡쳐해서 확인해준 구조: 각 옵션이
+    # <li class="option" option-name="07행운키링-말띠" option-soldout="0"|"1">
+    # 형태로 이름과 품절 여부를 속성에 정확히 갖고 있다. 여기서 '옵션 중
+    # 아무거나 하나라도 살아있으면 정상'으로 보면 안 된다 - 옵션이 여러 개인
+    # 상품은 그럼 사실상 항상 정상으로만 나와서 의미가 없다. 실제 주문에
+    # 찍힌 그 옵션 하나만 정확히 찾아서, 그 옵션 자체의 품절여부로 판정한다.
     try:
         option_lis = page.locator('li.option[option-soldout]')
         option_count = option_lis.count()
@@ -523,16 +548,19 @@ def _check_one_stock(page, order_url, code, L):
         return '확인실패'
 
     if option_count > 0:
-        try:
-            any_available = any(
-                option_lis.nth(i).get_attribute('option-soldout') == '0'
-                for i in range(option_count)
-            )
-        except Exception as e:
-            L(f"[{code}] 옵션별 품절여부 확인 실패: {type(e).__name__}: {e}")
+        if not option:
+            L(f"[{code}] 이 상품은 옵션이 {option_count}개 있는데 주문에 기록된 옵션 정보가 없어서 정확히 판정할 수 없습니다.")
             return '확인실패'
-        L(f"[{code}] 옵션 {option_count}개 중 구매 가능한 옵션 {'있음' if any_available else '없음'}.")
-        return '정상' if any_available else '품절'
+        li, matched_name = _find_matching_option_li(option_lis, option_count, option, code, L)
+        if li is None:
+            return '확인실패'
+        try:
+            soldout = li.get_attribute('option-soldout')
+        except Exception as e:
+            L(f"[{code}] 옵션 품절여부 확인 실패: {type(e).__name__}: {e}")
+            return '확인실패'
+        L(f"[{code}] 주문 옵션 '{option}' → 오너클랜 옵션 '{matched_name}' 매칭, {'구매 가능' if soldout == '0' else '품절'}.")
+        return '정상' if soldout == '0' else '품절'
 
     # 옵션 목록 자체가 없는 단일 상품은 페이지에 '바로구매' 버튼이 있는지로
     # 판단한다. exact=True로 '바로구매' 글자만 딱 맞춰서 찾다가, 버튼 안에
@@ -554,26 +582,28 @@ def _check_one_stock(page, order_url, code, L):
     return '확인실패'
 
 
-def _check_stock_impl(order_url, codes, L):
+def _check_stock_impl(order_url, items, L):
     page = _get_or_launch_page(L, launch_if_missing=False)
     if page is None:
         L("아직 로그인된 브라우저가 없습니다 - 먼저 '오너클랜 로그인 설정'을 눌러 로그인해주세요.")
-        return {}
+        return []
 
-    results = {}
-    for code in codes:
+    results = []
+    for code, option in items:
         if not code:
             continue
-        L(f"[{code}] 오너클랜에서 재고상태 확인 중...")
-        status = _check_one_stock(page, order_url, code, L)
-        results[code] = status
-        L(f"[{code}] → {status}")
+        label = f"{code}/{option}" if option else code
+        L(f"[{label}] 오너클랜에서 재고상태 확인 중...")
+        status = _check_one_stock(page, order_url, code, option, L)
+        results.append({'vendor_prod_id': code, 'option_name': option, 'status': status})
+        L(f"[{label}] → {status}")
     return results
 
 
-def check_stock(order_url, codes):
-    """판매사상품코드 목록을 받아 각각 오너클랜에서 재고상태를 확인해서
-    {코드: '정상'|'품절'|'확인실패'} 딕셔너리로 돌려준다."""
+def check_stock(order_url, items):
+    """(판매사상품코드, 주문된 옵션) 조합 목록을 받아 각각 오너클랜에서
+    재고상태를 확인해서 [{'vendor_prod_id':.., 'option_name':.., 'status':
+    '정상'|'품절'|'확인실패'}, ...] 리스트로 돌려준다."""
     log = []
 
     def L(msg):
@@ -581,26 +611,26 @@ def check_stock(order_url, codes):
 
     if platform.system() != 'Windows':
         L('이 기능은 윈도우 PC에서만 동작합니다.')
-        return {'ok': False, 'log': log, 'results': {}}
+        return {'ok': False, 'log': log, 'results': []}
 
     if not order_url:
         L("오너클랜 주소가 설정되어 있지 않습니다. '데이터 업로드' 탭에서 '바로가기 주소 설정'으로 오너클랜 발주내역 페이지 주소를 먼저 저장해주세요.")
-        return {'ok': False, 'log': log, 'results': {}}
+        return {'ok': False, 'log': log, 'results': []}
 
     try:
         import playwright  # noqa: F401
     except ImportError:
         L("playwright가 설치되어 있지 않습니다. START.bat을 다시 실행하면 자동으로 설치됩니다.")
-        return {'ok': False, 'log': log, 'results': {}}
+        return {'ok': False, 'log': log, 'results': []}
 
-    if not codes:
+    if not items:
         L('확인할 판매사상품코드가 없습니다 (신규주문 건이 없는 것 같아요).')
-        return {'ok': True, 'log': log, 'results': {}}
+        return {'ok': True, 'log': log, 'results': []}
 
     try:
-        results = _run_on_worker(_check_stock_impl, order_url, codes, L)
+        results = _run_on_worker(_check_stock_impl, order_url, items, L)
     except Exception as e:
         L(f'자동화 중 오류 발생 - {_friendly_error(e)}')
-        return {'ok': False, 'log': log, 'results': {}}
+        return {'ok': False, 'log': log, 'results': []}
 
     return {'ok': True, 'log': log, 'results': results}

@@ -59,6 +59,7 @@ def detect_and_normalize(df):
         new_df['add_ship_fee'] = _get_col(df, ['추가배송비', '추가비']).apply(_clamp_ship_fee)
         new_df['qty'] = _get_col(df, ['주문수량', '수량'])
         new_df['sell_status'] = _get_col(df, ['주문상태', '진행상태']).apply(_decode_status)
+        new_df['option_name'] = _get_col(df, ['옵션', '옵션정보', '주문옵션', '상품옵션', '옵션명'])
         new_df['source'] = '다팔자'
         return new_df.fillna(''), '다팔자'
 
@@ -75,6 +76,7 @@ def detect_and_normalize(df):
         new_df['add_ship_fee'] = '0'
         new_df['qty'] = _get_col(df, ['주문건수', '수량'])
         new_df['sell_status'] = _get_col(df, ['주문상태', '상태'])
+        new_df['option_name'] = _get_col(df, ['옵션', '옵션정보', '주문옵션', '상품옵션', '옵션명'])
         new_df['source'] = 'TOSS'
         new_df['market'] = 'TOSS'
         new_df = new_df[~new_df['order_id'].astype(str).str.replace(' ', '').str.contains('수정불가|수정가능', na=False)]
@@ -176,22 +178,27 @@ def process_upload(db_path, fp, filename):
         bundle_no = clean_id(row.get('bundle_no', ''))
         if not order_id:
             continue
+        option_name = str(row.get('option_name', '')).strip()
+        if option_name.lower() in ('nan', 'none', '-'):
+            option_name = ''
         if order_id in existing:
             cur.execute("""UPDATE merged_orders SET source=?, market=?, sell_status=?, order_date=?,
                 prod_id=?, prod_name=?, qty=?, order_amt=?, ship_fee=?, vendor_prod_id=?,
-                bundle_no=?, add_ship_fee=? WHERE order_id=?""", (
+                bundle_no=?, add_ship_fee=?, option_name=? WHERE order_id=?""", (
                 str(row['source']), str(row['market']), str(row['sell_status']), str(row['order_date']),
                 str(row['prod_id']), str(row['prod_name']), str(row['qty']), str(row['order_amt']),
                 str(row['ship_fee']), str(row['vendor_prod_id']), bundle_no, str(row.get('add_ship_fee', '0')),
-                order_id))
+                option_name, order_id))
             c_up += 1
         else:
             cur.execute("""INSERT INTO merged_orders (order_id, source, market, sell_status, order_date,
-                prod_id, prod_name, qty, order_amt, ship_fee, vendor_prod_id, margin_chk, bundle_no, add_ship_fee)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AUTO', ?, ?)""", (
+                prod_id, prod_name, qty, order_amt, ship_fee, vendor_prod_id, margin_chk, bundle_no, add_ship_fee,
+                option_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AUTO', ?, ?, ?)""", (
                 order_id, str(row['source']), str(row['market']), str(row['sell_status']), str(row['order_date']),
                 str(row['prod_id']), str(row['prod_name']), str(row['qty']), str(row['order_amt']),
-                str(row['ship_fee']), str(row['vendor_prod_id']), bundle_no, str(row.get('add_ship_fee', '0'))))
+                str(row['ship_fee']), str(row['vendor_prod_id']), bundle_no, str(row.get('add_ship_fee', '0')),
+                option_name))
             existing.add(order_id)
             c_in += 1
     conn.commit()
