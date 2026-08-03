@@ -568,9 +568,16 @@
       const data = await api('/api/dapalza/collect', { method: 'POST' });
       if (data.ok && data.upload && !data.upload.error) {
         // 성공했을 때는 로그를 지저분하게 남기지 않고 깔끔하게 비운다 -
-        // 실패했을 때만 원인 파악용으로 로그를 보여준다.
+        // 실패했을 때만 원인 파악용으로 로그를 보여준다. 옵션/합배송코드가
+        // 실제로 몇 건이나 채워졌는지는 로그 대신 완료 토스트에 짧게
+        // 같이 보여준다(다팔자 파일의 옵션 컬럼을 제대로 찾고 있는지
+        // 매번 확인할 수 있게).
         log.innerHTML = '';
-        toast('다팔자 자동 수집 및 반영이 완료되었습니다.', 'ok');
+        const u = data.upload;
+        const extra = (typeof u.total_rows === 'number')
+          ? ` (옵션 ${u.option_filled || 0}/${u.total_rows}건, 합배송코드 ${u.bundle_filled || 0}/${u.total_rows}건)`
+          : '';
+        toast(`다팔자 자동 수집 및 반영이 완료되었습니다.${extra}`, 'ok');
         state.loadedTabs.delete('summary');
         loadDashOrders();
       } else if (data.ok && data.upload && data.upload.error) {

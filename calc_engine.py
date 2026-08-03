@@ -360,8 +360,14 @@ def compute_dataset(db_path, fees_path):
             'settle_amt': settle_amt,
             'vendor_prod_id': m['vendor_prod_id'],
             'option_name': str(r[idx_['option_name']] or '') if 'option_name' in idx_ else '',
-            'stock_status': stock_map.get(
-                (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ''),
+            # 재고상태는 상품+옵션 단위로 캐시돼있어서, 같은 상품을 산 취소된
+            # 주문 건도 캐시 키가 같으면 화면에 그대로 보였다 - 취소건까지
+            # 품절/정상이 찍혀 보여서 헷갈린다는 지적이 있었다. STOCK 확인
+            # 대상 자체가 '신규주문' 건으로 한정돼있으니(app.py), 표시도
+            # 똑같이 신규주문 건에만 보이게 맞춘다.
+            'stock_status': (stock_map.get(
+                (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), '')
+                if sell_status == '신규주문' else ''),
             'buy_cost': int(display_buy_cost),
             'buy_ship_fee': int(display_buy_ship),
             'buy_total': int(display_buy_cost + display_buy_ship),

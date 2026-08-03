@@ -80,8 +80,12 @@ def bring_marginboard_to_front(log=None):
                 log("마진보드 브라우저 창을 찾지 못해 화면 앞으로 가져오지 못했습니다(무시하고 계속 진행).")
             return False
         hwnd = found[0]
-        SW_RESTORE = 9
-        user32.ShowWindow(hwnd, SW_RESTORE)
+        # 최소화 상태였다면 그냥 복원(SW_RESTORE)만 하면 예전에 남아있던
+        # 이상한 크기/위치(예: 화면 옆으로 찌그러진 상태)로 그대로 돌아오는
+        # 사고가 있었다 - 항상 최대화(SW_MAXIMIZE)로 띄워서 매번 온전한
+        # 크기로 보이게 한다.
+        SW_MAXIMIZE = 3
+        user32.ShowWindow(hwnd, SW_MAXIMIZE)
         fg_hwnd = user32.GetForegroundWindow()
         fg_thread = user32.GetWindowThreadProcessId(fg_hwnd, None)
         target_thread = user32.GetWindowThreadProcessId(hwnd, None)

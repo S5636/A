@@ -173,6 +173,10 @@ def process_upload(db_path, fp, filename):
     cur.execute("SELECT order_id FROM merged_orders")
     existing = {str(r[0]).strip() for r in cur.fetchall()}
     c_in = c_up = 0
+    # 다팔자 파일에 '옵션'/'묶음번호' 컬럼을 우리가 추측한 이름으로 제대로
+    # 찾고 있는지 확인용 진단 카운트 - 옵션 매칭이 이상하게 나올 때 이
+    # 컬럼 자체를 못 찾고 있는 건 아닌지 로그만 보고 바로 알 수 있게 한다.
+    n_option_filled = n_bundle_filled = 0
     for _, row in df_map.iterrows():
         order_id = clean_id(row['order_id'])
         bundle_no = clean_id(row.get('bundle_no', ''))
@@ -181,6 +185,10 @@ def process_upload(db_path, fp, filename):
         option_name = str(row.get('option_name', '')).strip()
         if option_name.lower() in ('nan', 'none', '-'):
             option_name = ''
+        if option_name:
+            n_option_filled += 1
+        if bundle_no:
+            n_bundle_filled += 1
         if order_id in existing:
             cur.execute("""UPDATE merged_orders SET source=?, market=?, sell_status=?, order_date=?,
                 prod_id=?, prod_name=?, qty=?, order_amt=?, ship_fee=?, vendor_prod_id=?,
@@ -203,7 +211,9 @@ def process_upload(db_path, fp, filename):
             c_in += 1
     conn.commit()
     conn.close()
-    return {'type': source_type, 'inserted': c_in, 'updated': c_up}
+    return {'type': source_type, 'inserted': c_in, 'updated': c_up,
+            'option_filled': n_option_filled, 'bundle_filled': n_bundle_filled,
+            'total_rows': c_in + c_up}
 
 
 # ---------------------------------------------------------------------------
