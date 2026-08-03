@@ -456,9 +456,13 @@ def apply_filters(rows, year=None, month=None, market=None, search=None,
     if unpurchased_only:
         out = [r for r in out if r['margin_label'] and '미매입' in r['margin_label']]
     if bundle_only:
+        # 합배송코드가 그 행 자신의 원장주문코드(order_id)와 같으면 실제로는
+        # 묶인 게 아니라 그 주문 하나를 가리키는 것뿐이므로 제외해야 한다
+        # (사용자가 문서에 뭉뚱그려 썼던 부분을 명확히 해서 반영).
         counts = {}
         for r in out:
-            if r['bundle_no']:
+            if r['bundle_no'] and r['bundle_no'] != r['order_id']:
                 counts[r['bundle_no']] = counts.get(r['bundle_no'], 0) + 1
-        out = [r for r in out if r['bundle_no'] and counts.get(r['bundle_no'], 0) > 1]
+        out = [r for r in out if r['bundle_no'] and r['bundle_no'] != r['order_id']
+               and counts.get(r['bundle_no'], 0) > 1]
     return out
