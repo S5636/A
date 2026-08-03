@@ -58,7 +58,14 @@ def detect_and_normalize(df):
         new_df['ship_fee'] = _get_col(df, ['마켓배송비', '배송비']).apply(_clamp_ship_fee)
         new_df['add_ship_fee'] = _get_col(df, ['추가배송비', '추가비']).apply(_clamp_ship_fee)
         new_df['qty'] = _get_col(df, ['주문수량', '수량'])
-        new_df['sell_status'] = _get_col(df, ['주문상태', '진행상태']).apply(_decode_status)
+        _raw_status = _get_col(df, ['주문상태', '진행상태'])
+        new_df['sell_status'] = _raw_status.apply(_decode_status)
+        # 주문상태가 빈 값이면 '신규주문'으로 기본 처리되는데, 실제로는
+        # 다팔자에 '배송준비' 등 다른 상태로 찍혀있는데도 우리 쪽이 그
+        # 컬럼을 못 찾아서 계속 신규주문으로 보이는 사고인지 확인하려고
+        # 원래 빈 값이었는지를 따로 남겨둔다.
+        new_df['sell_status_was_blank'] = _raw_status.apply(
+            lambda v: str(v).strip().lower() in ('nan', 'none', ''))
         new_df['option_name'] = _get_col(df, ['옵션', '옵션정보', '주문옵션', '상품옵션', '옵션명'])
         new_df['source'] = '다팔자'
         return new_df.fillna(''), '다팔자'
@@ -176,7 +183,7 @@ def process_upload(db_path, fp, filename):
     # 다팔자 파일에 '옵션'/'묶음번호' 컬럼을 우리가 추측한 이름으로 제대로
     # 찾고 있는지 확인용 진단 카운트 - 옵션 매칭이 이상하게 나올 때 이
     # 컬럼 자체를 못 찾고 있는 건 아닌지 로그만 보고 바로 알 수 있게 한다.
-    n_option_filled = n_bundle_filled = 0
+    n_option_filled = n_bundle_filled = n_status_blank = 0
     for _, row in df_map.iterrows():
         order_id = clean_id(row['order_id'])
         bundle_no = clean_id(row.get('bundle_no', ''))
@@ -189,6 +196,8 @@ def process_upload(db_path, fp, filename):
             n_option_filled += 1
         if bundle_no:
             n_bundle_filled += 1
+        if bool(row.get('sell_status_was_blank', False)):
+            n_status_blank += 1
         if order_id in existing:
             cur.execute("""UPDATE merged_orders SET source=?, market=?, sell_status=?, order_date=?,
                 prod_id=?, prod_name=?, qty=?, order_amt=?, ship_fee=?, vendor_prod_id=?,
@@ -213,7 +222,7 @@ def process_upload(db_path, fp, filename):
     conn.close()
     return {'type': source_type, 'inserted': c_in, 'updated': c_up,
             'option_filled': n_option_filled, 'bundle_filled': n_bundle_filled,
-            'total_rows': c_in + c_up}
+            'status_blank': n_status_blank, 'total_rows': c_in + c_up}
 
 
 # ---------------------------------------------------------------------------

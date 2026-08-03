@@ -575,7 +575,7 @@
         log.innerHTML = '';
         const u = data.upload;
         const extra = (typeof u.total_rows === 'number')
-          ? ` (옵션 ${u.option_filled || 0}/${u.total_rows}건, 합배송코드 ${u.bundle_filled || 0}/${u.total_rows}건)`
+          ? ` (옵션 ${u.option_filled || 0}/${u.total_rows}건, 합배송코드 ${u.bundle_filled || 0}/${u.total_rows}건, 주문상태 빈값 ${u.status_blank || 0}건)`
           : '';
         toast(`다팔자 자동 수집 및 반영이 완료되었습니다.${extra}`, 'ok');
         state.loadedTabs.delete('summary');
