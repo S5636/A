@@ -513,8 +513,18 @@ def _check_one_stock(page, order_url, code, option, L):
     try:
         code_link.click(timeout=10000)
     except Exception as e:
-        L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e).__name__}: {e}")
-        return '확인실패'
+        # 요소가 화면에 보이고 안정적인데도(Playwright 자체 로그에 그렇게
+        # 나옴) 클릭이 계속 시간초과 나는 경우가 실제로 있었다 - 광고
+        # 배너 등 다른 요소가 그 클릭 좌표를 위에서 가로채고 있을 때
+        # 흔히 나는 증상이다. 화면을 보고 클릭하는 대신, 그 링크
+        # 엘리먼트에 직접 자바스크립트로 클릭 이벤트를 발생시켜서
+        # 가로채는 요소를 우회한다.
+        L(f"[{code}] 화면 클릭이 시간초과 났습니다({type(e).__name__}) - 다른 요소가 가리고 있을 수 있어 직접 클릭 이벤트로 재시도합니다...")
+        try:
+            code_link.evaluate('el => el.click()')
+        except Exception as e2:
+            L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e2).__name__}: {e2}")
+            return '확인실패'
 
     # 검색결과 페이지에서 겪었던 것과 같은 문제(.count()는 안 기다림)가
     # 상세페이지에서도 똑같이 날 수 있다 - '바로구매' 글자 하나만 기다리는
