@@ -694,6 +694,16 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             before_files = {f for f in os.listdir(target_dir) if f.lower().endswith('.xlsx')}
         except Exception:
             before_files = set()
+        # 저장창 파일이름 칸을 안 건드리다 보니, 그 창이 처음에 어느 폴더를
+        # 띄우고 있었는지에 우리가 관여를 안 한다 - 항상 target_dir로
+        # 열린다는 보장이 없어서, 다운로드 폴더도 같이 스냅샷 떠두고 못
+        # 찾으면 거기서도 찾아본다(사용자 로그로 target_dir에서 파일을
+        # 끝내 못 찾은 실패 사례를 확인해서 추가).
+        downloads_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
+        try:
+            before_files_dl = {f for f in os.listdir(downloads_dir) if f.lower().endswith('.xlsx')}
+        except Exception:
+            before_files_dl = set()
 
         L('저장창의 파일이름 칸은 건드리지 않고, 다팔자가 제안하는 기본 파일명 그대로 저장한 뒤 파이썬으로 안전하게 이름을 바꿉니다...')
         try:
@@ -717,36 +727,45 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             pass
 
         def _find_new_xlsx():
-            try:
-                now_files = {f for f in os.listdir(target_dir) if f.lower().endswith('.xlsx')}
-            except Exception:
-                return None
             candidates = []
-            for f in (now_files - before_files):
-                p = os.path.join(target_dir, f)
+            for folder, before_set in ((target_dir, before_files), (downloads_dir, before_files_dl)):
                 try:
-                    if (time.time() - os.path.getmtime(p)) < 90:
-                        candidates.append(p)
+                    now_files = {f for f in os.listdir(folder) if f.lower().endswith('.xlsx')}
                 except Exception:
                     continue
+                for f in (now_files - before_set):
+                    p = os.path.join(folder, f)
+                    try:
+                        if (time.time() - os.path.getmtime(p)) < 90:
+                            candidates.append(p)
+                    except Exception:
+                        continue
             if not candidates:
                 return None
             candidates.sort(key=os.path.getmtime, reverse=True)
-            return candidates[0]
+            found = candidates[0]
+            if os.path.dirname(found) != target_dir:
+                L(f'저장 대상 폴더가 아니라 다운로드 폴더에서 새 파일을 찾았습니다: {found}')
+            return found
 
         L('새로 저장된 파일을 찾는 중...')
         new_file_path = None
-        for _ in range(20):
+        for _ in range(30):
             new_file_path = _find_new_xlsx()
             if new_file_path:
                 break
             time.sleep(1)
 
         if new_file_path is None:
-            # Enter가 다른 창(사용자가 그 사이 클릭한 다른 프로그램 등)으로 샜을
-            # 수 있으니, 저장창이 아직 열려있다면 이번엔 '저장' 버튼을 직접 찾아서
-            # 마지막으로 한 번 더 시도해본다.
-            L('아직 새 파일을 못 찾았습니다 - 저장창이 남아있으면 저장 버튼을 직접 클릭해서 재시도합니다...')
+            # 실제 로그로 확인된 사실: 이 시점엔 저장창(save_win)이 진짜로는
+            # 이미 닫혀서(=Enter로 저장 자체는 이미 끝난 상태) descendants()가
+            # 0개인데, .exists()/.is_visible()는 그래도 True를 돌려주는 경우가
+            # 있었다 - 그래서 존재하지도 않는 창에 '저장' 버튼을 찾으려다
+            # 당연히 실패하고("화면 요소 0개"), 정작 진짜 원인(파일이 다른
+            # 폴더에 저장됐거나 디스크 쓰기가 늦어짐)은 확인도 못 해보고
+            # 끝나버렸다. exists 체크만 믿지 말고 descendants 개수를 직접
+            # 봐서, 정말 창이 남아있을 때만 클릭을 재시도한다.
+            L('아직 새 파일을 못 찾았습니다 - 저장창이 실제로 남아있는지 확인 중...')
             try:
                 try:
                     still_there = save_win.exists(timeout=2)
@@ -755,6 +774,12 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                     # 없다 - is_visible()로 대신 확인한다.
                     still_there = save_win.is_visible()
                 if still_there:
+                    try:
+                        still_there = len(save_win.descendants()) > 0
+                    except Exception:
+                        still_there = False
+                if still_there:
+                    L('저장창이 실제로 남아있습니다 - 저장 버튼을 직접 클릭해서 재시도합니다...')
                     save_win.set_focus()
                     _click(save_win, '저장', 'Button', L)
                     time.sleep(1)
@@ -765,11 +790,16 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                             _click(confirm, '예', 'Button', L)
                     except Exception:
                         pass
-                    for _ in range(10):
-                        new_file_path = _find_new_xlsx()
-                        if new_file_path:
-                            break
-                        time.sleep(1)
+                else:
+                    # 저장창은 이미 닫혀있다(=저장 자체는 끝났을 가능성이 큼) -
+                    # 클릭할 대상이 없으니 재시도 대신, 디스크 쓰기/백신 검사가
+                    # 늦어지는 경우를 대비해 조금 더 길게 파일만 다시 찾아본다.
+                    L('저장창이 이미 닫혀있습니다(저장 자체는 끝난 것으로 보임) - 파일 쓰기가 늦어지는 걸 대비해 다시 확인합니다...')
+                for _ in range(20):
+                    new_file_path = _find_new_xlsx()
+                    if new_file_path:
+                        break
+                    time.sleep(1)
             except Exception as e:
                 L(f'재시도 중 오류: {type(e).__name__}: {e}')
         if new_file_path is None:
