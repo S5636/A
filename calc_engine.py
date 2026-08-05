@@ -11,6 +11,7 @@ compute_dataset() 결과만 사용한다 - 화면마다 계산을 따로 구현�
 import sqlite3
 import re
 import json
+from datetime import datetime
 
 MARKETS = ["쿠팡", "네이버", "11번가", "지마켓", "옥션", "TOSS", "카카오"]
 
@@ -256,11 +257,18 @@ def compute_dataset(db_path, fees_path):
 
     # 보조 매칭: 오너클랜 발주내역에 원장주문코드 흔적이 아예 없는 합배송 건을
     # 위한 규칙(사용자가 실제 사례로 확인해서 확정) - 같은 판매사상품코드 +
-    # 같은 주문일(day) + 같은 수령인 + 같은 배송지를 가진 주문들 중 하나라도
-    # 원장주문코드 그룹 매칭이 있으면, 매칭 없는 나머지도 같은 그룹으로 묶는다.
-    # bundle_no는 여기서도 전혀 안 쓴다 - 수령인/배송지/상품/날짜만 본다.
+    # 같은 수령인 + 같은 배송지를 가진 주문들 중, 시간 차이가 1분 이내인
+    # 것들만 같은 그룹으로 묶는다(같은 날짜 전체를 묶으면 너무 넓어서
+    # 무관한 주문까지 묶일 위험이 있다는 지적으로 1분 이내로 좁힘).
+    # bundle_no는 여기서도 전혀 안 쓴다.
     if 'recipient' in idx and 'ship_address' in idx:
-        recipient_groups = {}
+        def _parse_dt(s):
+            try:
+                return datetime.strptime(str(s or '').strip()[:19], '%Y-%m-%d %H:%M:%S')
+            except Exception:
+                return None
+
+        pra_groups = {}
         for r in raw_rows:
             oid = clean_id(r[idx['order_id']])
             if not oid:
@@ -268,26 +276,27 @@ def compute_dataset(db_path, fees_path):
             recipient = str(r[idx['recipient']] or '').strip()
             ship_address = str(r[idx['ship_address']] or '').strip()
             vendor_prod_id = str(r[idx['vendor_prod_id']] or '').strip()
-            order_date = str(r[idx['order_date']] or '').strip()
-            day = order_date.split(' ')[0] if order_date else ''
-            if not (recipient and ship_address and vendor_prod_id and day):
+            dt = _parse_dt(r[idx['order_date']])
+            if not (recipient and ship_address and vendor_prod_id and dt):
                 continue
-            key = (vendor_prod_id, day, recipient, ship_address)
-            recipient_groups.setdefault(key, []).append(oid)
+            key = (vendor_prod_id, recipient, ship_address)
+            pra_groups.setdefault(key, []).append((oid, dt))
+
         # '매칭됨'은 owner_group_of(②+③ 다단계 패턴)뿐 아니라 ①(단건 즉시
         # 확정) 패턴이나 HL 매칭까지 전부 포함해야 한다 - 실제 사례(4410119815)가
         # 원장주문코드=자기 order_id에 총결제금액이 바로 찍힌 ① 단건 패턴이라,
         # owner_group_of에는 안 들어가고 purchase_dict에만 직접 들어있었다.
-        # 그래서 이걸 놓치고 있었다.
-        for oids in recipient_groups.values():
-            matched = [o for o in oids if o in oid_to_owner_key or o in purchase_dict]
-            if not matched:
+        for items in pra_groups.values():
+            anchors = [(o, dt) for o, dt in items if o in oid_to_owner_key or o in purchase_dict]
+            if not anchors:
                 continue
-            anchor = matched[0]
-            group_key = oid_to_owner_key.get(anchor, anchor)
-            for o in oids:
-                if o not in oid_to_owner_key:
-                    oid_to_owner_key[o] = group_key
+            for o2, dt2 in items:
+                if o2 in oid_to_owner_key:
+                    continue
+                for anchor_oid, anchor_dt in anchors:
+                    if abs((dt2 - anchor_dt).total_seconds()) <= 60:
+                        oid_to_owner_key[o2] = oid_to_owner_key.get(anchor_oid, anchor_oid)
+                        break
 
     order_counts = {}
     prelim = []
