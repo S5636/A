@@ -152,11 +152,12 @@ def _build_owner_matches(cur, oid_to_bundle, purchase_dict):
     스펙 5.2의 ①/② 우선순위가 원래 하나의 조회로 합쳐져 있는 구조를 그대로 재현.
 
     '합배송' 판정은 판매측 bundle_no(합배송코드)가 아니라 이 스캔이 찾아낸
-    원장주문코드 3단계 그룹(대표행+하위행들이 하나의 원장주문코드 아래 실제로
-    묶여있는지)을 기준으로 해야 한다(사용자 지시) - bundle_no는 참고용일 뿐이고,
-    같은 원장주문코드로 묶인 주문들끼리 bundle_no가 서로 다른 경우도 있다.
-    그래서 하위행이 2건 이상(대표행 자신 포함) 모인 진짜 합배송 그룹만
-    owner_group_of에 그 그룹의 원장주문코드를 값으로 기록해 반환한다."""
+    원장주문코드 3단계 구조를 기준으로 해야 한다(사용자 지시) - bundle_no는
+    참고용일 뿐이고, 같은 원장주문코드로 묶인 주문들끼리 bundle_no가 서로
+    다른 경우도 있다. 원장주문코드가 비어있는 행(하위행/합산행)은 그 자체로
+    이미 합배송 구조의 일부이므로(사용자 지시: "원장주문코드가 비어있는
+    행은 무조건 합배송의 일부"), 대표행+합산행 패턴으로 매입가가 확정된
+    건은 하위행 개수와 상관없이 전부 owner_group_of에 기록해 반환한다."""
     cur.execute("SELECT 원장주문코드, 주문코드, 상품코드, 상품가격, 배송비, 배송상태 FROM ownerclan_raw ORDER BY rowid ASC")
     raw_owner = cur.fetchall()
 
@@ -206,12 +207,12 @@ def _build_owner_matches(cur, oid_to_bundle, purchase_dict):
                     _merge(saved_id, data)
                 if main_w_id in oid_to_bundle:
                     bundle_to_owner[oid_to_bundle[main_w_id]] = data
-                if len(current_bundle_ids) > 1:
-                    # 대표행 자신 말고 하위행이 실제로 하나 이상 더 있어야
-                    # 진짜 합배송이다(하위행 없이 대표행 혼자 확정되는 경우는
-                    # 그냥 단건이 3단계 서식으로 찍힌 것뿐).
-                    for saved_id in current_bundle_ids:
-                        owner_group_of[saved_id] = main_w_id
+                # 원장주문코드가 비어있는 행(하위행/합산행)은 그 자체로 이미
+                # 합배송 3단계 구조의 일부다(사용자 지시) - 하위행이 몇 개
+                # 딸려있는지와 상관없이, 대표행+합산행 패턴으로 매입가가
+                # 확정된 건은 전부 이 구조에 속한 것으로 취급한다.
+                for saved_id in current_bundle_ids:
+                    owner_group_of[saved_id] = main_w_id
                 current_bundle_ids = []
                 main_w_id = ""
             else:

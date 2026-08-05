@@ -633,14 +633,23 @@
     log.innerHTML = '<div class="hint">오너클랜 자동화를 시작합니다... (백그라운드, 화면은 안 뜹니다)</div>';
     try {
       const data = await api('/api/ownerclan/collect', { method: 'POST' });
-      renderCollectLog('collect-log', data);
       if (data.ok && data.upload && !data.upload.error) {
-        toast('오너클랜 자동 수집 및 반영이 완료되었습니다.', 'ok');
+        // STOCK/DPJ와 마찬가지로 문제없이 끝났을 땐 로그를 지저분하게
+        // 남기지 않고 토스트로만 결과를 알린다 (실패했을 때만 원인
+        // 파악용으로 로그를 남긴다).
+        log.innerHTML = '';
+        const u = data.upload;
+        const extra = (typeof u.total_rows === 'number')
+          ? ` (${u.inserted || 0}건 신규, ${u.updated || 0}건 갱신)`
+          : '';
+        toast(`오너클랜 자동 수집 및 반영이 완료되었습니다.${extra}`, 'ok');
         state.loadedTabs.delete('summary');
         loadDashOrders();
       } else if (data.ok && data.upload && data.upload.error) {
+        renderCollectLog('collect-log', data);
         toast(`파일은 저장했지만 반영 중 오류: ${data.upload.error}`, 'err');
       } else {
+        renderCollectLog('collect-log', data);
         toast('자동 수집이 중간에 멈췄어요. 아래 로그를 확인해주세요.', 'err');
       }
     } catch (e) {
