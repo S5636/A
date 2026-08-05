@@ -75,12 +75,24 @@
   }
 
   function toast(msg, type = '') {
+    // 잠깐 떴다 사라지는 게 너무 빨라서 못 읽고 지나간다는 지적이 있었다 -
+    // 표시시간을 늘리고, 클릭하면 바로 닫히게 하고, 마우스를 올려놓는 동안은
+    // 안 사라지게(hover하면 타이머 정지) 해서 원하는 만큼 읽을 수 있게 한다.
     const wrap = document.getElementById('toast-wrap');
     const el = document.createElement('div');
     el.className = `toast ${type}`;
     el.textContent = msg;
+    el.style.cursor = 'pointer';
+    el.title = '클릭하면 닫힙니다';
     wrap.appendChild(el);
-    setTimeout(() => el.remove(), 4200);
+    let timer = null;
+    const remove = () => { if (el.parentNode) el.remove(); };
+    const start = () => { timer = setTimeout(remove, 9000); };
+    const stop = () => { if (timer) clearTimeout(timer); };
+    el.addEventListener('click', remove);
+    el.addEventListener('mouseenter', stop);
+    el.addEventListener('mouseleave', start);
+    start();
   }
 
   function renderChip(label, active, onClick, extraClass = '') {

@@ -273,12 +273,26 @@ def _dump_structure(win, descendants=None):
 def _click(win, title, control_type=None, log=None):
     # 트리를 한 번만 훑어서 여러 곳에 재사용한다 - 다팔자처럼 트리가 크고 느린
     # 앱에서 같은 창을 반복해서 훑으면 그 자체가 타임아웃/에러로 이어질 수 있다.
-    try:
-        descendants = win.descendants()
-    except Exception as e:
-        descendants = None
+    #
+    # 접근성 트리가 미리 워밍업(945개까지 확인)됐는데도, 바로 다음 클릭
+    # 시도에서 다시 11개(창 테두리 정도)로 훅 줄어든 채 잡히는 사고가
+    # 실제로 있었다 - 다팔자 내부에서 화면이 순간적으로 다시 그려지는
+    # 타이밍과 겹친 것으로 보인다. 요소 수가 그렇게 비정상적으로 적으면
+    # 바로 포기하지 않고 잠깐 쉬었다 다시 한번 읽어본다.
+    descendants = None
+    for attempt in range(3):
+        try:
+            descendants = win.descendants()
+        except Exception as e:
+            descendants = None
+            if log is not None:
+                log(f"화면 요소 목록을 가져오는 데 실패했습니다: {type(e).__name__}: {e}")
+            break
+        if len(descendants) > 20 or attempt == 2:
+            break
         if log is not None:
-            log(f"화면 요소 목록을 가져오는 데 실패했습니다: {type(e).__name__}: {e}")
+            log(f"화면 요소가 {len(descendants)}개뿐이라(순간적으로 다시 줄어든 것으로 보임) 잠깐 쉬었다 다시 확인합니다...")
+        time.sleep(2)
 
     ctrl = _find_smallest_text_match(win, title, log, descendants=descendants)
     if ctrl is None:
