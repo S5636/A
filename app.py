@@ -103,12 +103,25 @@ def init_db():
     # 밀어내는 일이 생겼다. 기존에 이미 쌓인 중복은 가장 나중에 들어온
     # (rowid가 큰) 행만 남기고 정리한 뒤, 다시는 중복이 안 쌓이게 유니크
     # 인덱스를 건다.
+    #
+    # [치명적 버그 재발견/수정] 위 유니크 인덱스가 원장주문코드+주문코드
+    # 전체에 걸려있었는데, 스펙 5.2의 합배송 3단계 구조(대표행 아래
+    # 하위행/합산행들은 원장주문코드가 비어있고, 주문코드도 '-'라서 clean_id를
+    # 거치면 둘 다 빈 문자열('')이 됨)에서는 서로 다른 합배송 그룹의
+    # 하위행/합산행들이 전부 똑같은 ('','') 키를 갖게 된다. 그 결과 매
+    # 업로드/앱 재시작마다 이 DELETE와 parsers.py의 INSERT OR REPLACE가
+    # ('','') 행들을 서로 밀어내서 실제로는 딱 1개 그룹의 합산행만 살아남고
+    # 나머지 모든 합배송 그룹의 매입가 정보가 통째로 사라지고 있었다 -
+    # "합배송은 잡히는데 매입은 하나만 잡힌다"는 증상의 진짜 원인. 원장주문코드가
+    # 실제로 있는 행(단건/대표행)에만 유니크 제약을 걸어서, 정체성이 없는
+    # 하위행/합산행은 절대 서로 덮어쓰지 않고 매번 그대로 쌓이게 고친다.
     try:
-        cur.execute("""DELETE FROM ownerclan_raw WHERE rowid NOT IN (
-            SELECT MAX(rowid) FROM ownerclan_raw GROUP BY 원장주문코드, 주문코드
+        cur.execute("""DELETE FROM ownerclan_raw WHERE 원장주문코드 != '' AND rowid NOT IN (
+            SELECT MAX(rowid) FROM ownerclan_raw WHERE 원장주문코드 != '' GROUP BY 원장주문코드, 주문코드
         )""")
+        cur.execute("DROP INDEX IF EXISTS idx_ownerclan_raw_key")
         cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_ownerclan_raw_key
-            ON ownerclan_raw(원장주문코드, 주문코드)""")
+            ON ownerclan_raw(원장주문코드, 주문코드) WHERE 원장주문코드 != ''""")
     except Exception:
         pass
     cur.execute("""CREATE TABLE IF NOT EXISTS vat_summary (
