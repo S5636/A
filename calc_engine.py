@@ -251,6 +251,27 @@ def compute_dataset(db_path, fees_path):
         pass  # 아직 stock_check 테이블이 없는 예전 DB일 수 있음
     conn.close()
 
+    # 오너클랜 원장주문코드 기준 실제 합배송 그룹에 속한 주문이면 그 그룹을
+    # group_id로 쓴다 - bundle_no(합배송코드)는 참고용일 뿐이고 같은
+    # 원장주문코드로 묶인 주문끼리도 bundle_no가 서로 다를 수 있어서,
+    # bundle_no만 보면 진짜 합배송인데도 안 묶이는 문제가 있었다(사용자
+    # 지시로 재설계). 다만 같은 bundle_no를 가진 주문들끼리는 판매 채널이
+    # 실제로 같이 묶어서 보낸 형제 주문들이므로, 그중 한 건이라도 원장주문코드
+    # 그룹을 찾았으면 나머지 형제들도 같은 그룹으로 합쳐야 한다 - 안 그러면
+    # 형제 주문 중 매칭된 것만 매입가가 잡히고 나머지는 그 매칭 정보를 전혀
+    # 못 받아서 갑자기 미매입으로 보이는 문제가 생긴다.
+    oid_to_owner_key = {}
+    for r in raw_rows:
+        oid = clean_id(r[idx['order_id']])
+        if oid and oid in owner_group_of:
+            oid_to_owner_key[oid] = f"OWNERGRP:{owner_group_of[oid]}"
+    bundle_repr_key = {}
+    for r in raw_rows:
+        oid = clean_id(r[idx['order_id']])
+        b_no = clean_id(r[idx['bundle_no']])
+        if oid and b_no and oid in oid_to_owner_key:
+            bundle_repr_key[b_no] = oid_to_owner_key[oid]
+
     order_counts = {}
     prelim = []
     for r in raw_rows:
@@ -258,12 +279,12 @@ def compute_dataset(db_path, fees_path):
         if not oid or '수정' in oid or '불가' in oid:
             continue
         b_no = clean_id(r[idx['bundle_no']])
-        # 오너클랜 원장주문코드 기준 실제 합배송 그룹에 속한 주문이면 그
-        # 그룹을 group_id로 쓴다 - bundle_no(합배송코드)는 참고용일 뿐이고
-        # 같은 원장주문코드로 묶인 주문끼리도 서로 다를 수 있어서, bundle_no만
-        # 보면 진짜 합배송인데도 안 묶이거나(매입가 배정 실패), 반대로 묶이면
-        # 안 되는 것끼리 묶이는 문제가 있었다(사용자 지시로 재설계).
-        group_id = f"OWNERGRP:{owner_group_of[oid]}" if oid in owner_group_of else (b_no if b_no else oid)
+        if oid in oid_to_owner_key:
+            group_id = oid_to_owner_key[oid]
+        elif b_no and b_no in bundle_repr_key:
+            group_id = bundle_repr_key[b_no]
+        else:
+            group_id = b_no if b_no else oid
         order_counts[group_id] = order_counts.get(group_id, 0) + 1
         prelim.append((oid, b_no, group_id, r))
 
