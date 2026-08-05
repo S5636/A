@@ -557,13 +557,19 @@ def _check_one_stock(page, order_url, code, option, L):
         L(f"[{code}] 옵션 목록 확인 실패: {type(e).__name__}: {e}")
         return '확인실패'
 
+    # 판정 기준(사용자 지시): '바로구매' 버튼 유무는 더 이상 기준으로 안
+    # 쓴다. ①찾는 옵션칸 자체에 '품절'이라고 써있거나 ②찾는 옵션이 목록에
+    # 아예 없을 때만 품절로 본다 - 그 외(옵션이 있고 품절 표시가 없음)는
+    # 전부 정상으로 본다.
     if option_count > 0:
         if not option:
             L(f"[{code}] 이 상품은 옵션이 {option_count}개 있는데 주문에 기록된 옵션 정보가 없어서 정확히 판정할 수 없습니다.")
             return '확인실패'
         li, matched_name = _find_matching_option_li(option_lis, option_count, option, code, L)
         if li is None:
-            return '확인실패'
+            # 찾는 옵션이 목록에 없음 -> 품절로 본다.
+            L(f"[{code}] 주문 옵션 '{option}'을 오너클랜 옵션 목록에서 못 찾았습니다 - 품절로 처리합니다.")
+            return '품절'
         try:
             soldout = li.get_attribute('option-soldout')
         except Exception as e:
@@ -572,24 +578,21 @@ def _check_one_stock(page, order_url, code, option, L):
         L(f"[{code}] 주문 옵션 '{option}' → 오너클랜 옵션 '{matched_name}' 매칭, {'구매 가능' if soldout == '0' else '품절'}.")
         return '정상' if soldout == '0' else '품절'
 
-    # 옵션 목록 자체가 없는 단일 상품은 페이지에 '바로구매' 버튼이 있는지로
-    # 판단한다. exact=True로 '바로구매' 글자만 딱 맞춰서 찾다가, 버튼 안에
-    # 보이지 않는 여백/아이콘이 같이 들어있으면 매칭이 실패해서 있는데도
-    # 없다고 오판할 위험이 있어 exact=False로 완화했다.
+    # 옵션 목록 자체가 없는 단일 상품. 페이지 전체에서 '품절'을 느슨하게
+    # (exact=False) 찾으면 리뷰/추천상품/안내문구 등 상품 자체와 무관한
+    # 곳에 있는 글자까지 걸려서, 실제로는 정상인데도 품절로 잘못 나오는
+    # 사고가 있었다(실제로 다 정상인 상품 3개가 전부 품절로 나옴).
+    # '품절'이라는 글자 딱 그것만이 요소의 전체 텍스트인 경우(진짜 품절
+    # 배지/라벨일 가능성이 높음)로 exact=True로 좁혀서, 긴 문장 속에
+    # 우연히 '품절'이라는 단어가 섞여 있는 경우는 걸러낸다.
     try:
-        has_buy_now = page.get_by_text('바로구매', exact=False).count() > 0
-        has_soldout = page.get_by_text('품절', exact=False).count() > 0
+        has_soldout = page.get_by_text('품절', exact=True).count() > 0
     except Exception as e:
         L(f"[{code}] 상품 페이지 상태 확인 실패: {type(e).__name__}: {e}")
         return '확인실패'
 
-    L(f"[{code}] 옵션 없는 단일상품 - 바로구매 버튼 {'있음' if has_buy_now else '없음'}, 품절 글자 {'있음' if has_soldout else '없음'}.")
-    if has_buy_now:
-        return '정상'
-    if has_soldout:
-        return '품절'
-    L(f"[{code}] '바로구매'도 '품절'도 못 찾았습니다 - 상품 페이지가 맞는지 확인 필요.")
-    return '확인실패'
+    L(f"[{code}] 옵션 없는 단일상품 - '품절' 배지 {'있음' if has_soldout else '없음'}.")
+    return '품절' if has_soldout else '정상'
 
 
 def _check_stock_impl(order_url, items, L):
