@@ -46,16 +46,42 @@ def _find_hwnds_by_class(class_name, exclude_handles=None):
     return found
 
 
+def _force_foreground_hwnd(hwnd, maximize=False, log=None):
+    """그냥 SetForegroundWindow만 부르면 백그라운드 프로세스가 호출한다는
+    이유로 윈도우 보안 정책 때문에 조용히 무시되는 경우가 많다(호출은
+    성공한 것처럼 리턴되지만 실제로는 창이 안 앞으로 안 나옴) -
+    AttachThreadInput으로 우회하는 표준 기법을 쓴다. 다팔자 자동화 시작
+    직전에 다팔자 창을 확실히 앞으로 가져오는 데도, DPJ 완료 후 마진보드
+    창을 앞으로 가져오는 데도 똑같이 쓴다."""
+    try:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        if maximize:
+            SW_MAXIMIZE = 3
+            user32.ShowWindow(hwnd, SW_MAXIMIZE)
+        fg_hwnd = user32.GetForegroundWindow()
+        fg_thread = user32.GetWindowThreadProcessId(fg_hwnd, None)
+        target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+        current_thread = kernel32.GetCurrentThreadId()
+        user32.AttachThreadInput(current_thread, fg_thread, True)
+        user32.AttachThreadInput(current_thread, target_thread, True)
+        user32.SetForegroundWindow(hwnd)
+        user32.AttachThreadInput(current_thread, fg_thread, False)
+        user32.AttachThreadInput(current_thread, target_thread, False)
+        return True
+    except Exception as e:
+        if log is not None:
+            log(f"창을 앞으로 가져오는 데 실패했지만 무시하고 계속 진행합니다: {type(e).__name__}: {e}")
+        return False
+
+
 def bring_marginboard_to_front(log=None):
     """DPJ 자동화가 끝난 뒤 다팔자 창이 화면 맨 앞에 그대로 남아있으면,
     사용자가 자동화가 끝났는지 아닌지 바로 알기 어렵다는 피드백을 받았다.
     제목에 '이유상점 Margin Board'가 들어간 창(마진보드 브라우저 탭)을 찾아서
-    맨 앞으로 가져온다. 그냥 SetForegroundWindow만 부르면 백그라운드
-    프로세스가 호출한다는 이유로 윈도우 보안 정책 때문에 조용히 무시되는
-    경우가 많아서, AttachThreadInput으로 우회하는 표준 기법을 같이 쓴다."""
+    맨 앞으로 가져온다."""
     try:
         user32 = ctypes.windll.user32
-        kernel32 = ctypes.windll.kernel32
         found = []
 
         def _callback(hwnd, _lparam):
@@ -79,23 +105,11 @@ def bring_marginboard_to_front(log=None):
             if log is not None:
                 log("마진보드 브라우저 창을 찾지 못해 화면 앞으로 가져오지 못했습니다(무시하고 계속 진행).")
             return False
-        hwnd = found[0]
         # 최소화 상태였다면 그냥 복원(SW_RESTORE)만 하면 예전에 남아있던
         # 이상한 크기/위치(예: 화면 옆으로 찌그러진 상태)로 그대로 돌아오는
         # 사고가 있었다 - 항상 최대화(SW_MAXIMIZE)로 띄워서 매번 온전한
         # 크기로 보이게 한다.
-        SW_MAXIMIZE = 3
-        user32.ShowWindow(hwnd, SW_MAXIMIZE)
-        fg_hwnd = user32.GetForegroundWindow()
-        fg_thread = user32.GetWindowThreadProcessId(fg_hwnd, None)
-        target_thread = user32.GetWindowThreadProcessId(hwnd, None)
-        current_thread = kernel32.GetCurrentThreadId()
-        user32.AttachThreadInput(current_thread, fg_thread, True)
-        user32.AttachThreadInput(current_thread, target_thread, True)
-        user32.SetForegroundWindow(hwnd)
-        user32.AttachThreadInput(current_thread, fg_thread, False)
-        user32.AttachThreadInput(current_thread, target_thread, False)
-        return True
+        return _force_foreground_hwnd(found[0], maximize=True, log=log)
     except Exception as e:
         if log is not None:
             log(f"창을 앞으로 가져오는 데 실패했지만 무시하고 계속 진행합니다: {type(e).__name__}: {e}")
@@ -376,7 +390,22 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             return {'ok': False, 'log': log}
         # desktop.windows()가 돌려주는 건 WindowSpecification이 아니라 UIAWrapper라서
         # .wait()가 없다 - 이미 존재가 확인된 요소이니 포커스만 주면 된다.
-        win.set_focus()
+        # set_focus()만으로는(내부적으로 그냥 SetForegroundWindow를 부르는
+        # 걸로 보임) 실제로 창이 앞으로 안 나오고 조용히 무시되는 경우가
+        # 있었다 - 특히 직전에 마진보드 창을 강제로 앞에 가져온 뒤라면
+        # 윈도우 보안 정책 때문에 더 그럴 수 있다. 접근성 트리가 120초 내내
+        # 창 테두리(11개)에서 안 늘어나던 사고가 바로 이 증상과 일치한다
+        # (창이 실제로는 뒤에 가려진 채 렌더링이 멎어있었을 가능성). 더
+        # 확실한 방법(AttachThreadInput 우회)을 같이 써서 확실히 앞으로
+        # 가져온다.
+        try:
+            win.set_focus()
+        except Exception:
+            pass
+        try:
+            _force_foreground_hwnd(win.handle, maximize=True, log=L)
+        except Exception as e:
+            L(f'창 강제 포커스 시도 실패(무시하고 계속 진행): {type(e).__name__}: {e}')
         L('다팔자 창을 찾았습니다.')
 
         # 다팔자는 클래스명이 Chrome_WidgetWin_1(Electron/Chromium 기반)이다.
