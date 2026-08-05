@@ -659,15 +659,24 @@
     log.innerHTML = '<div class="hint">신규주문 건들의 재고상태를 오너클랜에서 백그라운드로 확인하는 중... (건수에 따라 시간이 걸릴 수 있어요)</div>';
     try {
       const data = await api('/api/ownerclan/check_stock', { method: 'POST' });
-      renderCollectLog('collect-log', data);
+      log.innerHTML = '';
       if (data.ok) {
-        toast(`재고상태 확인 완료 (${data.checked || 0}건).`, 'ok');
+        const results = data.results || [];
+        let ok = 0, soldout = 0, fail = 0;
+        results.forEach((r) => {
+          if (r.status === '정상') ok++;
+          else if (r.status === '품절') soldout++;
+          else fail++;
+        });
+        const detail = results.length
+          ? ` - 정상 ${ok}건, 품절 ${soldout}건${fail ? `, 확인실패 ${fail}건` : ''}`
+          : '';
+        toast(`재고상태 확인 완료 (${data.checked || 0}건)${detail}.`, 'ok');
         loadDashOrders();
       } else {
-        toast('재고상태 확인이 중간에 멈췄어요. 아래 로그를 확인해주세요.', 'err');
+        toast('재고상태 확인이 중간에 멈췄어요.', 'err');
       }
     } catch (e) {
-      log.innerHTML = `<div class="upload-log-item err"><span>${e.message}</span></div>`;
       toast('재고상태 확인 요청이 실패했습니다.', 'err');
     }
     btn.disabled = false;

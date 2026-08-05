@@ -143,11 +143,19 @@ def _build_owner_matches(cur, oid_to_bundle, purchase_dict):
     """오너클랜 발주내역 3단계 구조 스캔 (스펙 5.2).
     단건(원장주문코드=w_id가 판매측 order_id와 그대로 일치하는 발주 관례) 매칭 결과는
     HL과 동일한 purchase_dict에 직접 병합한다 (HL 매칭이 있으면 덮어쓰지 않음) -
-    스펙 5.2의 ①/② 우선순위가 원래 하나의 조회로 합쳐져 있는 구조를 그대로 재현."""
+    스펙 5.2의 ①/② 우선순위가 원래 하나의 조회로 합쳐져 있는 구조를 그대로 재현.
+
+    '합배송' 판정은 판매측 bundle_no(합배송코드)가 아니라 이 스캔이 찾아낸
+    원장주문코드 3단계 그룹(대표행+하위행들이 하나의 원장주문코드 아래 실제로
+    묶여있는지)을 기준으로 해야 한다(사용자 지시) - bundle_no는 참고용일 뿐이고,
+    같은 원장주문코드로 묶인 주문들끼리 bundle_no가 서로 다른 경우도 있다.
+    그래서 하위행이 2건 이상(대표행 자신 포함) 모인 진짜 합배송 그룹만
+    owner_group_of에 그 그룹의 원장주문코드를 값으로 기록해 반환한다."""
     cur.execute("SELECT 원장주문코드, 주문코드, 상품코드, 상품가격, 배송비, 배송상태 FROM ownerclan_raw ORDER BY rowid ASC")
     raw_owner = cur.fetchall()
 
     bundle_to_owner = {}
+    owner_group_of = {}
     current_bundle_ids = []
     main_w_id = ""
 
@@ -192,6 +200,12 @@ def _build_owner_matches(cur, oid_to_bundle, purchase_dict):
                     _merge(saved_id, data)
                 if main_w_id in oid_to_bundle:
                     bundle_to_owner[oid_to_bundle[main_w_id]] = data
+                if len(current_bundle_ids) > 1:
+                    # 대표행 자신 말고 하위행이 실제로 하나 이상 더 있어야
+                    # 진짜 합배송이다(하위행 없이 대표행 혼자 확정되는 경우는
+                    # 그냥 단건이 3단계 서식으로 찍힌 것뿐).
+                    for saved_id in current_bundle_ids:
+                        owner_group_of[saved_id] = main_w_id
                 current_bundle_ids = []
                 main_w_id = ""
             else:
@@ -199,7 +213,7 @@ def _build_owner_matches(cur, oid_to_bundle, purchase_dict):
                 if sub_id and sub_id not in current_bundle_ids:
                     current_bundle_ids.append(sub_id)
 
-    return bundle_to_owner
+    return bundle_to_owner, owner_group_of
 
 
 def compute_dataset(db_path, fees_path):
@@ -221,7 +235,7 @@ def compute_dataset(db_path, fees_path):
             oid_to_bundle[oid] = bno
 
     purchase_dict = _build_purchase_dict(cur)
-    bundle_to_owner = _build_owner_matches(cur, oid_to_bundle, purchase_dict)
+    bundle_to_owner, owner_group_of = _build_owner_matches(cur, oid_to_bundle, purchase_dict)
     stock_map = {}
     try:
         cur.execute("SELECT vendor_prod_id, option_name, status FROM stock_check")
@@ -237,7 +251,12 @@ def compute_dataset(db_path, fees_path):
         if not oid or '수정' in oid or '불가' in oid:
             continue
         b_no = clean_id(r[idx['bundle_no']])
-        group_id = b_no if b_no else oid
+        # 오너클랜 원장주문코드 기준 실제 합배송 그룹에 속한 주문이면 그
+        # 그룹을 group_id로 쓴다 - bundle_no(합배송코드)는 참고용일 뿐이고
+        # 같은 원장주문코드로 묶인 주문끼리도 서로 다를 수 있어서, bundle_no만
+        # 보면 진짜 합배송인데도 안 묶이거나(매입가 배정 실패), 반대로 묶이면
+        # 안 되는 것끼리 묶이는 문제가 있었다(사용자 지시로 재설계).
+        group_id = f"OWNERGRP:{owner_group_of[oid]}" if oid in owner_group_of else (b_no if b_no else oid)
         order_counts[group_id] = order_counts.get(group_id, 0) + 1
         prelim.append((oid, b_no, group_id, r))
 
@@ -472,13 +491,10 @@ def apply_filters(rows, year=None, month=None, market=None, search=None,
     if unpurchased_only:
         out = [r for r in out if r['margin_label'] and '미매입' in r['margin_label']]
     if bundle_only:
-        # 합배송코드가 그 행 자신의 원장주문코드(order_id)와 같으면 실제로는
-        # 묶인 게 아니라 그 주문 하나를 가리키는 것뿐이므로 제외해야 한다
-        # (사용자가 문서에 뭉뚱그려 썼던 부분을 명확히 해서 반영).
-        counts = {}
-        for r in out:
-            if r['bundle_no'] and r['bundle_no'] != r['order_id']:
-                counts[r['bundle_no']] = counts.get(r['bundle_no'], 0) + 1
-        out = [r for r in out if r['bundle_no'] and r['bundle_no'] != r['order_id']
-               and counts.get(r['bundle_no'], 0) > 1]
+        # 합배송 판정은 판매측 bundle_no(합배송코드)가 아니라 오너클랜
+        # 원장주문코드 3단계 구조에서 실제로 묶인 그룹인지를 기준으로 한다
+        # (사용자 지시: "합배송코드는 그냥 참고용" - 원장주문코드 기준으로
+        # compute_dataset()의 group_id/is_bundled가 이미 이렇게 계산돼있으니
+        # 그 결과를 그대로 쓴다).
+        out = [r for r in out if r['is_bundled']]
     return out
