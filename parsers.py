@@ -138,13 +138,12 @@ def process_upload(db_path, fp, filename):
     cur = conn.cursor()
 
     if '원장주문코드' in temp_df.columns:
-        n_rows = 0
         # 스펙 5.2가 가정하는 '합배송 3단계 구조'(원장주문코드 없는 빈 행이
         # 하위상품/합산행으로 낀다)가 지금도 실제 다운로드 파일에 있는지
         # 확인하려고 빈 원장주문코드 행 개수를 같이 세어둔다 - 이게 0이면
         # 그 3단계 구조 자체가 지금 안 내려온다는 뜻이라, 합배송 매입상태
         # 매칭이 안 맞는 문제의 원인일 수 있다.
-        n_blank_oid = 0
+        n_blank_oid = n_new = n_upd = 0
         for _, r in temp_df.iterrows():
             oid = clean_id(r.get('원장주문코드', ''))
             jcode = clean_id(r.get('주문코드', ''))
@@ -164,13 +163,26 @@ def process_upload(db_path, fp, filename):
             has_any_value = oid or jcode or any(v for v in row_vals if v)
             if not has_any_value:
                 continue
+            # '신규 N건 · 갱신 0건'으로 항상 0건만 찍히던 게 실제 계산이 아니라
+            # 그냥 하드코딩된 값이었다 - 원장주문코드가 있는 행(정체성이 있는
+            # 단건/대표행)에 한해 이미 있던 행인지 먼저 확인해서 실제 신규/갱신
+            # 건수를 센다. 원장주문코드가 빈 하위행/합산행은 정체성이 없어서
+            # 항상 새로 쌓이는 게 정상이라 전부 신규로 센다.
+            if oid:
+                cur.execute("SELECT 1 FROM ownerclan_raw WHERE 원장주문코드=? AND 주문코드=?", (oid, jcode))
+                is_update = cur.fetchone() is not None
+            else:
+                is_update = False
             vals = [oid] + row_vals
             cur.execute(f"""INSERT OR REPLACE INTO ownerclan_raw
                 (원장주문코드, {', '.join(OWNERCLAN_COLS)}) VALUES ({', '.join(['?'] * (len(OWNERCLAN_COLS) + 1))})""", vals)
-            n_rows += 1
+            if is_update:
+                n_upd += 1
+            else:
+                n_new += 1
         conn.commit()
         conn.close()
-        return {'type': '오너클랜 발주내역', 'inserted': n_rows, 'updated': 0, 'blank_ledger_rows': n_blank_oid}
+        return {'type': '오너클랜 발주내역', 'inserted': n_new, 'updated': n_upd, 'blank_ledger_rows': n_blank_oid}
 
     df_map, source_type = detect_and_normalize(temp_df)
     if df_map is None or df_map.empty:
