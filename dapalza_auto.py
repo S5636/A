@@ -499,6 +499,27 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             except Exception:
                 descendants = None
 
+            # 특정 마켓(네이버 등) 계정이 허용량을 소진했을 때만 뜨는 확인
+            # 팝업 - "지금 진행하면 나머지 계정은 정상 처리되고 위 계정만
+            # 실패로 남습니다. 계속하시겠습니까?" + [아니요]/[예] 버튼. 매번
+            # 뜨는 게 아니라 해당 마켓이 걸렸을 때만 나타나서, 이걸 처리 못
+            # 하면 자동화가 여기서 계속 멈춰있다가 결국 저장창을 못
+            # 찾았다는 엉뚱한 실패로 이어졌다. 뜨면 '예'를 눌러 계속 진행한다.
+            quota_marker = _find_smallest_text_match(win, '허용량이 소진된 계정', None, descendants=descendants)
+            if quota_marker is not None:
+                L("'허용량이 소진된 계정' 안내 팝업 발견 - '예' 눌러 계속 진행합니다...")
+                yes_ctrl = _find_near(quota_marker, '예', L) or _find_smallest_text_match(win, '예', L, descendants=descendants)
+                if yes_ctrl is not None:
+                    try:
+                        yes_ctrl.click_input()
+                        L("'예' 버튼 클릭 완료.")
+                    except Exception as e:
+                        L(f"'예' 버튼 클릭 실패: {type(e).__name__}: {e}")
+                else:
+                    L("'허용량이 소진된 계정' 팝업은 보이는데 '예' 버튼을 못 찾았습니다.")
+                time.sleep(1)
+                continue
+
             done_marker = _find_smallest_text_match(win, '완료하였습니다', None, descendants=descendants)
             if done_marker is not None:
                 L("'주문 수집을 완료하였습니다' 메시지 확인됨 - '확인' 버튼 찾는 중...")
