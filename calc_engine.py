@@ -145,23 +145,23 @@ def _build_purchase_dict(cur):
     return purchase_dict
 
 
-def _build_owner_matches(cur, oid_to_bundle, purchase_dict):
+def _build_owner_matches(cur, purchase_dict):
     """오너클랜 발주내역 3단계 구조 스캔 (스펙 5.2).
     단건(원장주문코드=w_id가 판매측 order_id와 그대로 일치하는 발주 관례) 매칭 결과는
     HL과 동일한 purchase_dict에 직접 병합한다 (HL 매칭이 있으면 덮어쓰지 않음) -
     스펙 5.2의 ①/② 우선순위가 원래 하나의 조회로 합쳐져 있는 구조를 그대로 재현.
 
-    '합배송' 판정은 판매측 bundle_no(합배송코드)가 아니라 이 스캔이 찾아낸
-    원장주문코드 3단계 구조를 기준으로 해야 한다(사용자 지시) - bundle_no는
-    참고용일 뿐이고, 같은 원장주문코드로 묶인 주문들끼리 bundle_no가 서로
-    다른 경우도 있다. 원장주문코드가 비어있는 행(하위행/합산행)은 그 자체로
-    이미 합배송 구조의 일부이므로(사용자 지시: "원장주문코드가 비어있는
-    행은 무조건 합배송의 일부"), 대표행+합산행 패턴으로 매입가가 확정된
-    건은 하위행 개수와 상관없이 전부 owner_group_of에 기록해 반환한다."""
+    '합배송' 판정은 판매측 bundle_no(합배송코드)와 완전히 무관하다(사용자 지시:
+    "합배송코드를 합배송 필터링하는데 사용하지 말라고 했잖아") - 오직 이 스캔이
+    찾아낸 원장주문코드 3단계 구조만 기준으로 삼는다. 원장주문코드가 비어있는
+    행(하위행/합산행)은 그 자체로 이미 합배송 구조의 일부이므로(사용자 지시:
+    "원장주문코드가 비어있는 행은 무조건 합배송의 일부"), 대표행+합산행
+    패턴으로 매입가가 확정된 건은 하위행 개수와 상관없이 전부 owner_group_of에
+    기록해 반환한다. 매칭도 여기서 order_id로 직접 purchase_dict에 병합해두는
+    것만 쓴다 - bundle_no를 거쳐서 매칭을 찾는 경로는 두지 않는다."""
     cur.execute("SELECT 원장주문코드, 주문코드, 상품코드, 상품가격, 배송비, 배송상태 FROM ownerclan_raw ORDER BY rowid ASC")
     raw_owner = cur.fetchall()
 
-    bundle_to_owner = {}
     owner_group_of = {}
     current_bundle_ids = []
     main_w_id = ""
@@ -192,8 +192,6 @@ def _build_owner_matches(cur, oid_to_bundle, purchase_dict):
                 data = {'vendor_prod_id': prod_code, 'buy_cost': price, 'buy_ship_fee': ship,
                         'buy_total': total_buy, 'status': status}
                 _merge(w_id, data)
-                if w_id in oid_to_bundle:
-                    bundle_to_owner[oid_to_bundle[w_id]] = data
                 current_bundle_ids = []
                 main_w_id = ""
             else:
@@ -205,8 +203,6 @@ def _build_owner_matches(cur, oid_to_bundle, purchase_dict):
                         'buy_total': total_buy, 'status': status}
                 for saved_id in current_bundle_ids:
                     _merge(saved_id, data)
-                if main_w_id in oid_to_bundle:
-                    bundle_to_owner[oid_to_bundle[main_w_id]] = data
                 # 원장주문코드가 비어있는 행(하위행/합산행)은 그 자체로 이미
                 # 합배송 3단계 구조의 일부다(사용자 지시) - 하위행이 몇 개
                 # 딸려있는지와 상관없이, 대표행+합산행 패턴으로 매입가가
@@ -220,7 +216,7 @@ def _build_owner_matches(cur, oid_to_bundle, purchase_dict):
                 if sub_id and sub_id not in current_bundle_ids:
                     current_bundle_ids.append(sub_id)
 
-    return bundle_to_owner, owner_group_of
+    return owner_group_of
 
 
 def compute_dataset(db_path, fees_path):
@@ -234,15 +230,8 @@ def compute_dataset(db_path, fees_path):
     idx = {c: i for i, c in enumerate(columns)}
     raw_rows = cur.fetchall()
 
-    oid_to_bundle = {}
-    for r in raw_rows:
-        oid = clean_id(r[idx['order_id']])
-        bno = clean_id(r[idx['bundle_no']])
-        if oid and bno:
-            oid_to_bundle[oid] = bno
-
     purchase_dict = _build_purchase_dict(cur)
-    bundle_to_owner, owner_group_of = _build_owner_matches(cur, oid_to_bundle, purchase_dict)
+    owner_group_of = _build_owner_matches(cur, purchase_dict)
     stock_map = {}
     try:
         cur.execute("SELECT vendor_prod_id, option_name, status FROM stock_check")
@@ -251,26 +240,19 @@ def compute_dataset(db_path, fees_path):
         pass  # 아직 stock_check 테이블이 없는 예전 DB일 수 있음
     conn.close()
 
-    # 오너클랜 원장주문코드 기준 실제 합배송 그룹에 속한 주문이면 그 그룹을
-    # group_id로 쓴다 - bundle_no(합배송코드)는 참고용일 뿐이고 같은
-    # 원장주문코드로 묶인 주문끼리도 bundle_no가 서로 다를 수 있어서,
-    # bundle_no만 보면 진짜 합배송인데도 안 묶이는 문제가 있었다(사용자
-    # 지시로 재설계). 다만 같은 bundle_no를 가진 주문들끼리는 판매 채널이
-    # 실제로 같이 묶어서 보낸 형제 주문들이므로, 그중 한 건이라도 원장주문코드
-    # 그룹을 찾았으면 나머지 형제들도 같은 그룹으로 합쳐야 한다 - 안 그러면
-    # 형제 주문 중 매칭된 것만 매입가가 잡히고 나머지는 그 매칭 정보를 전혀
-    # 못 받아서 갑자기 미매입으로 보이는 문제가 생긴다.
+    # group_id(합배송 판정/매입가 중복배정 방지 기준)는 오직 오너클랜
+    # 원장주문코드 그룹(owner_group_of)만 쓴다. bundle_no(합배송코드)는
+    # 화면에 참고용으로만 보여주는 필드일 뿐, 그룹핑/매칭 어디에도 관여시키지
+    # 않는다(사용자 지시: "합배송코드를 합배송 필터링하는데 사용하지 말라고
+    # 했잖아" - bundle_no로 형제를 묶어서 매입가를 나눠 물려주는 것도 결국
+    # bundle_no를 매칭 판단에 쓰는 것이라 금지 대상에 포함됨). 원장주문코드
+    # 그룹이 없는 주문은 그냥 자기 자신만의 그룹이 된다 - 실제로 매칭되는
+    # 오너클랜 데이터가 없으면 미매입으로 남는 게 맞다.
     oid_to_owner_key = {}
     for r in raw_rows:
         oid = clean_id(r[idx['order_id']])
         if oid and oid in owner_group_of:
             oid_to_owner_key[oid] = f"OWNERGRP:{owner_group_of[oid]}"
-    bundle_repr_key = {}
-    for r in raw_rows:
-        oid = clean_id(r[idx['order_id']])
-        b_no = clean_id(r[idx['bundle_no']])
-        if oid and b_no and oid in oid_to_owner_key:
-            bundle_repr_key[b_no] = oid_to_owner_key[oid]
 
     order_counts = {}
     prelim = []
@@ -279,16 +261,14 @@ def compute_dataset(db_path, fees_path):
         if not oid or '수정' in oid or '불가' in oid:
             continue
         b_no = clean_id(r[idx['bundle_no']])
-        if oid in oid_to_owner_key:
-            group_id = oid_to_owner_key[oid]
-        elif b_no and b_no in bundle_repr_key:
-            group_id = bundle_repr_key[b_no]
-        else:
-            group_id = b_no if b_no else oid
+        group_id = oid_to_owner_key.get(oid, oid)
         order_counts[group_id] = order_counts.get(group_id, 0) + 1
         prelim.append((oid, b_no, group_id, r))
 
-    # 1차 패스: 매입 매칭 우선순위 (스펙 5.2) + 묶음당 매입가 1회만 배정
+    # 1차 패스: 매입 매칭 우선순위 (스펙 5.2) + 묶음당 매입가 1회만 배정.
+    # 매칭은 오직 order_id(원장주문코드 그룹으로 이미 병합된 purchase_dict)로만
+    # 한다 - bundle_no를 거쳐서 매칭을 찾는 경로는 전부 제거했다(사용자 지시:
+    # bundle_no는 매칭/그룹핑 어디에도 쓰면 안 됨).
     bundle_buy_assigned = set()
     bundle_has_purchase = set()
     matched_rows = []
@@ -296,12 +276,6 @@ def compute_dataset(db_path, fees_path):
         ptype, data = None, None
         if oid in purchase_dict:
             ptype, data = purchase_dict[oid]
-        elif b_no and b_no in bundle_to_owner:
-            ptype, data = 'OWNER', bundle_to_owner[b_no]
-        elif oid in oid_to_bundle and oid_to_bundle[oid] in bundle_to_owner:
-            ptype, data = 'OWNER', bundle_to_owner[oid_to_bundle[oid]]
-        elif b_no and b_no in purchase_dict:
-            ptype, data = purchase_dict[b_no]
 
         buy_cost = buy_ship = buy_total = 0.0
         buy_status = ''
