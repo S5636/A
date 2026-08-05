@@ -42,7 +42,7 @@
   const state = {
     tab: 'summary',
     calState: { year: NOW.getFullYear(), month: NOW.getMonth() + 1 },
-    dashFilters: { year: '전체', month: '전체', market: '전체', search: '', hl_only: false, unpurchased_only: false, bundle_only: false },
+    dashFilters: { year: '전체', month: '전체', market: '전체', search: '', hl_only: false, unpurchased_only: false, bundle_only: false, ready_only: false, issue_only: false },
     dashRows: [],
     dashSort: { col: 'order_date', dir: -1 },
     hlRows: [],
@@ -290,10 +290,23 @@
     el.appendChild(toggleGroup); el.appendChild(sep());
 
     el.appendChild(renderChip('필터 초기화', false, () => {
-      state.dashFilters = { year: '전체', month: '전체', market: '전체', search: '', hl_only: false, unpurchased_only: false, bundle_only: false };
+      state.dashFilters = { year: '전체', month: '전체', market: '전체', search: '', hl_only: false, unpurchased_only: false, bundle_only: false, ready_only: false, issue_only: false };
       document.getElementById('dash-search').value = '';
       renderDashFilters(); loadDashOrders();
     }, 'ghost'));
+
+    // READY(신규주문+배송준비)/ISSUE(취소요청+반품요청+주문확인) - 헤더
+    // 오른쪽 DPJ/OC/STOCK 옆에 별도로 둔 상태 필터. 서로는 배타적이지만
+    // 위 토글 그룹(HL주문건/미매입/합배송)과는 독립적으로 같이 켤 수 있다.
+    const statusEl = document.getElementById('dash-status-toggle');
+    statusEl.innerHTML = '';
+    const selectStatusExclusive = (name) => {
+      f.ready_only = name === 'ready_only' ? !f.ready_only : false;
+      f.issue_only = name === 'issue_only' ? !f.issue_only : false;
+      renderDashFilters(); loadDashOrders();
+    };
+    statusEl.appendChild(renderChip('READY', f.ready_only, () => selectStatusExclusive('ready_only'), 'toggle'));
+    statusEl.appendChild(renderChip('ISSUE', f.issue_only, () => selectStatusExclusive('issue_only'), 'toggle'));
   }
 
   // bundleCls: 화면에 표시된 순서상 합배송 그룹이 바뀔 때마다 번갈아 계산된

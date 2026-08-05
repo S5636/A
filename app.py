@@ -200,6 +200,8 @@ def _filters_from_request(args):
         hl_only=args.get('hl_only') == '1',
         unpurchased_only=args.get('unpurchased_only') == '1',
         bundle_only=args.get('bundle_only') == '1',
+        ready_only=args.get('ready_only') == '1',
+        issue_only=args.get('issue_only') == '1',
     )
 
 

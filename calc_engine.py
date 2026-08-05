@@ -519,7 +519,8 @@ def daily_aggregate(rows):
 
 
 def apply_filters(rows, year=None, month=None, market=None, search=None,
-                   hl_only=False, unpurchased_only=False, bundle_only=False):
+                   hl_only=False, unpurchased_only=False, bundle_only=False,
+                   ready_only=False, issue_only=False):
     out = rows
     if year and year != '전체':
         out = [r for r in out if year in r['order_date']]
@@ -550,4 +551,10 @@ def apply_filters(rows, year=None, month=None, market=None, search=None,
         # compute_dataset()의 group_id/is_bundled가 이미 이렇게 계산돼있으니
         # 그 결과를 그대로 쓴다).
         out = [r for r in out if r['is_bundled']]
+    if ready_only:
+        # 다팔자 신규주문 + 배송준비 - 아직 출고 전이라 지금 처리해야 할 건.
+        out = [r for r in out if r['sell_status'] in ('신규주문', '배송준비')]
+    if issue_only:
+        # 취소요청/반품요청/주문확인 - 사람이 직접 확인해야 하는 문제 건.
+        out = [r for r in out if r['sell_status'] in ('취소요청', '반품요청', '주문확인')]
     return out
