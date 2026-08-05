@@ -30,6 +30,13 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
 # 로컬 1인용 앱이라 static 파일(CSS/JS) 캐시를 꺼서, 업데이트 zip으로 갈아끼운 뒤
 # 브라우저가 옛날 버전을 계속 보여주는 문제를 원천 차단한다.
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+# [치명적] launcher.py가 debug=False로 실행하는데, Flask는 debug=False일 때
+# Jinja 템플릿(templates/index.html)을 최초 1회만 컴파일해서 메모리에 캐시해두고
+# 그 뒤로는 파일이 바뀌어도 다시 안 읽는다 - 그래서 zip을 새로 풀어도, 서버
+# 프로세스를 재시작하기 전까지는 build_version 숫자만 새로 보이고(이 값은
+# 요청마다 파일에서 새로 읽음) 실제 화면 레이아웃/버튼 위치 등은 예전 그대로
+# 계속 보이는 사고가 있었다. 항상 최신 파일을 다시 읽게 강제한다.
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 
 @app.errorhandler(Exception)
