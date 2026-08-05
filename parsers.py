@@ -67,6 +67,12 @@ def detect_and_normalize(df):
         new_df['sell_status_was_blank'] = _raw_status.apply(
             lambda v: str(v).strip().lower() in ('nan', 'none', ''))
         new_df['option_name'] = _get_col(df, ['옵션', '옵션정보', '주문옵션', '상품옵션', '옵션명', '마켓상품옵션명'])
+        # 오너클랜 발주내역에 원장주문코드 흔적이 아예 없는 합배송 건을
+        # 찾아내려고(사용자 지시) 수령인+배송지를 같이 저장해둔다 - 같은
+        # 상품을 같은 날 같은 사람/주소로 보낸 미매입 주문은, 매칭된 다른
+        # 주문과 묶어서 매입가를 나눠 받을 수 있게 하는 근거가 된다.
+        new_df['recipient'] = _get_col(df, ['수령인', '받는사람'])
+        new_df['ship_address'] = _get_col(df, ['배송지', '주소'])
         new_df['source'] = '다팔자'
         return new_df.fillna(''), '다팔자'
 
@@ -84,6 +90,8 @@ def detect_and_normalize(df):
         new_df['qty'] = _get_col(df, ['주문건수', '수량'])
         new_df['sell_status'] = _get_col(df, ['주문상태', '상태'])
         new_df['option_name'] = _get_col(df, ['옵션', '옵션정보', '주문옵션', '상품옵션', '옵션명', '마켓상품옵션명'])
+        new_df['recipient'] = _get_col(df, ['수령인', '받는사람', '수취인'])
+        new_df['ship_address'] = _get_col(df, ['배송지', '주소', '수령인주소'])
         new_df['source'] = 'TOSS'
         new_df['market'] = 'TOSS'
         new_df = new_df[~new_df['order_id'].astype(str).str.replace(' ', '').str.contains('수정불가|수정가능', na=False)]
@@ -210,24 +218,26 @@ def process_upload(db_path, fp, filename):
             n_bundle_filled += 1
         if bool(row.get('sell_status_was_blank', False)):
             n_status_blank += 1
+        recipient = str(row.get('recipient', '')).strip()
+        ship_address = str(row.get('ship_address', '')).strip()
         if order_id in existing:
             cur.execute("""UPDATE merged_orders SET source=?, market=?, sell_status=?, order_date=?,
                 prod_id=?, prod_name=?, qty=?, order_amt=?, ship_fee=?, vendor_prod_id=?,
-                bundle_no=?, add_ship_fee=?, option_name=? WHERE order_id=?""", (
+                bundle_no=?, add_ship_fee=?, option_name=?, recipient=?, ship_address=? WHERE order_id=?""", (
                 str(row['source']), str(row['market']), str(row['sell_status']), str(row['order_date']),
                 str(row['prod_id']), str(row['prod_name']), str(row['qty']), str(row['order_amt']),
                 str(row['ship_fee']), str(row['vendor_prod_id']), bundle_no, str(row.get('add_ship_fee', '0')),
-                option_name, order_id))
+                option_name, recipient, ship_address, order_id))
             c_up += 1
         else:
             cur.execute("""INSERT INTO merged_orders (order_id, source, market, sell_status, order_date,
                 prod_id, prod_name, qty, order_amt, ship_fee, vendor_prod_id, margin_chk, bundle_no, add_ship_fee,
-                option_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AUTO', ?, ?, ?)""", (
+                option_name, recipient, ship_address)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AUTO', ?, ?, ?, ?, ?)""", (
                 order_id, str(row['source']), str(row['market']), str(row['sell_status']), str(row['order_date']),
                 str(row['prod_id']), str(row['prod_name']), str(row['qty']), str(row['order_amt']),
                 str(row['ship_fee']), str(row['vendor_prod_id']), bundle_no, str(row.get('add_ship_fee', '0')),
-                option_name))
+                option_name, recipient, ship_address))
             existing.add(order_id)
             c_in += 1
     conn.commit()

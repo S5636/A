@@ -254,6 +254,35 @@ def compute_dataset(db_path, fees_path):
         if oid and oid in owner_group_of:
             oid_to_owner_key[oid] = f"OWNERGRP:{owner_group_of[oid]}"
 
+    # 보조 매칭: 오너클랜 발주내역에 원장주문코드 흔적이 아예 없는 합배송 건을
+    # 위한 규칙(사용자가 실제 사례로 확인해서 확정) - 같은 판매사상품코드 +
+    # 같은 주문일(day) + 같은 수령인 + 같은 배송지를 가진 주문들 중 하나라도
+    # 원장주문코드 그룹 매칭이 있으면, 매칭 없는 나머지도 같은 그룹으로 묶는다.
+    # bundle_no는 여기서도 전혀 안 쓴다 - 수령인/배송지/상품/날짜만 본다.
+    if 'recipient' in idx and 'ship_address' in idx:
+        recipient_groups = {}
+        for r in raw_rows:
+            oid = clean_id(r[idx['order_id']])
+            if not oid:
+                continue
+            recipient = str(r[idx['recipient']] or '').strip()
+            ship_address = str(r[idx['ship_address']] or '').strip()
+            vendor_prod_id = str(r[idx['vendor_prod_id']] or '').strip()
+            order_date = str(r[idx['order_date']] or '').strip()
+            day = order_date.split(' ')[0] if order_date else ''
+            if not (recipient and ship_address and vendor_prod_id and day):
+                continue
+            key = (vendor_prod_id, day, recipient, ship_address)
+            recipient_groups.setdefault(key, []).append(oid)
+        for oids in recipient_groups.values():
+            matched = [o for o in oids if o in oid_to_owner_key]
+            if not matched:
+                continue
+            group_key = oid_to_owner_key[matched[0]]
+            for o in oids:
+                if o not in oid_to_owner_key:
+                    oid_to_owner_key[o] = group_key
+
     order_counts = {}
     prelim = []
     for r in raw_rows:
@@ -271,6 +300,11 @@ def compute_dataset(db_path, fees_path):
     # bundle_no는 매칭/그룹핑 어디에도 쓰면 안 됨).
     bundle_buy_assigned = set()
     bundle_has_purchase = set()
+    # group_id 단위 실제 매입 정보 - 그룹 안에 매입 매칭이 없는 형제 행(수령인/
+    # 배송지로 묶인 미매입 건 등)이 2차 패스에서 먼저 처리되면 그 행의 매입가
+    # 0을 그룹 대표값으로 잘못 써버리는 사고가 있었다 - 그룹의 진짜 매입 정보를
+    # 여기 별도로 저장해두고 2차 패스가 처리 순서와 무관하게 이 값을 쓰게 한다.
+    group_buy_data = {}
     matched_rows = []
     for oid, b_no, group_id, r in prelim:
         ptype, data = None, None
@@ -284,6 +318,7 @@ def compute_dataset(db_path, fees_path):
             if group_id not in bundle_buy_assigned:
                 buy_cost, buy_ship, buy_total = data['buy_cost'], data['buy_ship_fee'], data['buy_total']
                 bundle_buy_assigned.add(group_id)
+                group_buy_data[group_id] = (buy_cost, buy_ship)
                 if buy_total > 0:
                     bundle_has_purchase.add(group_id)
             buy_status = data['status']
@@ -347,7 +382,7 @@ def compute_dataset(db_path, fees_path):
         display_buy_cost = display_buy_ship = 0
         if is_included and not is_cancelled:
             if group_id not in processed_bundles:
-                display_buy_cost, display_buy_ship = m['buy_cost'], m['buy_ship']
+                display_buy_cost, display_buy_ship = group_buy_data.get(group_id, (0, 0))
                 processed_bundles.add(group_id)
 
         margin_amt = None

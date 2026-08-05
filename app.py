@@ -78,15 +78,22 @@ def init_db():
         add_ship_fee TEXT, fee_rate TEXT, market_fee TEXT, settle_amt TEXT, vendor_prod_id TEXT,
         buy_cost TEXT, buy_ship_fee TEXT, buy_total TEXT, final_margin TEXT, margin_rate TEXT,
         margin_chk TEXT DEFAULT 'AUTO', bundle_no TEXT DEFAULT '', ad_chk TEXT DEFAULT 'N',
-        option_name TEXT DEFAULT '')""")
+        option_name TEXT DEFAULT '', recipient TEXT DEFAULT '', ship_address TEXT DEFAULT '')""")
     # 이미 만들어져 있던(예전 버전) merged_orders에는 option_name 컬럼이
     # 없으므로, CREATE TABLE IF NOT EXISTS로는 안 생긴다 - 있는지 확인해서
     # 없으면 추가한다 (재고상태를 상품코드 단위가 아니라 실제 주문된 옵션
     # 단위로 정확히 확인하려면 이 컬럼이 꼭 있어야 함).
     try:
         cur.execute("PRAGMA table_info(merged_orders)")
-        if 'option_name' not in {row[1] for row in cur.fetchall()}:
+        cols_now = {row[1] for row in cur.fetchall()}
+        if 'option_name' not in cols_now:
             cur.execute("ALTER TABLE merged_orders ADD COLUMN option_name TEXT DEFAULT ''")
+        # 오너클랜 발주내역에 원장주문코드 흔적이 아예 없는 합배송 건을
+        # 수령인+배송지+상품+날짜로 찾아내려면(사용자 지시) 이 두 컬럼이 필요.
+        if 'recipient' not in cols_now:
+            cur.execute("ALTER TABLE merged_orders ADD COLUMN recipient TEXT DEFAULT ''")
+        if 'ship_address' not in cols_now:
+            cur.execute("ALTER TABLE merged_orders ADD COLUMN ship_address TEXT DEFAULT ''")
     except Exception:
         pass
     cur.execute("""CREATE TABLE IF NOT EXISTS purchase_ledger (
