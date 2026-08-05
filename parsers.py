@@ -7,6 +7,18 @@ import pandas as pd
 from calc_engine import clean_id, safe_float, STATUS_CODE_MAP
 
 
+def _clean_vendor_prod_id(val):
+    # 판매사상품코드가 정상일 땐 'W...'로 시작하는데, 일부 상품은 같은
+    # 칸에 'sellerbot_W...'처럼 접두어가 붙어서 들어온다 - 접두어가 있으면
+    # 실제 코드(W로 시작하는 부분)만 남긴다. 이 접두어 때문에 같은 상품인데
+    # 코드가 서로 다르게 보여서 합배송 매칭(수령인+배송지+상품코드 비교)이
+    # 실패하는 사고가 있었다(사용자 지시로 정규화).
+    s = str(val).strip()
+    if s.lower().startswith('sellerbot_'):
+        s = s[len('sellerbot_'):]
+    return s
+
+
 def _clamp_ship_fee(val):
     s = str(val).strip().replace(',', '')
     if s.lower() in ('nan', 'none', '-', ''):
@@ -52,7 +64,7 @@ def detect_and_normalize(df):
         new_df['market'] = _get_col(df, ['마켓별칭', '판매처'])
         new_df['order_date'] = _get_col(df, ['주문일시', '결제일시']).apply(_clean_date_str)
         new_df['prod_id'] = _get_col(df, ['상품ID', '상품번호'])
-        new_df['vendor_prod_id'] = _get_col(df, ['판매사상품번호', '업체상품코드'])
+        new_df['vendor_prod_id'] = _get_col(df, ['판매사상품번호', '업체상품코드']).apply(_clean_vendor_prod_id)
         new_df['prod_name'] = _get_col(df, ['상품명', '주문상품명'])
         new_df['order_amt'] = _get_col(df, ['주문금액', '결제금액'])
         new_df['ship_fee'] = _get_col(df, ['마켓배송비', '배송비']).apply(_clamp_ship_fee)
@@ -82,7 +94,7 @@ def detect_and_normalize(df):
         new_df['bundle_no'] = _get_col(df, ['주문번호', '결제번호']).apply(clean_id)
         new_df['order_date'] = _get_col(df, ['주문일시', '주문일자', '결제일시']).apply(_clean_date_str)
         new_df['prod_id'] = _get_col(df, ['상품ID', '상품번호'])
-        new_df['vendor_prod_id'] = _get_col(df, ['상품관리코드', '옵션관리코드', '상품코드', '옵션코드']).astype(str)
+        new_df['vendor_prod_id'] = _get_col(df, ['상품관리코드', '옵션관리코드', '상품코드', '옵션코드']).astype(str).apply(_clean_vendor_prod_id)
         new_df['prod_name'] = _get_col(df, ['상품명'])
         new_df['order_amt'] = _get_col(df, ['주문금액', '거래금액', '결제금액'])
         new_df['ship_fee'] = _get_col(df, ['배송비합계', '배송비']).apply(_clamp_ship_fee)
