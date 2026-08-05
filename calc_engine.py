@@ -257,9 +257,10 @@ def compute_dataset(db_path, fees_path):
 
     # 보조 매칭: 오너클랜 발주내역에 원장주문코드 흔적이 아예 없는 합배송 건을
     # 위한 규칙(사용자가 실제 사례로 확인해서 확정) - 같은 판매사상품코드 +
-    # 같은 수령인 + 같은 배송지를 가진 주문들 중, 시간 차이가 1분 이내인
+    # 같은 수령인 + 같은 배송지를 가진 주문들 중, 시간 차이가 90초 이내인
     # 것들만 같은 그룹으로 묶는다(같은 날짜 전체를 묶으면 너무 넓어서
-    # 무관한 주문까지 묶일 위험이 있다는 지적으로 1분 이내로 좁힘).
+    # 무관한 주문까지 묶일 위험이 있다는 지적으로 좁혔고, 60초는 실제
+    # 사례(65초차) 하나를 놓쳐서 90초로 확정함).
     # bundle_no는 여기서도 전혀 안 쓴다.
     if 'recipient' in idx and 'ship_address' in idx:
         def _parse_dt(s):
@@ -294,7 +295,7 @@ def compute_dataset(db_path, fees_path):
                 if o2 in oid_to_owner_key:
                     continue
                 for anchor_oid, anchor_dt in anchors:
-                    if abs((dt2 - anchor_dt).total_seconds()) <= 60:
+                    if abs((dt2 - anchor_dt).total_seconds()) <= 90:
                         oid_to_owner_key[o2] = oid_to_owner_key.get(anchor_oid, anchor_oid)
                         break
 
