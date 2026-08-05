@@ -274,11 +274,17 @@ def compute_dataset(db_path, fees_path):
                 continue
             key = (vendor_prod_id, day, recipient, ship_address)
             recipient_groups.setdefault(key, []).append(oid)
+        # '매칭됨'은 owner_group_of(②+③ 다단계 패턴)뿐 아니라 ①(단건 즉시
+        # 확정) 패턴이나 HL 매칭까지 전부 포함해야 한다 - 실제 사례(4410119815)가
+        # 원장주문코드=자기 order_id에 총결제금액이 바로 찍힌 ① 단건 패턴이라,
+        # owner_group_of에는 안 들어가고 purchase_dict에만 직접 들어있었다.
+        # 그래서 이걸 놓치고 있었다.
         for oids in recipient_groups.values():
-            matched = [o for o in oids if o in oid_to_owner_key]
+            matched = [o for o in oids if o in oid_to_owner_key or o in purchase_dict]
             if not matched:
                 continue
-            group_key = oid_to_owner_key[matched[0]]
+            anchor = matched[0]
+            group_key = oid_to_owner_key.get(anchor, anchor)
             for o in oids:
                 if o not in oid_to_owner_key:
                     oid_to_owner_key[o] = group_key
