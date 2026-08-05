@@ -66,7 +66,7 @@ def detect_and_normalize(df):
         # 원래 빈 값이었는지를 따로 남겨둔다.
         new_df['sell_status_was_blank'] = _raw_status.apply(
             lambda v: str(v).strip().lower() in ('nan', 'none', ''))
-        new_df['option_name'] = _get_col(df, ['옵션', '옵션정보', '주문옵션', '상품옵션', '옵션명'])
+        new_df['option_name'] = _get_col(df, ['옵션', '옵션정보', '주문옵션', '상품옵션', '옵션명', '마켓상품옵션명'])
         new_df['source'] = '다팔자'
         return new_df.fillna(''), '다팔자'
 
@@ -83,7 +83,7 @@ def detect_and_normalize(df):
         new_df['add_ship_fee'] = '0'
         new_df['qty'] = _get_col(df, ['주문건수', '수량'])
         new_df['sell_status'] = _get_col(df, ['주문상태', '상태'])
-        new_df['option_name'] = _get_col(df, ['옵션', '옵션정보', '주문옵션', '상품옵션', '옵션명'])
+        new_df['option_name'] = _get_col(df, ['옵션', '옵션정보', '주문옵션', '상품옵션', '옵션명', '마켓상품옵션명'])
         new_df['source'] = 'TOSS'
         new_df['market'] = 'TOSS'
         new_df = new_df[~new_df['order_id'].astype(str).str.replace(' ', '').str.contains('수정불가|수정가능', na=False)]

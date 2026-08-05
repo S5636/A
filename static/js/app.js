@@ -87,7 +87,7 @@
     wrap.appendChild(el);
     let timer = null;
     const remove = () => { if (el.parentNode) el.remove(); };
-    const start = () => { timer = setTimeout(remove, 9000); };
+    const start = () => { timer = setTimeout(remove, 20000); };
     const stop = () => { if (timer) clearTimeout(timer); };
     el.addEventListener('click', remove);
     el.addEventListener('mouseenter', stop);

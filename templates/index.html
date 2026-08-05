@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>이유상점 Margin Board</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ build_version|urlencode }}">
 </head>
 <body>
 <div class="app-shell">
@@ -208,6 +208,6 @@
 
 <div class="toast-wrap" id="toast-wrap"></div>
 
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}?v={{ build_version|urlencode }}"></script>
 </body>
 </html>
