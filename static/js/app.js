@@ -674,7 +674,8 @@
         toast(`재고상태 확인 완료 (${data.checked || 0}건)${detail}.`, 'ok');
         loadDashOrders();
       } else {
-        toast('재고상태 확인이 중간에 멈췄어요.', 'err');
+        const reason = (data.log && data.log.length) ? ` - ${data.log[data.log.length - 1]}` : '';
+        toast(`재고상태 확인이 중간에 멈췄어요.${reason}`, 'err');
       }
     } catch (e) {
       toast('재고상태 확인 요청이 실패했습니다.', 'err');

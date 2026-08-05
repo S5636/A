@@ -598,8 +598,13 @@ def _check_one_stock(page, order_url, code, option, L):
 def _check_stock_impl(order_url, items, L):
     page = _get_or_launch_page(L, launch_if_missing=False)
     if page is None:
-        L("아직 로그인된 브라우저가 없습니다 - 먼저 '오너클랜 로그인 설정'을 눌러 로그인해주세요.")
-        return []
+        # 예전엔 여기서 빈 리스트([])를 그냥 돌려줬는데, 그러면 check_stock()이
+        # 이걸 '확인할 게 하나도 없어서 정상적으로 0건'과 구분 못 하고 똑같이
+        # ok=True로 리턴해버려서, 화면엔 "재고상태 확인 완료 (0건)"이라는
+        # 성공 토스트가 떴다 - 사실은 로그인된 브라우저가 없어서 자동화를
+        # 시작도 못 한 실패인데 성공처럼 보인 사고. 예외를 던져서 check_stock()의
+        # 실패 처리 경로(ok=False + 실패 토스트)를 타게 한다.
+        raise RuntimeError("아직 로그인된 브라우저가 없습니다 - 먼저 '오너클랜 로그인 설정'을 눌러 로그인해주세요.")
 
     results = []
     for code, option in items:
