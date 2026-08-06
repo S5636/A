@@ -292,6 +292,63 @@ def _escape_keys(s):
     return ''.join(f'{{{ch}}}' if ch in special else ch for ch in s)
 
 
+def _find_filename_edit(win, log=None):
+    """저장 대화상자의 '파일 이름' 입력칸(Edit 컨트롤)을 직접 찾는다.
+    윈도우 표준 저장 대화상자는 이 칸의 automation_id가 항상 '1148'로 고정돼
+    있다(운영체제 버전과 무관). 이 방식으로 정확한 칸을 직접 찾아내면,
+    Ctrl+A 같은 키보드 단축키가 포커스/타이밍 문제로 엉뚱하게 동작해서
+    (실제로 겪은 사고: 기존 텍스트를 지우지 못하고 리터럴 'a' 글자만 남아
+    경로 앞에 붙어버림 - "aC:\\Users\\...") 파일명이 깨지는 사고를 원천적으로
+    피할 수 있다 - 클릭도, 단축키도 없이 그 칸의 텍스트를 코드로 직접 덮어쓴다."""
+    try:
+        descendants = win.descendants(control_type='Edit')
+    except Exception:
+        descendants = []
+    for d in descendants:
+        try:
+            if d.automation_id() == '1148':
+                return d
+        except Exception:
+            pass
+    for d in descendants:
+        try:
+            name = d.window_text() or ''
+        except Exception:
+            name = ''
+        if '파일' in name or 'file' in name.lower():
+            return d
+    return descendants[0] if descendants else None
+
+
+def _set_save_filename(win, target_path, log=None):
+    """저장창 파일이름 칸에 target_path를 안전하게 넣는다. 우선 그 칸의
+    Edit 컨트롤을 직접 찾아 텍스트를 코드로 덮어쓰는(set_edit_text) 방식을
+    쓴다 - 이건 키보드 입력을 흉내내는 게 아니라 컨트롤의 값 자체를
+    바꾸는 것이라 Ctrl+A 타이밍 문제가 아예 발생할 수 없다. 그 칸을 못
+    찾은 경우에만 예전 방식(Ctrl+A 후 타이핑)으로 대체한다."""
+    edit_ctrl = _find_filename_edit(win, log)
+    if edit_ctrl is not None:
+        try:
+            edit_ctrl.set_edit_text(target_path)
+            if log is not None:
+                log(f'파일이름 칸(Edit 컨트롤)을 직접 찾아 텍스트를 설정했습니다(키보드 입력 없이): {target_path}')
+            return True
+        except Exception as e:
+            if log is not None:
+                log(f'파일이름 칸에 직접 텍스트 설정 실패({type(e).__name__}: {e}) - 키보드 입력으로 대체합니다...')
+    else:
+        if log is not None:
+            log('파일이름 칸(Edit 컨트롤)을 못 찾았습니다 - 키보드 입력으로 대체합니다...')
+    try:
+        win.set_focus()
+    except Exception:
+        pass
+    win.type_keys('^a')
+    time.sleep(0.3)
+    win.type_keys(_escape_keys(target_path), with_spaces=True)
+    return False
+
+
 def _click(win, title, control_type=None, log=None):
     # 트리를 한 번만 훑어서 여러 곳에 재사용한다 - 다팔자처럼 트리가 크고 느린
     # 앱에서 같은 창을 반복해서 훑으면 그 자체가 타임아웃/에러로 이어질 수 있다.
@@ -699,20 +756,20 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         # 이어졌다(사용자가 실제로 겪음 - 폴더를 계속 짐작해서 뒤지는 방식은
         # 쓰레기 파일만 쌓이니 쓰지 말라는 지시).
         #
-        # 그래서 이번엔 '클릭' 없이 '키보드 입력만으로' 원하는 폴더+파일명을
-        # 직접 넣는 방식으로 바꾼다 - 저장 대화상자가 열리면 파일이름 칸에
-        # 기본으로 포커스가 가 있는 게 표준 윈도우 동작이라, 클릭 없이 바로
-        # Ctrl+A(기존 텍스트 전체 선택) 후 원하는 전체 경로를 타이핑하면
-        # 좌표 오차로 엉뚱한 걸 클릭할 위험 자체가 없다.
-        L(f"저장창 파일이름 칸에 정해진 경로를 직접 입력합니다(클릭 없이 키보드로만): {target_path}")
+        # 그래서 이번엔 '클릭'도 'Ctrl+A 단축키'도 쓰지 않고, 파일이름 칸
+        # (Edit 컨트롤)을 automation_id로 직접 찾아 그 값을 코드로 덮어쓰는
+        # 방식으로 바꾼다. (실제로 겪은 사고: Ctrl+A가 타이밍 문제로 기존
+        # 텍스트를 지우지 못하고 리터럴 'a' 글자만 남아 경로 앞에 붙어버려
+        # "aC:\Users\..." 같은 깨진 이름이 되고 "파일 이름이 올바르지
+        # 않습니다" 오류가 났었다 - 그 칸을 못 찾을 때만 예전 방식으로
+        # 대체한다.)
+        L(f"저장창 파일이름 칸에 정해진 경로를 직접 입력합니다: {target_path}")
         try:
             save_win.set_focus()
         except Exception:
             pass
         try:
-            save_win.type_keys('^a')
-            time.sleep(0.3)
-            save_win.type_keys(_escape_keys(target_path), with_spaces=True)
+            _set_save_filename(save_win, target_path, L)
             time.sleep(0.3)
             save_win.type_keys('{ENTER}')
             L('경로 입력 후 Enter로 저장 실행.')
@@ -762,9 +819,7 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                 if still_there:
                     L('저장창이 실제로 남아있습니다 - 경로를 다시 입력하고 저장 버튼을 직접 클릭해서 재시도합니다...')
                     save_win.set_focus()
-                    save_win.type_keys('^a')
-                    time.sleep(0.3)
-                    save_win.type_keys(_escape_keys(target_path), with_spaces=True)
+                    _set_save_filename(save_win, target_path, L)
                     time.sleep(0.3)
                     _click(save_win, '저장', 'Button', L)
                     time.sleep(1)
