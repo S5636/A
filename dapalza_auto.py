@@ -802,8 +802,44 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                     time.sleep(1)
             except Exception as e:
                 L(f'재시도 중 오류: {type(e).__name__}: {e}')
+
         if new_file_path is None:
-            L(f'저장된 파일을 끝내 못 찾았습니다: {target_dir} 폴더에 새 xlsx 파일이 안 보입니다 (자동화 중 다른 창을 조작하면 Enter/클릭이 엉뚱한 곳으로 샐 수 있어요 - 자동화가 끝날 때까지 다른 창은 건드리지 말아주세요)')
+            # 정산_업로드_대기 폴더와 다운로드 폴더 둘 다 못 찾았다 - 저장창이
+            # 실제로 그 순간 어느 폴더를 띄우고 있었는지 우리가 전혀 관여를
+            # 안 하다 보니(파일이름 칸을 안 건드리는 방식이라), 짐작한 두
+            # 폴더가 아닌 제3의 폴더(바탕화면/문서 등 윈도우가 마지막으로
+            # 기억해둔 폴더)에 저장됐을 가능성이 있다. 마지막 수단으로 사용자
+            # 폴더 전체를 뒤져서, 방금 막(120초 이내) 새로 생긴 xlsx 파일을
+            # 찾아본다 - 이러면 어느 폴더인지 더 이상 짐작할 필요가 없다.
+            L('정산_업로드_대기/다운로드 폴더에서 못 찾았습니다 - 마지막으로 내 문서(사용자 폴더) 전체에서 방금 생긴 xlsx 파일을 찾아봅니다...')
+
+            def _find_recent_xlsx_anywhere(seconds=120):
+                home = os.path.expanduser('~')
+                skip_dirs = {'appdata', 'application data', '.git', 'node_modules'}
+                best, best_mtime = None, 0
+                try:
+                    for root, dirs, files in os.walk(home):
+                        dirs[:] = [d for d in dirs if d.lower() not in skip_dirs]
+                        for f in files:
+                            if not f.lower().endswith('.xlsx'):
+                                continue
+                            p = os.path.join(root, f)
+                            try:
+                                mtime = os.path.getmtime(p)
+                            except Exception:
+                                continue
+                            if (time.time() - mtime) < seconds and mtime > best_mtime:
+                                best, best_mtime = p, mtime
+                except Exception:
+                    pass
+                return best
+
+            new_file_path = _find_recent_xlsx_anywhere()
+            if new_file_path:
+                L(f'사용자 폴더 전체 검색으로 방금 저장된 파일을 찾았습니다: {new_file_path}')
+
+        if new_file_path is None:
+            L(f'저장된 파일을 끝내 못 찾았습니다: {target_dir} 폴더에도, 다운로드 폴더에도, 사용자 폴더 전체를 뒤져봐도 새 xlsx 파일이 안 보입니다 (자동화 중 다른 창을 조작하면 Enter/클릭이 엉뚱한 곳으로 샐 수 있어요 - 자동화가 끝날 때까지 다른 창은 건드리지 말아주세요)')
             return {'ok': False, 'log': log}
 
         try:
