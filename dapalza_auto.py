@@ -284,6 +284,14 @@ def _dump_structure(win, descendants=None):
         return cls, 0, [f'(하위 요소 조회 실패: {e})']
 
 
+def _escape_keys(s):
+    """pywinauto type_keys()의 특수문자(+^%~(){})를 리터럴로 보내기 위한 이스케이프.
+    윈도우 경로(드라이브 문자/역슬래시/콜론)는 특수문자가 아니라 그대로 보내도 되지만,
+    파일명에 저 문자들이 섞여 들어올 가능성까지 대비해 안전하게 처리한다."""
+    special = '+^%~(){}'
+    return ''.join(f'{{{ch}}}' if ch in special else ch for ch in s)
+
+
 def _click(win, title, control_type=None, log=None):
     # 트리를 한 번만 훑어서 여러 곳에 재사용한다 - 다팔자처럼 트리가 크고 느린
     # 앱에서 같은 창을 반복해서 훑으면 그 자체가 타임아웃/에러로 이어질 수 있다.
@@ -680,41 +688,36 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
             except Exception as e:
                 L(f'기존 파일 정리 실패(무시하고 진행): {type(e).__name__}: {e}')
 
-        # 저장창의 '파일 이름' 칸을 직접 조작해서 우리가 원하는 경로를 넣는
-        # 방식은 여러 번 사고가 났다 - 값 설정이 COM 에러로 실패 -> 예비로
-        # 그 칸을 클릭하는데 그 좌표가 낡아서 목록의 다른 파일을 잘못 클릭 ->
-        # 윈도우가 그걸 '이름 바꾸기' 시작으로 오인 -> 거기에 경로 문자열
-        # (콜론/역슬래시)을 넣으니 '파일 이름에 이 문자는 못 쓴다'는 오류가
-        # 반복해서 났다. 그래서 아예 그 칸을 절대 건드리지 않기로 바꿨다:
-        # 다팔자가 제안하는 기본 파일명 그대로 Enter만 눌러 저장시키고,
-        # 저장이 끝난 뒤 폴더에 새로 생긴 파일을 파이썬 os.replace()로
-        # 우리가 원하는 이름으로 바꾼다 - 이건 화면을 전혀 건드리지 않는
-        # 순수 파일시스템 작업이라 이런 종류의 사고 자체가 날 수가 없다.
-        try:
-            before_files = {f for f in os.listdir(target_dir) if f.lower().endswith('.xlsx')}
-        except Exception:
-            before_files = set()
-        # 저장창 파일이름 칸을 안 건드리다 보니, 그 창이 처음에 어느 폴더를
-        # 띄우고 있었는지에 우리가 관여를 안 한다 - 항상 target_dir로
-        # 열린다는 보장이 없어서, 다운로드 폴더도 같이 스냅샷 떠두고 못
-        # 찾으면 거기서도 찾아본다(사용자 로그로 target_dir에서 파일을
-        # 끝내 못 찾은 실패 사례를 확인해서 추가).
-        downloads_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
-        try:
-            before_files_dl = {f for f in os.listdir(downloads_dir) if f.lower().endswith('.xlsx')}
-        except Exception:
-            before_files_dl = set()
-
-        L('저장창의 파일이름 칸은 건드리지 않고, 다팔자가 제안하는 기본 파일명 그대로 저장한 뒤 파이썬으로 안전하게 이름을 바꿉니다...')
+        # 예전엔 파일이름 칸을 직접 조작하다가 사고가 났었다 - 그 칸을
+        # 클릭해서 포커스를 주려다가 좌표가 낡아서 목록의 다른 파일을
+        # 잘못 클릭 -> 윈도우가 그걸 '이름 바꾸기' 시작으로 오인 -> 거기에
+        # 경로 문자열을 넣으니 오류가 났다. 그래서 한동안 그 칸을 아예 안
+        # 건드리고 기본 파일명으로 저장한 뒤 폴더에서 새 파일을 찾아
+        # 이름을 바꾸는 방식을 썼는데, 그러면 저장 대화상자가 그 순간 어느
+        # 폴더를 기본으로 띄우고 있었는지 우리가 전혀 통제를 못 해서, 다른
+        # 폴더(다운로드 등 짐작도 안 되는 곳)에 파일이 저장되는 사고로
+        # 이어졌다(사용자가 실제로 겪음 - 폴더를 계속 짐작해서 뒤지는 방식은
+        # 쓰레기 파일만 쌓이니 쓰지 말라는 지시).
+        #
+        # 그래서 이번엔 '클릭' 없이 '키보드 입력만으로' 원하는 폴더+파일명을
+        # 직접 넣는 방식으로 바꾼다 - 저장 대화상자가 열리면 파일이름 칸에
+        # 기본으로 포커스가 가 있는 게 표준 윈도우 동작이라, 클릭 없이 바로
+        # Ctrl+A(기존 텍스트 전체 선택) 후 원하는 전체 경로를 타이핑하면
+        # 좌표 오차로 엉뚱한 걸 클릭할 위험 자체가 없다.
+        L(f"저장창 파일이름 칸에 정해진 경로를 직접 입력합니다(클릭 없이 키보드로만): {target_path}")
         try:
             save_win.set_focus()
         except Exception:
             pass
         try:
+            save_win.type_keys('^a')
+            time.sleep(0.3)
+            save_win.type_keys(_escape_keys(target_path), with_spaces=True)
+            time.sleep(0.3)
             save_win.type_keys('{ENTER}')
-            L('Enter로 저장 실행.')
+            L('경로 입력 후 Enter로 저장 실행.')
         except Exception as e:
-            L(f'Enter 입력 실패({type(e).__name__}: {e}) - 저장 버튼을 직접 찾아 클릭 시도...')
+            L(f'경로 입력 실패({type(e).__name__}: {e}) - 저장 버튼을 직접 찾아 클릭 시도...')
             _click(save_win, '저장', 'Button', L)
         time.sleep(1)
         _dismiss_invalid_filename_dialog(L)
@@ -726,46 +729,24 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         except Exception:
             pass
 
-        def _find_new_xlsx():
-            candidates = []
-            for folder, before_set in ((target_dir, before_files), (downloads_dir, before_files_dl)):
-                try:
-                    now_files = {f for f in os.listdir(folder) if f.lower().endswith('.xlsx')}
-                except Exception:
-                    continue
-                for f in (now_files - before_set):
-                    p = os.path.join(folder, f)
-                    try:
-                        if (time.time() - os.path.getmtime(p)) < 90:
-                            candidates.append(p)
-                    except Exception:
-                        continue
-            if not candidates:
-                return None
-            candidates.sort(key=os.path.getmtime, reverse=True)
-            found = candidates[0]
-            if os.path.dirname(found) != target_dir:
-                L(f'저장 대상 폴더가 아니라 다운로드 폴더에서 새 파일을 찾았습니다: {found}')
-            return found
-
-        L('새로 저장된 파일을 찾는 중...')
-        new_file_path = None
+        # 경로를 직접 입력했으니 이제 target_path 그 자리에 정확히 저장됐는지만
+        # 확인하면 된다 - 폴더를 짐작해서 여기저기 뒤지는 방식은 더 이상 안 쓴다.
+        L(f'{target_path} 에 실제로 저장됐는지 확인하는 중...')
+        found = False
         for _ in range(30):
-            new_file_path = _find_new_xlsx()
-            if new_file_path:
+            if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                found = True
                 break
             time.sleep(1)
 
-        if new_file_path is None:
+        if not found:
             # 실제 로그로 확인된 사실: 이 시점엔 저장창(save_win)이 진짜로는
-            # 이미 닫혀서(=Enter로 저장 자체는 이미 끝난 상태) descendants()가
-            # 0개인데, .exists()/.is_visible()는 그래도 True를 돌려주는 경우가
-            # 있었다 - 그래서 존재하지도 않는 창에 '저장' 버튼을 찾으려다
-            # 당연히 실패하고("화면 요소 0개"), 정작 진짜 원인(파일이 다른
-            # 폴더에 저장됐거나 디스크 쓰기가 늦어짐)은 확인도 못 해보고
-            # 끝나버렸다. exists 체크만 믿지 말고 descendants 개수를 직접
-            # 봐서, 정말 창이 남아있을 때만 클릭을 재시도한다.
-            L('아직 새 파일을 못 찾았습니다 - 저장창이 실제로 남아있는지 확인 중...')
+            # 이미 닫혀서(=저장 자체는 이미 끝난 상태) descendants()가 0개인데,
+            # .exists()/.is_visible()는 그래도 True를 돌려주는 경우가 있었다 -
+            # 그래서 존재하지도 않는 창에 '저장' 버튼을 찾으려다 당연히
+            # 실패했다. exists 체크만 믿지 말고 descendants 개수를 직접 봐서,
+            # 정말 창이 남아있을 때만 클릭을 재시도한다.
+            L(f'아직 {target_path}가 안 보입니다 - 저장창이 실제로 남아있는지 확인 중...')
             try:
                 try:
                     still_there = save_win.exists(timeout=2)
@@ -779,8 +760,12 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                     except Exception:
                         still_there = False
                 if still_there:
-                    L('저장창이 실제로 남아있습니다 - 저장 버튼을 직접 클릭해서 재시도합니다...')
+                    L('저장창이 실제로 남아있습니다 - 경로를 다시 입력하고 저장 버튼을 직접 클릭해서 재시도합니다...')
                     save_win.set_focus()
+                    save_win.type_keys('^a')
+                    time.sleep(0.3)
+                    save_win.type_keys(_escape_keys(target_path), with_spaces=True)
+                    time.sleep(0.3)
                     _click(save_win, '저장', 'Button', L)
                     time.sleep(1)
                     _dismiss_invalid_filename_dialog(L)
@@ -793,63 +778,21 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                 else:
                     # 저장창은 이미 닫혀있다(=저장 자체는 끝났을 가능성이 큼) -
                     # 클릭할 대상이 없으니 재시도 대신, 디스크 쓰기/백신 검사가
-                    # 늦어지는 경우를 대비해 조금 더 길게 파일만 다시 찾아본다.
+                    # 늦어지는 경우를 대비해 조금 더 길게 다시 확인한다.
                     L('저장창이 이미 닫혀있습니다(저장 자체는 끝난 것으로 보임) - 파일 쓰기가 늦어지는 걸 대비해 다시 확인합니다...')
                 for _ in range(20):
-                    new_file_path = _find_new_xlsx()
-                    if new_file_path:
+                    if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                        found = True
                         break
                     time.sleep(1)
             except Exception as e:
                 L(f'재시도 중 오류: {type(e).__name__}: {e}')
 
-        if new_file_path is None:
-            # 정산_업로드_대기 폴더와 다운로드 폴더 둘 다 못 찾았다 - 저장창이
-            # 실제로 그 순간 어느 폴더를 띄우고 있었는지 우리가 전혀 관여를
-            # 안 하다 보니(파일이름 칸을 안 건드리는 방식이라), 짐작한 두
-            # 폴더가 아닌 제3의 폴더(바탕화면/문서 등 윈도우가 마지막으로
-            # 기억해둔 폴더)에 저장됐을 가능성이 있다. 마지막 수단으로 사용자
-            # 폴더 전체를 뒤져서, 방금 막(120초 이내) 새로 생긴 xlsx 파일을
-            # 찾아본다 - 이러면 어느 폴더인지 더 이상 짐작할 필요가 없다.
-            L('정산_업로드_대기/다운로드 폴더에서 못 찾았습니다 - 마지막으로 내 문서(사용자 폴더) 전체에서 방금 생긴 xlsx 파일을 찾아봅니다...')
-
-            def _find_recent_xlsx_anywhere(seconds=120):
-                home = os.path.expanduser('~')
-                skip_dirs = {'appdata', 'application data', '.git', 'node_modules'}
-                best, best_mtime = None, 0
-                try:
-                    for root, dirs, files in os.walk(home):
-                        dirs[:] = [d for d in dirs if d.lower() not in skip_dirs]
-                        for f in files:
-                            if not f.lower().endswith('.xlsx'):
-                                continue
-                            p = os.path.join(root, f)
-                            try:
-                                mtime = os.path.getmtime(p)
-                            except Exception:
-                                continue
-                            if (time.time() - mtime) < seconds and mtime > best_mtime:
-                                best, best_mtime = p, mtime
-                except Exception:
-                    pass
-                return best
-
-            new_file_path = _find_recent_xlsx_anywhere()
-            if new_file_path:
-                L(f'사용자 폴더 전체 검색으로 방금 저장된 파일을 찾았습니다: {new_file_path}')
-
-        if new_file_path is None:
-            L(f'저장된 파일을 끝내 못 찾았습니다: {target_dir} 폴더에도, 다운로드 폴더에도, 사용자 폴더 전체를 뒤져봐도 새 xlsx 파일이 안 보입니다 (자동화 중 다른 창을 조작하면 Enter/클릭이 엉뚱한 곳으로 샐 수 있어요 - 자동화가 끝날 때까지 다른 창은 건드리지 말아주세요)')
+        if not found:
+            L(f'저장된 파일을 끝내 못 찾았습니다: {target_path}가 안 만들어졌습니다 (자동화 중 다른 창을 조작하면 입력이 엉뚱한 곳으로 샐 수 있어요 - 자동화가 끝날 때까지 다른 창은 건드리지 말아주세요)')
             return {'ok': False, 'log': log}
 
-        try:
-            if os.path.exists(target_path):
-                os.remove(target_path)
-            os.replace(new_file_path, target_path)
-            L(f'파일 저장 확인 완료 - 원하는 이름으로 바꿨습니다: {target_path}')
-        except Exception as e:
-            L(f'파일은 저장됐지만 이름 바꾸기에 실패({type(e).__name__}: {e}) - 원래 이름 그대로 사용합니다: {new_file_path}')
-            target_path = new_file_path
+        L(f'파일 저장 확인 완료: {target_path}')
 
         # 다팔자 자체가 저장 완료 후 '전체 주문관리 엑셀이 저장되었습니다' 같은
         # 확인 팝업을 추가로 띄운다. 이걸 안 닫아두면 다음번 '지금 수집' 실행이
