@@ -5,3 +5,5 @@ venv/
 *.log
 ownerclan_profile/
 .setup_done
+.env
+toss_invest/.env
