@@ -13,6 +13,7 @@ from flask import Flask, jsonify, render_template, request, send_file
 from openpyxl import Workbook, load_workbook
 
 from models import (
+    card_codes_match,
     current_year_month,
     cycle_bounds,
     extract_last4,
@@ -36,13 +37,16 @@ def serialize_inbox(conn):
     rows = conn.execute(
         "SELECT * FROM inbox_items WHERE status = 'pending' ORDER BY occurred_at DESC, id DESC"
     ).fetchall()
+    cards_with_code = conn.execute("SELECT id, name, last4 FROM cards WHERE last4 != ''").fetchall()
+
     items = []
     for r in rows:
         card = None
         if r["last4"]:
-            card = conn.execute(
-                "SELECT id, name FROM cards WHERE last4 = ? AND last4 != ''", (r["last4"],)
-            ).fetchone()
+            for c in cards_with_code:
+                if card_codes_match(c["last4"], r["last4"]):
+                    card = c
+                    break
         items.append({
             "id": r["id"],
             "raw_text": r["raw_text"],
@@ -641,6 +645,12 @@ def _import_statement(ws, header_info):
 
     conn = get_conn()
     try:
+        cards_with_code = conn.execute(
+            """SELECT c.id, c.name, c.last4, COUNT(b.id) AS benefit_count
+               FROM cards c LEFT JOIN benefits b ON b.card_id = c.id
+               WHERE c.last4 != '' GROUP BY c.id"""
+        ).fetchall()
+
         queued = 0
         skipped = []
         for i, row in enumerate(
@@ -673,6 +683,12 @@ def _import_statement(ws, header_info):
             last4 = ""
             if cardno_col is not None and cardno_col < len(row):
                 last4 = extract_last4(row[cardno_col])
+
+            if last4:
+                matched = next((c for c in cards_with_code if card_codes_match(c["last4"], last4)), None)
+                if matched and matched["benefit_count"] == 0:
+                    skipped.append(f"{i}행: \"{matched['name']}\"는 추적할 혜택이 등록되어 있지 않아 건너뜀")
+                    continue
 
             raw_parts = [p for p in [merchant, f"{amount:,.0f}원", used_at] if p]
             raw_text = " · ".join(raw_parts)

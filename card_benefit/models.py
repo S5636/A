@@ -237,8 +237,28 @@ def is_cancelled_status(value):
 
 
 def extract_last4(value):
+    """카드번호(또는 마스킹된 카드번호) 셀에서 끝자리 식별코드를 뽑는다.
+
+    카드사마다 실적표엔 뒤 4자리를 다 보여주기도 하고("1234-56**-****-8390"),
+    일부만 보여주기도 한다(예: "본인839*"처럼 마지막 한 자리가 마스킹).
+    그래서 최소 3자리만 있어도 인정하고, 몇 자리인지가 다른 경우의 비교는
+    card_codes_match()에서 접두(prefix) 매칭으로 처리한다.
+    """
     digits = re.sub(r"\D", "", str(value or ""))
-    return digits[-4:] if len(digits) >= 4 else ""
+    if len(digits) < 3:
+        return ""
+    return digits[-4:] if len(digits) >= 4 else digits[-3:]
+
+
+def card_codes_match(a, b):
+    """두 카드 식별코드가 같은 카드를 가리키는지 비교한다.
+
+    한쪽이 다른 쪽의 접두(prefix)면 같은 카드로 본다 - 마스킹 방식에 따라
+    자릿수가 다를 수 있어서다(예: 카드 등록 시 "839", 알림에서는 "8390").
+    """
+    if not a or not b:
+        return False
+    return a == b or a.startswith(b) or b.startswith(a)
 
 
 def parse_amount_cell(value):
