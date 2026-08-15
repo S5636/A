@@ -4,6 +4,7 @@
 같은 와이파이(공유기)에 연결된 PC와 폰이 브라우저로 같은 서버(0.0.0.0)에
 접속해서 카드별 혜택의 이번 달 남은 한도를 같이 보고 같이 기록한다.
 """
+import json
 import os
 import secrets
 from datetime import date, datetime
@@ -28,6 +29,7 @@ from models import (
     parse_date_cell,
     parse_notification,
     set_setting,
+    tier_limit_for_spend,
 )
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -92,6 +94,15 @@ def _serialize_cards(conn):
     result = []
     for card in cards:
         start, end = cycle_bounds(card["reset_day"])
+
+        this_month = current_year_month()
+        perf_row = conn.execute(
+            "SELECT total_spend FROM performance WHERE card_id = ? AND year_month = ?",
+            (card["id"], this_month),
+        ).fetchone()
+        perf_threshold = card["perf_threshold"] or 0
+        perf_spend = perf_row["total_spend"] if perf_row else 0
+
         benefits = conn.execute(
             "SELECT * FROM benefits WHERE card_id = ? ORDER BY sort_order ASC, id ASC",
             (card["id"],),
@@ -112,7 +123,8 @@ def _serialize_cards(conn):
                 (b["id"], start.isoformat(), end.isoformat()),
             ).fetchall()
 
-            limit_value = b["limit_value"] or 0
+            tiered_limit = tier_limit_for_spend(b["tier_table"], perf_spend)
+            limit_value = tiered_limit if tiered_limit is not None else (b["limit_value"] or 0)
             unlimited = limit_value <= 0
             remaining = None if unlimited else limit_value - used
             percent = None if unlimited else max(0, min(100, round(used / limit_value * 100))) if limit_value > 0 else 0
@@ -124,6 +136,8 @@ def _serialize_cards(conn):
                 "limit_type": b["limit_type"],
                 "limit_value": limit_value,
                 "unlimited": unlimited,
+                "tiered": tiered_limit is not None,
+                "tier_table": b["tier_table"],
                 "memo": b["memo"],
                 "merchant_keywords": b["merchant_keywords"],
                 "used": used,
@@ -134,14 +148,6 @@ def _serialize_cards(conn):
             })
 
         days_left = (end - date.today()).days
-
-        this_month = current_year_month()
-        perf_row = conn.execute(
-            "SELECT total_spend FROM performance WHERE card_id = ? AND year_month = ?",
-            (card["id"], this_month),
-        ).fetchone()
-        perf_threshold = card["perf_threshold"] or 0
-        perf_spend = perf_row["total_spend"] if perf_row else 0
 
         result.append({
             "id": card["id"],
@@ -294,6 +300,21 @@ def delete_card(card_id):
     return jsonify(serialize_full())
 
 
+def _clean_tier_table(raw):
+    """[[기준금액,한도], ...] 형태인지 검증하고 정돈된 JSON 문자열(또는 '')을 돌려준다."""
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    try:
+        tiers = json.loads(raw)
+        if not isinstance(tiers, list):
+            raise ValueError
+        cleaned = [[float(t[0]), float(t[1])] for t in tiers]
+    except (ValueError, TypeError, IndexError, KeyError):
+        raise ValueError("구간표 형식이 올바르지 않습니다. 예: [[400000,5000],[800000,10000]]")
+    return json.dumps(cleaned)
+
+
 @app.route("/api/cards/<int:card_id>/benefits", methods=["POST"])
 def create_benefit(card_id):
     data = request.get_json(force=True) or {}
@@ -305,6 +326,10 @@ def create_benefit(card_id):
     except (TypeError, ValueError):
         limit_value = 0
     limit_type = data.get("limit_type") if data.get("limit_type") in ("amount", "count") else "amount"
+    try:
+        tier_table = _clean_tier_table(data.get("tier_table"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     conn = get_conn()
     try:
@@ -315,12 +340,13 @@ def create_benefit(card_id):
             "SELECT COALESCE(MAX(sort_order), -1) AS m FROM benefits WHERE card_id = ?", (card_id,)
         ).fetchone()["m"]
         conn.execute(
-            """INSERT INTO benefits (card_id, name, limit_type, limit_value, memo, merchant_keywords, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO benefits (card_id, name, limit_type, limit_value, memo, merchant_keywords, tier_table, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 card_id, name, limit_type, limit_value,
                 (data.get("memo") or "").strip(),
                 (data.get("merchant_keywords") or "").strip(),
+                tier_table,
                 max_order + 1,
             ),
         )
@@ -345,14 +371,19 @@ def update_benefit(benefit_id):
         except (TypeError, ValueError):
             limit_value = b["limit_value"]
         limit_type = data.get("limit_type") if data.get("limit_type") in ("amount", "count") else b["limit_type"]
+        try:
+            tier_table = _clean_tier_table(data.get("tier_table", b["tier_table"]))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
 
         conn.execute(
-            """UPDATE benefits SET name = ?, limit_type = ?, limit_value = ?, memo = ?, merchant_keywords = ?
-               WHERE id = ?""",
+            """UPDATE benefits SET name = ?, limit_type = ?, limit_value = ?, memo = ?, merchant_keywords = ?,
+               tier_table = ? WHERE id = ?""",
             (
                 name, limit_type, limit_value,
                 (data.get("memo", b["memo"]) or "").strip(),
                 (data.get("merchant_keywords", b["merchant_keywords"]) or "").strip(),
+                tier_table,
                 benefit_id,
             ),
         )

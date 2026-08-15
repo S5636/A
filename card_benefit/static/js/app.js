@@ -152,7 +152,7 @@
       <div class="benefit" data-benefit-id="${b.id}">
         <div class="benefit-top">
           <div>
-            <div class="benefit-name">${escapeHtml(b.name)}</div>
+            <div class="benefit-name">${escapeHtml(b.name)}${b.tiered ? ` <span class="tier-tag">📊 실적구간 자동조정</span>` : ""}</div>
             ${b.memo ? `<div class="benefit-memo">${escapeHtml(b.memo)}</div>` : ""}
           </div>
           ${rightSideHtml}
@@ -292,6 +292,7 @@
     document.getElementById("benefit-type").value = benefit ? benefit.limit_type : "amount";
     document.getElementById("benefit-limit").value = benefit ? benefit.limit_value : "";
     document.getElementById("benefit-keywords").value = benefit ? benefit.merchant_keywords : "";
+    document.getElementById("benefit-tiers").value = benefit ? benefit.tier_table : "";
     document.getElementById("benefit-memo").value = benefit ? benefit.memo : "";
     benefitModal.classList.add("open");
   }
@@ -302,6 +303,7 @@
       limit_type: document.getElementById("benefit-type").value,
       limit_value: document.getElementById("benefit-limit").value,
       merchant_keywords: document.getElementById("benefit-keywords").value.trim(),
+      tier_table: document.getElementById("benefit-tiers").value.trim(),
       memo: document.getElementById("benefit-memo").value.trim(),
     };
     if (!payload.name) { alert("혜택 이름을 입력하세요."); return; }

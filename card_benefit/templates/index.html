@@ -105,6 +105,10 @@
       <input type="text" id="benefit-keywords" placeholder="예: 스타벅스,투썸플레이스,이디야">
       <small>받은 알림/업로드 내역의 가맹점명에 이 단어가 들어있으면 배정 화면에서 이 혜택이 자동으로 선택됩니다.</small>
     </label>
+    <label>전월실적 구간별 자동 한도 (고급, 선택)
+      <textarea id="benefit-tiers" rows="2" placeholder="예: [[400000,5000],[800000,10000],[1200000,15000],[1800000,20000]]"></textarea>
+      <small>[[전월실적기준금액,그때한도], ...] 형태의 JSON. 입력하면 위 "월 한도" 대신 카드의 이번 달 실적에 맞는 한도가 자동 계산됩니다. 모르면 비워두세요.</small>
+    </label>
     <label>메모 (선택)
       <textarea id="benefit-memo" rows="2" placeholder="적용 조건 등"></textarea>
     </label>

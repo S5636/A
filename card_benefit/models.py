@@ -8,6 +8,7 @@
 남은 혜택을 계산한다.
 """
 import calendar
+import json
 import os
 import re
 import sqlite3
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS benefits (
     limit_value REAL NOT NULL DEFAULT 0,
     memo TEXT DEFAULT '',
     merchant_keywords TEXT DEFAULT '',   -- 쉼표로 구분된 가맹점명 키워드 - 매칭되면 배정 화면에서 이 혜택을 자동 선택
+    tier_table TEXT DEFAULT '',          -- [[전월실적기준금액, 한도], ...] JSON - 있으면 카드의 이번달 실적에 따라 한도 자동 계산
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -103,6 +105,7 @@ def init_db():
         _ensure_column(conn, "cards", "last4", "last4 TEXT DEFAULT ''")
         _ensure_column(conn, "cards", "perf_threshold", "perf_threshold REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "benefits", "merchant_keywords", "merchant_keywords TEXT DEFAULT ''")
+        _ensure_column(conn, "benefits", "tier_table", "tier_table TEXT DEFAULT ''")
         conn.commit()
     finally:
         conn.close()
@@ -179,6 +182,27 @@ _MERCHANT_ALIASES = {
     "비바리퍼블리카": "토스",
     "우아한형제들": "배달의민족",
 }
+
+
+def tier_limit_for_spend(tier_table_json: str, spend: float):
+    """[[기준금액, 한도], ...] JSON과 이번달 실적(spend)을 받아서 해당하는 한도를
+    돌려준다. 기준금액을 만족하는 구간 중 가장 높은 걸 적용(구간 오름차순
+    가정 안 함 - 정렬 후 계산). tier_table_json이 비어있거나 파싱 실패하면 None.
+    """
+    if not tier_table_json:
+        return None
+    try:
+        tiers = json.loads(tier_table_json)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(tiers, list) or not tiers:
+        return None
+
+    applicable = 0
+    for threshold, limit in sorted(tiers, key=lambda t: t[0]):
+        if spend >= threshold:
+            applicable = limit
+    return applicable
 
 
 def match_benefit_keyword(merchant: str, merchant_keywords: str) -> bool:
