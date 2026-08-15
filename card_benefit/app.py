@@ -23,6 +23,7 @@ from models import (
     get_setting,
     init_db,
     is_cancelled_status,
+    match_benefit_keyword,
     parse_amount_cell,
     parse_date_cell,
     parse_notification,
@@ -39,6 +40,9 @@ def serialize_inbox(conn):
         "SELECT * FROM inbox_items WHERE status = 'pending' ORDER BY occurred_at DESC, id DESC"
     ).fetchall()
     cards_with_code = conn.execute("SELECT id, name, last4 FROM cards WHERE last4 != ''").fetchall()
+    benefits_by_card = {}
+    for b in conn.execute("SELECT id, card_id, name, merchant_keywords FROM benefits"):
+        benefits_by_card.setdefault(b["card_id"], []).append(b)
 
     items = []
     for r in rows:
@@ -48,6 +52,14 @@ def serialize_inbox(conn):
                 if card_codes_match(c["last4"], r["last4"]):
                     card = c
                     break
+
+        matched_benefit = None
+        if card and r["merchant"]:
+            for b in benefits_by_card.get(card["id"], []):
+                if match_benefit_keyword(r["merchant"], b["merchant_keywords"]):
+                    matched_benefit = b
+                    break
+
         items.append({
             "id": r["id"],
             "raw_text": r["raw_text"],
@@ -58,6 +70,8 @@ def serialize_inbox(conn):
             "occurred_at": r["occurred_at"],
             "matched_card_id": card["id"] if card else None,
             "matched_card_name": card["name"] if card else None,
+            "matched_benefit_id": matched_benefit["id"] if matched_benefit else None,
+            "matched_benefit_name": matched_benefit["name"] if matched_benefit else None,
         })
     return items
 
@@ -111,6 +125,7 @@ def _serialize_cards(conn):
                 "limit_value": limit_value,
                 "unlimited": unlimited,
                 "memo": b["memo"],
+                "merchant_keywords": b["merchant_keywords"],
                 "used": used,
                 "remaining": remaining,
                 "percent": percent,
@@ -300,9 +315,14 @@ def create_benefit(card_id):
             "SELECT COALESCE(MAX(sort_order), -1) AS m FROM benefits WHERE card_id = ?", (card_id,)
         ).fetchone()["m"]
         conn.execute(
-            """INSERT INTO benefits (card_id, name, limit_type, limit_value, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (card_id, name, limit_type, limit_value, (data.get("memo") or "").strip(), max_order + 1),
+            """INSERT INTO benefits (card_id, name, limit_type, limit_value, memo, merchant_keywords, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                card_id, name, limit_type, limit_value,
+                (data.get("memo") or "").strip(),
+                (data.get("merchant_keywords") or "").strip(),
+                max_order + 1,
+            ),
         )
         conn.commit()
     finally:
@@ -327,8 +347,14 @@ def update_benefit(benefit_id):
         limit_type = data.get("limit_type") if data.get("limit_type") in ("amount", "count") else b["limit_type"]
 
         conn.execute(
-            "UPDATE benefits SET name = ?, limit_type = ?, limit_value = ?, memo = ? WHERE id = ?",
-            (name, limit_type, limit_value, (data.get("memo", b["memo"]) or "").strip(), benefit_id),
+            """UPDATE benefits SET name = ?, limit_type = ?, limit_value = ?, memo = ?, merchant_keywords = ?
+               WHERE id = ?""",
+            (
+                name, limit_type, limit_value,
+                (data.get("memo", b["memo"]) or "").strip(),
+                (data.get("merchant_keywords", b["merchant_keywords"]) or "").strip(),
+                benefit_id,
+            ),
         )
         conn.commit()
     finally:

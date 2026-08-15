@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS benefits (
     limit_type TEXT NOT NULL DEFAULT 'amount',   -- 'amount'(원) 또는 'count'(횟수)
     limit_value REAL NOT NULL DEFAULT 0,
     memo TEXT DEFAULT '',
+    merchant_keywords TEXT DEFAULT '',   -- 쉼표로 구분된 가맹점명 키워드 - 매칭되면 배정 화면에서 이 혜택을 자동 선택
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -101,6 +102,7 @@ def init_db():
         conn.executescript(SCHEMA)
         _ensure_column(conn, "cards", "last4", "last4 TEXT DEFAULT ''")
         _ensure_column(conn, "cards", "perf_threshold", "perf_threshold REAL NOT NULL DEFAULT 0")
+        _ensure_column(conn, "benefits", "merchant_keywords", "merchant_keywords TEXT DEFAULT ''")
         conn.commit()
     finally:
         conn.close()
@@ -177,6 +179,15 @@ _MERCHANT_ALIASES = {
     "비바리퍼블리카": "토스",
     "우아한형제들": "배달의민족",
 }
+
+
+def match_benefit_keyword(merchant: str, merchant_keywords: str) -> bool:
+    """가맹점명이 혜택에 등록된 자동매칭 키워드 중 하나라도 포함하는지 확인."""
+    if not merchant or not merchant_keywords:
+        return False
+    merchant_lower = merchant.lower()
+    keywords = [k.strip().lower() for k in merchant_keywords.split(",") if k.strip()]
+    return any(k in merchant_lower for k in keywords)
 
 
 def annotate_merchant(name: str) -> str:

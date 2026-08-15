@@ -49,6 +49,7 @@
         <div class="inbox-item-info">
           <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
           <div class="inbox-item-sub">${it.occurred_at}${it.matched_card_name ? " · " + escapeHtml(it.matched_card_name) : ""}${it.merchant ? " · " + escapeHtml(it.merchant) : ""}</div>
+          ${it.matched_benefit_name ? `<div class="inbox-item-sub">🎯 ${escapeHtml(it.matched_benefit_name)} 자동매칭</div>` : ""}
         </div>
         <button class="btn small assign-inbox" data-id="${it.id}">혜택 선택</button>
       </div>
@@ -290,6 +291,7 @@
     document.getElementById("benefit-name").value = benefit ? benefit.name : "";
     document.getElementById("benefit-type").value = benefit ? benefit.limit_type : "amount";
     document.getElementById("benefit-limit").value = benefit ? benefit.limit_value : "";
+    document.getElementById("benefit-keywords").value = benefit ? benefit.merchant_keywords : "";
     document.getElementById("benefit-memo").value = benefit ? benefit.memo : "";
     benefitModal.classList.add("open");
   }
@@ -299,6 +301,7 @@
       name: document.getElementById("benefit-name").value.trim(),
       limit_type: document.getElementById("benefit-type").value,
       limit_value: document.getElementById("benefit-limit").value,
+      merchant_keywords: document.getElementById("benefit-keywords").value.trim(),
       memo: document.getElementById("benefit-memo").value.trim(),
     };
     if (!payload.name) { alert("혜택 이름을 입력하세요."); return; }
@@ -354,7 +357,7 @@
   const assignBenefitSelect = document.getElementById("assign-benefit");
   let assigningItem = null;
 
-  function fillAssignBenefitOptions(cardId) {
+  function fillAssignBenefitOptions(cardId, preselectBenefitId) {
     const card = state.cards.find((c) => c.id == cardId);
     const benefits = card ? card.benefits : [];
     assignBenefitSelect.innerHTML = benefits.length
@@ -364,6 +367,7 @@
           return `<option value="${b.id}">${escapeHtml(b.name)} (${tag})</option>`;
         }).join("")
       : `<option value="">등록된 혜택이 없습니다</option>`;
+    if (preselectBenefitId) assignBenefitSelect.value = preselectBenefitId;
   }
 
   function openAssignModal(item) {
@@ -378,7 +382,7 @@
       .join("");
     const preselectCardId = item.matched_card_id || state.cards[0].id;
     assignCardSelect.value = preselectCardId;
-    fillAssignBenefitOptions(preselectCardId);
+    fillAssignBenefitOptions(preselectCardId, item.matched_benefit_id);
 
     document.getElementById("assign-amount").value = item.amount != null ? item.amount : "";
     document.getElementById("assign-date").value = (item.occurred_at || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
