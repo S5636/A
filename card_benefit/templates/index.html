@@ -7,22 +7,48 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-<header class="topbar">
-  <h1>💳 카드 남은혜택 체크</h1>
-  <div class="topbar-actions">
-    <button id="btn-webhook-info" class="btn" title="폰 결제 알림 자동수집 설정">🔔 자동수집 설정</button>
-    <button id="btn-add-card" class="btn btn-primary">+ 카드 추가</button>
-  </div>
-</header>
+<div class="app-shell">
 
-<section id="inbox-section" class="inbox-section" style="display:none;">
-  <h2>🔔 받은 결제 알림 <span id="inbox-count" class="inbox-count"></span></h2>
-  <div id="inbox-list" class="inbox-list"></div>
-</section>
+  <header class="app-header">
+    <div class="app-title">
+      <h1>💳 카드 남은혜택 체크</h1>
+    </div>
+    <div class="header-actions">
+      <button id="btn-webhook-info" class="btn secondary small" title="폰 결제 알림 자동수집 설정">🔔 자동수집 설정</button>
+      <button id="btn-add-card" class="btn small">+ 카드 추가</button>
+    </div>
+  </header>
 
-<main id="card-list" class="card-list">
-  <p class="empty-hint" id="empty-hint">아직 등록된 카드가 없습니다. "카드 추가"를 눌러 시작하세요.</p>
-</main>
+  <section id="inbox-section" class="inbox-section" style="display:none;">
+    <h2>🔔 받은 결제 알림 <span id="inbox-count" class="inbox-count"></span></h2>
+    <div id="inbox-list" class="inbox-list"></div>
+  </section>
+
+  <main id="card-list" class="card-list">
+    <p class="empty-hint" id="empty-hint">아직 등록된 카드가 없습니다. "카드 추가"를 눌러 시작하세요.</p>
+  </main>
+
+  <section class="backup-section">
+    <div class="card">
+      <div class="card-title">📦 지난/누락 내역 백업 · 일괄 업로드</div>
+      <div class="header-actions" style="margin-bottom:12px;">
+        <a class="btn secondary small" href="/api/export/usage.xlsx">전체 내역 다운로드</a>
+        <a class="btn secondary small" href="/api/export/template.xlsx">빈 양식 받기</a>
+      </div>
+      <label class="dropzone" id="import-dropzone">
+        <strong>탭해서 엑셀 파일 선택 → 자동 업로드</strong><br>
+        지나간 결제나 자동수집이 놓친 내역을 엑셀에 채워서 올리면 한 번에 추가됩니다.
+        <input type="file" id="import-file" accept=".xlsx" style="display:none;">
+      </label>
+      <p class="hint">
+        "빈 양식 받기"를 누르면 등록된 카드·혜택 이름이 미리 채워진 엑셀이 다운로드됩니다.
+        날짜/금액 칸만 채워서 다시 업로드하면 카드·혜택 이름으로 자동 매칭됩니다.
+      </p>
+      <div class="upload-log" id="import-log"></div>
+    </div>
+  </section>
+
+</div>
 
 <!-- 카드 추가/수정 모달 -->
 <div class="modal-backdrop" id="card-modal">
@@ -46,8 +72,8 @@
       <textarea id="card-memo" rows="2" placeholder="전월실적 조건 등"></textarea>
     </label>
     <div class="modal-actions">
-      <button class="btn" id="card-cancel">취소</button>
-      <button class="btn btn-primary" id="card-save">저장</button>
+      <button class="btn secondary" id="card-cancel">취소</button>
+      <button class="btn" id="card-save">저장</button>
     </div>
   </div>
 </div>
@@ -72,8 +98,8 @@
       <textarea id="benefit-memo" rows="2" placeholder="적용 조건 등"></textarea>
     </label>
     <div class="modal-actions">
-      <button class="btn" id="benefit-cancel">취소</button>
-      <button class="btn btn-primary" id="benefit-save">저장</button>
+      <button class="btn secondary" id="benefit-cancel">취소</button>
+      <button class="btn" id="benefit-save">저장</button>
     </div>
   </div>
 </div>
@@ -92,8 +118,8 @@
       <input type="text" id="use-memo" placeholder="예: 강남점 결제">
     </label>
     <div class="modal-actions">
-      <button class="btn" id="use-cancel">취소</button>
-      <button class="btn btn-primary" id="use-save">기록</button>
+      <button class="btn secondary" id="use-cancel">취소</button>
+      <button class="btn" id="use-save">기록</button>
     </div>
   </div>
 </div>
@@ -116,9 +142,9 @@
       <input type="date" id="assign-date">
     </label>
     <div class="modal-actions">
-      <button class="btn" id="assign-discard">이 알림 무시</button>
-      <button class="btn" id="assign-cancel">닫기</button>
-      <button class="btn btn-primary" id="assign-save">기록하기</button>
+      <button class="btn secondary" id="assign-discard">이 알림 무시</button>
+      <button class="btn secondary" id="assign-cancel">닫기</button>
+      <button class="btn" id="assign-save">기록하기</button>
     </div>
   </div>
 </div>
@@ -143,9 +169,13 @@
       Body = <code>{"text": "[notification_text]"}</code>
       (신한카드 앱이면 "SOL페이"에서 오는 알림만 대상으로 필터링하세요)
     </p>
+    <p class="hint">
+      집/회사 등 wifi가 바뀌면 이 주소(IP 부분)도 달라집니다. 그 장소에서 폰으로 이 화면을 열어
+      새 주소를 확인하고, MacroDroid에도 그 장소용 규칙을 각각 만들어두면 됩니다.
+    </p>
     <div class="modal-actions">
-      <button class="btn" id="webhook-regenerate">토큰 재발급</button>
-      <button class="btn btn-primary" id="webhook-close">닫기</button>
+      <button class="btn secondary" id="webhook-regenerate">토큰 재발급</button>
+      <button class="btn" id="webhook-close">닫기</button>
     </div>
   </div>
 </div>

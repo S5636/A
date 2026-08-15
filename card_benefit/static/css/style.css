@@ -1,201 +1,83 @@
+/* 카드 남은혜택 체크 - 이유상점 Margin Board와 동일한 다크 UI 토큰 사용 */
+
 :root {
-  --bg: #f4f5f7;
-  --surface: #ffffff;
-  --text: #1c1e21;
-  --text-muted: #6b7280;
-  --border: #e5e7eb;
-  --primary: #4f46e5;
-  --primary-dark: #4338ca;
+  color-scheme: dark;
+  --bg: #0a0f1c;
+  --bg-grad: radial-gradient(circle at 15% -10%, #14203a 0%, #0a0f1c 45%), #0a0f1c;
+  --surface: #121a2c;
+  --surface-2: #182238;
+  --surface-3: #1e2a44;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text-primary: #f3f6fc;
+  --text-secondary: #a7b2c8;
+  --text-muted: #6c7893;
+
+  --series-1: #3987e5;
   --good: #22c55e;
-  --warn: #f59e0b;
-  --bad: #ef4444;
-  --radius: 14px;
+  --warning: #fab219;
+  --critical: #e66767;
+  --accent-pink: #ec4899;
+
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-sm: 6px;
+  --font: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
 }
 
 * { box-sizing: border-box; }
 
-body {
+html, body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", Roboto, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  padding-bottom: 40px;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg-grad);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
 }
 
-.topbar {
+html { scrollbar-gutter: stable; overflow-y: scroll; }
+body { padding-bottom: 40px; }
+
+.app-shell { max-width: 720px; margin: 0 auto; padding: 20px 16px 0; }
+
+/* ---------- Header ---------- */
+.app-header {
   position: sticky;
   top: 0;
   z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+  padding: 10px 0;
+  background: linear-gradient(var(--bg) 70%, transparent);
 }
+.app-title { display: flex; align-items: baseline; gap: 10px; }
+.app-title h1 { font-size: 19px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
 
-.topbar h1 {
-  font-size: 18px;
-  margin: 0;
-}
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* ---------- Buttons ---------- */
 .btn {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-  padding: 9px 14px;
-  border-radius: 10px;
-  font-size: 14px;
+  background: linear-gradient(135deg, var(--series-1), #6b4cd6);
+  color: #fff;
+  border: none;
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  font-size: 13px;
   cursor: pointer;
 }
-
-.btn:active { transform: scale(0.97); }
-
-.btn-primary {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
-}
-
-.btn-primary:hover { background: var(--primary-dark); }
-
-.btn-danger {
-  color: var(--bad);
-  border-color: var(--bad);
-  background: transparent;
-}
-
-.btn-small {
-  padding: 5px 10px;
-  font-size: 12px;
-}
-
-.topbar-actions { display: flex; gap: 8px; }
-
-.inbox-section {
-  max-width: 720px;
-  margin: 16px auto 0;
-  padding: 0 12px;
-}
-
-.inbox-section h2 {
-  font-size: 14px;
-  margin: 0 0 8px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.inbox-count {
-  background: var(--primary);
-  color: #fff;
-  border-radius: 999px;
-  font-size: 11px;
-  padding: 1px 8px;
-}
-
-.inbox-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.inbox-item {
-  background: #fff7ed;
-  border: 1px solid #fdba74;
-  border-radius: 10px;
-  padding: 10px 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .inbox-item { background: #2b2410; border-color: #7c5a17; }
-}
-
-.inbox-item-info { font-size: 13px; }
-.inbox-item-amount { font-weight: 700; }
-.inbox-item-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-
-.assign-raw-text {
-  font-size: 12px;
-  color: var(--text-muted);
-  background: var(--bg);
-  border-radius: 8px;
-  padding: 8px 10px;
-  white-space: pre-wrap;
-  margin: 0 0 12px;
-}
-
-.webhook-desc {
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.5;
-}
-.webhook-desc code {
-  background: var(--bg);
-  padding: 1px 5px;
-  border-radius: 4px;
-}
-
-.card-list {
-  max-width: 720px;
-  margin: 16px auto;
-  padding: 0 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.empty-hint {
-  text-align: center;
-  color: var(--text-muted);
-  margin-top: 60px;
-}
-
-.card {
-  background: var(--surface);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  padding: 16px;
-}
-
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.card-title-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-
-.card-title {
-  font-size: 17px;
-  font-weight: 700;
-}
-
-.card-issuer {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.card-cycle {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.card-memo {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 4px;
-  white-space: pre-wrap;
-}
-
-.card-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.btn:hover { filter: brightness(1.08); }
+.btn.secondary { background: var(--surface-3); border: 1px solid var(--border-strong); color: var(--text-primary); }
+.btn.danger { background: linear-gradient(135deg, var(--critical), #b23c3c); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.small { padding: 6px 11px; font-size: 12px; }
 
 .icon-btn {
   border: none;
@@ -204,103 +86,111 @@ body {
   font-size: 15px;
   cursor: pointer;
   padding: 4px 6px;
+  border-radius: 6px;
 }
-.icon-btn:hover { color: var(--text); }
+.icon-btn:hover { color: var(--text-primary); background: var(--surface-3); }
 
-.benefit-list {
+/* ---------- Cards ---------- */
+.card-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 10px;
+  gap: 16px;
 }
+
+.empty-hint { text-align: center; color: var(--text-muted); margin-top: 60px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+}
+
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+.card-title-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.card-title { font-size: 15.5px; font-weight: 700; color: var(--text-primary); }
+.card-issuer { font-size: 12px; color: var(--text-muted); }
+.card-cycle { font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
+.card-memo { font-size: 12px; color: var(--text-muted); margin-top: 4px; white-space: pre-wrap; }
+.card-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.benefit-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 
 .benefit {
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
 }
 
-.benefit-top {
+.benefit-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.benefit-name { font-weight: 700; font-size: 14px; color: var(--text-primary); }
+.benefit-memo { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+.benefit-remaining { font-size: 15px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.remaining-good { color: var(--good); }
+.remaining-warn { color: var(--warning); }
+.remaining-bad { color: var(--critical); }
+
+.progress-track { background: var(--surface-3); border-radius: 999px; height: 8px; margin-top: 9px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 999px; background: var(--good); transition: width .2s ease; }
+.progress-fill.warn { background: var(--warning); }
+.progress-fill.bad { background: var(--critical); }
+
+.benefit-sub { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; font-size: 11.5px; color: var(--text-muted); }
+.benefit-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.add-benefit-row { margin-top: 12px; }
+
+.log-list { margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 6px; display: none; flex-direction: column; gap: 4px; }
+.log-list.open { display: flex; }
+.log-item { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-secondary); }
+.log-item button { border: none; background: none; color: var(--critical); cursor: pointer; font-size: 11.5px; }
+
+/* ---------- 받은 결제 알림 ---------- */
+.inbox-section { margin-bottom: 16px; }
+.inbox-section h2 { font-size: 13.5px; margin: 0 0 8px; display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-weight: 700; }
+.inbox-count { background: var(--accent-pink); color: #fff; border-radius: 999px; font-size: 11px; padding: 1px 8px; }
+.inbox-list { display: flex; flex-direction: column; gap: 8px; }
+.inbox-item {
+  background: rgba(250, 178, 25, 0.1);
+  border: 1px solid rgba(250, 178, 25, 0.4);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
 }
+.inbox-item-info { font-size: 13px; }
+.inbox-item-amount { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.inbox-item-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
-.benefit-name { font-weight: 600; font-size: 14px; }
-.benefit-memo { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-
-.benefit-remaining {
-  font-size: 15px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.remaining-good { color: var(--good); }
-.remaining-warn { color: var(--warn); }
-.remaining-bad { color: var(--bad); }
-
-.progress-track {
-  background: #eef0f3;
-  border-radius: 999px;
-  height: 8px;
-  margin-top: 8px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: var(--good);
-  transition: width 0.2s ease;
-}
-
-.progress-fill.warn { background: var(--warn); }
-.progress-fill.bad { background: var(--bad); }
-
-.benefit-sub {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.benefit-buttons { display: flex; gap: 6px; }
-
-.add-benefit-row { margin-top: 10px; }
-
-.log-list {
-  margin-top: 8px;
-  border-top: 1px dashed var(--border);
-  padding-top: 6px;
-  display: none;
-  flex-direction: column;
-  gap: 4px;
-}
-.log-list.open { display: flex; }
-
-.log-item {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.log-item button {
-  border: none;
-  background: none;
-  color: var(--bad);
+/* ---------- 백업 / 일괄 업로드 ---------- */
+.backup-section { margin-bottom: 16px; }
+.dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 22px 16px;
+  text-align: center;
+  color: var(--text-secondary);
   cursor: pointer;
-  font-size: 11px;
+  transition: border-color .15s, background .15s;
+  font-size: 12.5px;
 }
+.dropzone:hover, .dropzone.drag { border-color: var(--accent-pink); background: rgba(236,72,153,0.06); }
+.dropzone strong { color: var(--text-primary); }
 
-/* modal */
+.upload-log { margin-top: 12px; font-size: 12px; }
+.upload-log-item { display: flex; justify-content: space-between; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); margin-bottom: 6px; }
+.upload-log-item.err { background: rgba(230,103,103,0.14); color: var(--critical); }
+
+/* ---------- Modal ---------- */
 .modal-backdrop {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.4);
+  background: rgba(5, 8, 15, 0.65);
   align-items: center;
   justify-content: center;
   padding: 16px;
@@ -310,51 +200,47 @@ body {
 
 .modal {
   background: var(--surface);
-  border-radius: var(--radius);
-  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 20px;
   width: 100%;
-  max-width: 380px;
+  max-width: 400px;
   max-height: 90vh;
   overflow-y: auto;
 }
 
-.modal h2 { margin: 0 0 12px; font-size: 16px; }
+.modal h2 { margin: 0 0 14px; font-size: 16px; color: var(--text-primary); }
 
-.modal label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--text-muted);
-  margin-bottom: 12px;
-}
+.modal label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--text-secondary); font-weight: 600; margin-bottom: 12px; }
 
 .modal input, .modal select, .modal textarea {
   font-family: inherit;
   font-size: 14px;
-  padding: 9px 10px;
-  border-radius: 8px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  background: var(--surface-2);
+  outline: none;
+}
+.modal input:focus, .modal select:focus, .modal textarea:focus { border-color: var(--series-1); }
+
+.modal small { color: var(--text-muted); font-size: 11px; font-weight: 400; }
+
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+
+.assign-raw-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  color: var(--text);
-  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  white-space: pre-wrap;
+  margin: 0 0 12px;
 }
 
-.modal small { color: var(--text-muted); font-size: 11px; }
+.webhook-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+.webhook-desc code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; color: var(--text-primary); }
 
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111214;
-    --surface: #1b1d21;
-    --text: #f1f2f4;
-    --text-muted: #9aa0a8;
-    --border: #2c2f34;
-  }
-  .progress-track { background: #2a2d31; }
-}
+.hint { color: var(--text-muted); font-size: 11.5px; margin-top: 6px; line-height: 1.5; }

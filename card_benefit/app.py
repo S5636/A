@@ -7,10 +7,14 @@
 import os
 import secrets
 from datetime import date, datetime
+from io import BytesIO
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
+from openpyxl import Workbook, load_workbook
 
 from models import cycle_bounds, get_conn, get_setting, init_db, parse_notification, set_setting
+
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 app = Flask(__name__)
 
@@ -432,6 +436,143 @@ def discard_inbox_item(item_id):
     finally:
         conn.close()
     return jsonify(serialize_full())
+
+
+# ---- 지난/누락 내역 백업(엑셀 다운로드) · 일괄 업로드 ----
+
+
+def _xlsx_response(wb, filename):
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name=filename, mimetype=XLSX_MIME)
+
+
+def _set_column_widths(ws, widths):
+    for col, width in zip("ABCDEFGH", widths):
+        ws.column_dimensions[col].width = width
+
+
+@app.route("/api/export/usage.xlsx")
+def export_usage():
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """SELECT c.name AS card_name, b.name AS benefit_name, l.used_at, l.used_value, l.memo
+               FROM usage_logs l
+               JOIN benefits b ON b.id = l.benefit_id
+               JOIN cards c ON c.id = b.card_id
+               ORDER BY l.used_at DESC, l.id DESC"""
+        ).fetchall()
+    finally:
+        conn.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "사용내역"
+    ws.append(["카드명", "혜택명", "날짜", "금액(또는 횟수)", "메모"])
+    for r in rows:
+        ws.append([r["card_name"], r["benefit_name"], r["used_at"], r["used_value"], r["memo"]])
+    _set_column_widths(ws, [18, 22, 12, 16, 26])
+
+    return _xlsx_response(wb, "카드혜택_사용내역.xlsx")
+
+
+@app.route("/api/export/template.xlsx")
+def export_template():
+    conn = get_conn()
+    try:
+        combos = conn.execute(
+            """SELECT c.name AS card_name, b.name AS benefit_name
+               FROM benefits b JOIN cards c ON c.id = b.card_id
+               ORDER BY c.sort_order, b.sort_order"""
+        ).fetchall()
+    finally:
+        conn.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "업로드양식"
+    ws.append(["카드명", "혜택명", "날짜(YYYY-MM-DD)", "금액(또는 횟수)", "메모(선택)"])
+    for c in combos:
+        ws.append([c["card_name"], c["benefit_name"], "", "", ""])
+    _set_column_widths(ws, [18, 22, 18, 16, 26])
+
+    return _xlsx_response(wb, "카드혜택_업로드양식.xlsx")
+
+
+def _parse_excel_date(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    try:
+        return datetime.strptime(str(value).strip(), "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        return None
+
+
+@app.route("/api/import/usage", methods=["POST"])
+def import_usage():
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "파일을 선택하세요."}), 400
+
+    try:
+        wb = load_workbook(file, data_only=True)
+    except Exception:
+        return jsonify({"error": "엑셀 파일을 읽을 수 없습니다. .xlsx 파일인지 확인해주세요."}), 400
+    ws = wb.active
+
+    conn = get_conn()
+    try:
+        benefit_lookup = {}
+        for row in conn.execute(
+            """SELECT b.id AS benefit_id, c.name AS card_name, b.name AS benefit_name
+               FROM benefits b JOIN cards c ON c.id = b.card_id"""
+        ):
+            benefit_lookup[(row["card_name"].strip(), row["benefit_name"].strip())] = row["benefit_id"]
+
+        added = 0
+        skipped = []
+        for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            if row is None or all(v in (None, "") for v in row):
+                continue
+            card_name, benefit_name, used_at, used_value = (list(row) + [None] * 4)[:4]
+            memo = row[4] if len(row) > 4 else None
+
+            key = ((str(card_name).strip() if card_name else ""), (str(benefit_name).strip() if benefit_name else ""))
+            if key not in benefit_lookup:
+                skipped.append(f"{i}행: 카드/혜택 이름을 찾을 수 없음 ({key[0]} / {key[1]})")
+                continue
+
+            try:
+                used_value = float(used_value)
+            except (TypeError, ValueError):
+                used_value = 0
+            if not used_value:
+                skipped.append(f"{i}행: 금액(또는 횟수)이 올바르지 않음")
+                continue
+
+            used_at_str = _parse_excel_date(used_at)
+            if not used_at_str:
+                skipped.append(f"{i}행: 날짜가 올바르지 않음 (YYYY-MM-DD)")
+                continue
+
+            conn.execute(
+                "INSERT INTO usage_logs (benefit_id, used_value, used_at, memo) VALUES (?, ?, ?, ?)",
+                (benefit_lookup[key], used_value, used_at_str, (str(memo).strip() if memo else "")),
+            )
+            added += 1
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = serialize_full()
+    result["import_result"] = {"added": added, "skipped": skipped}
+    return jsonify(result)
 
 
 init_db()

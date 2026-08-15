@@ -50,7 +50,7 @@
           <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
           <div class="inbox-item-sub">${it.occurred_at}${it.matched_card_name ? " · " + escapeHtml(it.matched_card_name) : ""}${it.merchant ? " · " + escapeHtml(it.merchant) : ""}</div>
         </div>
-        <button class="btn btn-small btn-primary assign-inbox" data-id="${it.id}">혜택 선택</button>
+        <button class="btn small assign-inbox" data-id="${it.id}">혜택 선택</button>
       </div>
     `).join("");
 
@@ -96,7 +96,7 @@
       </div>
       <div class="benefit-list">${benefitsHtml}</div>
       <div class="add-benefit-row">
-        <button class="btn btn-small add-benefit" data-card-id="${card.id}">+ 혜택 추가</button>
+        <button class="btn secondary small add-benefit" data-card-id="${card.id}">+ 혜택 추가</button>
       </div>
     `;
   }
@@ -129,8 +129,8 @@
         <div class="benefit-sub">
           <span>한도 ${fmt(b.limit_value)}${unit} 중 ${fmt(b.used)}${unit} 사용</span>
           <div class="benefit-buttons">
-            <button class="btn btn-small use-benefit" data-id="${b.id}" data-card-id="${card.id}" data-type="${b.limit_type}">사용 기록</button>
-            <button class="btn btn-small toggle-log" data-id="${b.id}">내역</button>
+            <button class="btn small use-benefit" data-id="${b.id}" data-card-id="${card.id}" data-type="${b.limit_type}">사용 기록</button>
+            <button class="btn secondary small toggle-log" data-id="${b.id}">내역</button>
             <button class="icon-btn edit-benefit" data-id="${b.id}" data-card-id="${card.id}">✏️</button>
             <button class="icon-btn delete-benefit" data-id="${b.id}">🗑️</button>
           </div>
@@ -368,6 +368,39 @@
     const url = `${location.origin}${info.webhook_path}?token=${info.token}`;
     document.getElementById("webhook-url").value = url;
     document.getElementById("webhook-token").value = info.token;
+  });
+
+  // ---- 지난/누락 내역 엑셀 업로드 ----
+  const importFile = document.getElementById("import-file");
+  const importLog = document.getElementById("import-log");
+
+  importFile.addEventListener("change", async () => {
+    const file = importFile.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    importLog.innerHTML = `<div class="upload-log-item">업로드 중...</div>`;
+    let data;
+    try {
+      const res = await fetch("/api/import/usage", { method: "POST", body: formData });
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || "업로드 실패");
+    } catch (e) {
+      importLog.innerHTML = `<div class="upload-log-item err">${escapeHtml(e.message)}</div>`;
+      importFile.value = "";
+      return;
+    }
+
+    state = data;
+    render();
+
+    const r = data.import_result || { added: 0, skipped: [] };
+    const lines = [`<div class="upload-log-item">${r.added}건 추가됨</div>`];
+    r.skipped.forEach((msg) => lines.push(`<div class="upload-log-item err">${escapeHtml(msg)}</div>`));
+    importLog.innerHTML = lines.join("");
+    importFile.value = "";
   });
 
   [cardModal, benefitModal, useModal, assignModal, webhookModal].forEach((modal) => {
