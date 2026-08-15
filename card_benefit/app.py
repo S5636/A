@@ -12,7 +12,18 @@ from io import BytesIO
 from flask import Flask, jsonify, render_template, request, send_file
 from openpyxl import Workbook, load_workbook
 
-from models import cycle_bounds, get_conn, get_setting, init_db, parse_notification, set_setting
+from models import (
+    cycle_bounds,
+    extract_last4,
+    find_statement_header,
+    get_conn,
+    get_setting,
+    init_db,
+    parse_amount_cell,
+    parse_date_cell,
+    parse_notification,
+    set_setting,
+)
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -501,31 +512,12 @@ def export_template():
     return _xlsx_response(wb, "카드혜택_업로드양식.xlsx")
 
 
-def _parse_excel_date(value):
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.date().isoformat()
-    if isinstance(value, date):
-        return value.isoformat()
-    try:
-        return datetime.strptime(str(value).strip(), "%Y-%m-%d").date().isoformat()
-    except ValueError:
-        return None
+def _import_own_template(ws):
+    """이 앱이 만든 "빈 양식"(카드명/혜택명 헤더)을 그대로 채워 올린 경우.
 
-
-@app.route("/api/import/usage", methods=["POST"])
-def import_usage():
-    file = request.files.get("file")
-    if not file:
-        return jsonify({"error": "파일을 선택하세요."}), 400
-
-    try:
-        wb = load_workbook(file, data_only=True)
-    except Exception:
-        return jsonify({"error": "엑셀 파일을 읽을 수 없습니다. .xlsx 파일인지 확인해주세요."}), 400
-    ws = wb.active
-
+    카드명·혜택명이 정확히 일치하는 행은 바로 usage_logs로 들어간다(혜택이
+    이미 정해져 있으므로 사람이 다시 고를 필요가 없음).
+    """
     conn = get_conn()
     try:
         benefit_lookup = {}
@@ -548,15 +540,12 @@ def import_usage():
                 skipped.append(f"{i}행: 카드/혜택 이름을 찾을 수 없음 ({key[0]} / {key[1]})")
                 continue
 
-            try:
-                used_value = float(used_value)
-            except (TypeError, ValueError):
-                used_value = 0
+            used_value = parse_amount_cell(used_value)
             if not used_value:
                 skipped.append(f"{i}행: 금액(또는 횟수)이 올바르지 않음")
                 continue
 
-            used_at_str = _parse_excel_date(used_at)
+            used_at_str = parse_date_cell(used_at)
             if not used_at_str:
                 skipped.append(f"{i}행: 날짜가 올바르지 않음 (YYYY-MM-DD)")
                 continue
@@ -571,8 +560,96 @@ def import_usage():
         conn.close()
 
     result = serialize_full()
-    result["import_result"] = {"added": added, "skipped": skipped}
+    result["import_result"] = {"mode": "template", "added": added, "skipped": skipped}
     return jsonify(result)
+
+
+def _import_statement(ws, header_info):
+    """카드사에서 그대로 다운로드한 엑셀(이용일자/승인금액 등)을 인식해서
+    "받은 결제 알림"(inbox_items) 목록에 대량으로 쌓는다.
+
+    이 표에는 어떤 혜택인지에 대한 정보가 없으므로, 자동수집 알림과 똑같이
+    사람이 앱에서 "혜택 선택"으로 하나씩 배정해야 한다.
+    """
+    date_col = header_info["date_col"]
+    amount_col = header_info["amount_col"]
+    merchant_col = header_info["merchant_col"]
+    cardno_col = header_info["cardno_col"]
+
+    conn = get_conn()
+    try:
+        queued = 0
+        skipped = []
+        for i, row in enumerate(
+            ws.iter_rows(min_row=header_info["header_row"] + 1, values_only=True),
+            start=header_info["header_row"] + 1,
+        ):
+            if row is None or all(v in (None, "") for v in row):
+                continue
+
+            amount = parse_amount_cell(row[amount_col] if amount_col < len(row) else None)
+            if not amount:
+                skipped.append(f"{i}행: 금액을 확인할 수 없음")
+                continue
+
+            used_at = parse_date_cell(row[date_col] if date_col < len(row) else None)
+            if not used_at:
+                skipped.append(f"{i}행: 날짜를 확인할 수 없음")
+                continue
+
+            merchant = ""
+            if merchant_col is not None and merchant_col < len(row) and row[merchant_col] is not None:
+                merchant = str(row[merchant_col]).strip()
+
+            last4 = ""
+            if cardno_col is not None and cardno_col < len(row):
+                last4 = extract_last4(row[cardno_col])
+
+            raw_parts = [p for p in [merchant, f"{amount:,.0f}원", used_at] if p]
+            raw_text = " · ".join(raw_parts)
+
+            conn.execute(
+                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at)
+                   VALUES (?, ?, ?, '', ?, ?)""",
+                (raw_text, amount, last4, merchant, used_at),
+            )
+            queued += 1
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = serialize_full()
+    result["import_result"] = {"mode": "statement", "queued": queued, "skipped": skipped}
+    return jsonify(result)
+
+
+@app.route("/api/import/usage", methods=["POST"])
+def import_usage():
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "파일을 선택하세요."}), 400
+
+    try:
+        wb = load_workbook(file, data_only=True)
+    except Exception:
+        return jsonify({"error": "엑셀 파일을 읽을 수 없습니다. .xlsx 파일인지 확인해주세요."}), 400
+    ws = wb.active
+
+    first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None) or []
+    header_cells = [str(c).strip() if c is not None else "" for c in first_row]
+    is_own_template = any("카드명" in c for c in header_cells) and any("혜택명" in c for c in header_cells)
+
+    if is_own_template:
+        return _import_own_template(ws)
+
+    header_info = find_statement_header(ws)
+    if not header_info:
+        return jsonify({
+            "error": "엑셀에서 날짜·금액 열을 찾지 못했습니다. 카드사에서 받은 파일 원본 그대로 올려주세요 "
+                     "(헤더에 '이용일자'나 '승인금액' 같은 표현이 있어야 자동으로 인식됩니다)."
+        }), 400
+
+    return _import_statement(ws, header_info)
 
 
 init_db()

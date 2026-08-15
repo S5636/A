@@ -11,7 +11,7 @@ import calendar
 import os
 import re
 import sqlite3
-from datetime import date
+from datetime import date, datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "card_benefit.db")
@@ -149,6 +149,103 @@ def parse_notification(text: str) -> dict:
         break
 
     return {"amount": amount, "last4": last4, "issuer": issuer, "merchant": merchant}
+
+
+# ---- 카드사에서 다운로드한 엑셀(이용내역서) 자동인식 ----
+# 카드사마다 열 이름이 제각각이라, 흔히 쓰이는 헤더 표현들을 넓게 잡아서
+# "이 표에서 어느 열이 날짜/금액/가맹점/카드번호인지" 추측한다.
+
+_DATE_HEADERS = ["이용일자", "이용일", "승인일자", "거래일자", "거래일", "일자", "날짜", "결제일자", "결제일"]
+_AMOUNT_HEADERS = ["이용금액", "승인금액", "결제금액", "청구금액", "이용대금", "금액"]
+_MERCHANT_HEADERS = ["가맹점명", "가맹점", "사용처", "이용가맹점", "적요", "내용", "상호"]
+_CARDNO_HEADERS = ["카드번호", "카드no", "카드 no", "카드"]
+
+
+def _norm_cell(cell):
+    return str(cell).strip() if cell is not None else ""
+
+
+def _match_col(header_cells, candidates):
+    # candidates는 구체적인 표현부터 순서대로 나열되어 있다고 보고, 후보를
+    # 바깥 루프로 돌려서 구체적인 헤더명이 더 넓은(포괄적인) 헤더명보다
+    # 먼저 매칭되게 한다 (예: "카드번호"가 그냥 "카드"보다 우선).
+    for cand in candidates:
+        for idx, cell in enumerate(header_cells):
+            c = _norm_cell(cell)
+            if c and cand in c:
+                return idx
+    return None
+
+
+def find_statement_header(ws, max_scan=15):
+    """카드사 엑셀에서 '이용일자·승인금액' 같은 헤더가 있는 행을 찾는다.
+
+    카드사 엑셀은 표 위에 안내문구가 몇 줄 섞여 있는 경우가 많아서, 1행이
+    무조건 헤더라고 가정하지 않고 위에서부터 몇 줄을 훑어서 날짜/금액 헤더가
+    둘 다 있는 행을 찾는다.
+    """
+    for r in range(1, max_scan + 1):
+        row = next(ws.iter_rows(min_row=r, max_row=r, values_only=True), None)
+        if row is None:
+            break
+        cells = list(row)
+        date_col = _match_col(cells, _DATE_HEADERS)
+        amount_col = _match_col(cells, _AMOUNT_HEADERS)
+        if date_col is not None and amount_col is not None:
+            return {
+                "header_row": r,
+                "date_col": date_col,
+                "amount_col": amount_col,
+                "merchant_col": _match_col(cells, _MERCHANT_HEADERS),
+                "cardno_col": _match_col(cells, _CARDNO_HEADERS),
+            }
+    return None
+
+
+def extract_last4(value):
+    digits = re.sub(r"\D", "", str(value or ""))
+    return digits[-4:] if len(digits) >= 4 else ""
+
+
+def parse_amount_cell(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).replace(",", "").replace("원", "").strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_date_cell(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+
+    s = str(value).strip()
+    if not s:
+        return None
+    s_norm = s.replace(".", "-").replace("/", "-").strip("-")
+    for fmt in ("%Y-%m-%d", "%y-%m-%d"):
+        try:
+            return datetime.strptime(s_norm, fmt).date().isoformat()
+        except ValueError:
+            pass
+
+    digits = re.sub(r"\D", "", s)
+    if len(digits) == 8:
+        try:
+            return datetime.strptime(digits, "%Y%m%d").date().isoformat()
+        except ValueError:
+            return None
+    return None
 
 
 def _safe_date(year: int, month: int, day: int) -> date:

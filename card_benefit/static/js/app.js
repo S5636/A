@@ -396,8 +396,11 @@
     state = data;
     render();
 
-    const r = data.import_result || { added: 0, skipped: [] };
-    const lines = [`<div class="upload-log-item">${r.added}건 추가됨</div>`];
+    const r = data.import_result || { mode: "template", added: 0, skipped: [] };
+    const summary = r.mode === "statement"
+      ? `${r.queued}건이 "받은 결제 알림" 목록에 추가됨 - 아래에서 혜택을 골라주세요`
+      : `${r.added}건 추가됨`;
+    const lines = [`<div class="upload-log-item">${summary}</div>`];
     r.skipped.forEach((msg) => lines.push(`<div class="upload-log-item err">${escapeHtml(msg)}</div>`));
     importLog.innerHTML = lines.join("");
     importFile.value = "";
