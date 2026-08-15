@@ -105,8 +105,19 @@
       <select id="benefit-calc-mode">
         <option value="raw">입력한 금액 그대로 기록</option>
         <option value="change_under_1000">잔돈 자동계산 (결제금액 입력 → 1,000원 미만 자동 계산, 더모아형)</option>
+        <option value="percent_discount">할인율 자동계산 (결제금액 입력 → 할인/캐시백 금액 자동 계산)</option>
       </select>
-      <small>"잔돈 자동계산"을 고르면 사용 기록 시 결제금액을 넣으면 1,000원 미만 잔돈만 자동으로 적립액에 더해집니다(건당 5천원 이상만 인정, 동일 가맹점 당일 중복 자동 차단).</small>
+      <small>
+        "잔돈 자동계산": 사용 기록 시 결제금액을 넣으면 1,000원 미만 잔돈만 자동으로 적립액에 더해집니다(건당 5천원 이상만 인정, 동일 가맹점 당일 중복 자동 차단).<br>
+        "할인율 자동계산": 결제금액을 넣으면 할인율(아래)을 곱한 실제 할인액만 한도에서 빠집니다 - 결제금액 전체가 아니라.
+      </small>
+    </label>
+    <label id="benefit-percent-row" style="display:none;">할인율 (%)
+      <input type="number" id="benefit-percent" min="0" max="100" step="0.1" placeholder="예: 10">
+    </label>
+    <label id="benefit-cap-row" style="display:none;">건당 할인적용 대상 결제금액 한도 (원, 선택)
+      <input type="number" id="benefit-cap" min="0" step="1" placeholder="예: 10000 (비우면 한도 없음)">
+      <small>카드 안내장의 "할인받기 전 이용금액 기준 1회 OO까지"에 해당하는 숫자입니다.</small>
     </label>
     <label>자동 매칭 가맹점 (선택, 쉼표로 구분)
       <input type="text" id="benefit-keywords" placeholder="예: 스타벅스,투썸플레이스,이디야">

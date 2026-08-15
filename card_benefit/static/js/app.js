@@ -307,6 +307,13 @@
   const benefitModal = document.getElementById("benefit-modal");
   let editingBenefit = null; // { cardId, benefitId }
 
+  function updateBenefitCalcFieldsUI() {
+    const mode = document.getElementById("benefit-calc-mode").value;
+    document.getElementById("benefit-percent-row").style.display = mode === "percent_discount" ? "block" : "none";
+    document.getElementById("benefit-cap-row").style.display = mode === "percent_discount" ? "block" : "none";
+  }
+  document.getElementById("benefit-calc-mode").addEventListener("change", updateBenefitCalcFieldsUI);
+
   function openBenefitModal(cardId, benefit) {
     editingBenefit = { cardId, benefitId: benefit ? benefit.id : null };
     document.getElementById("benefit-modal-title").textContent = benefit ? "혜택 수정" : "혜택 추가";
@@ -314,9 +321,12 @@
     document.getElementById("benefit-type").value = benefit ? benefit.limit_type : "amount";
     document.getElementById("benefit-limit").value = benefit ? benefit.limit_value : "";
     document.getElementById("benefit-calc-mode").value = benefit ? benefit.calc_mode : "raw";
+    document.getElementById("benefit-percent").value = benefit && benefit.discount_percent ? benefit.discount_percent : "";
+    document.getElementById("benefit-cap").value = benefit && benefit.per_txn_cap ? benefit.per_txn_cap : "";
     document.getElementById("benefit-keywords").value = benefit ? benefit.merchant_keywords : "";
     document.getElementById("benefit-tiers").value = benefit ? benefit.tier_table : "";
     document.getElementById("benefit-memo").value = benefit ? benefit.memo : "";
+    updateBenefitCalcFieldsUI();
     benefitModal.classList.add("open");
   }
   document.getElementById("benefit-cancel").addEventListener("click", () => benefitModal.classList.remove("open"));
@@ -326,11 +336,17 @@
       limit_type: document.getElementById("benefit-type").value,
       limit_value: document.getElementById("benefit-limit").value,
       calc_mode: document.getElementById("benefit-calc-mode").value,
+      discount_percent: document.getElementById("benefit-percent").value || 0,
+      per_txn_cap: document.getElementById("benefit-cap").value || 0,
       merchant_keywords: document.getElementById("benefit-keywords").value.trim(),
       tier_table: document.getElementById("benefit-tiers").value.trim(),
       memo: document.getElementById("benefit-memo").value.trim(),
     };
     if (!payload.name) { alert("혜택 이름을 입력하세요."); return; }
+    if (payload.calc_mode === "percent_discount" && (!payload.discount_percent || Number(payload.discount_percent) <= 0)) {
+      alert("할인율(%)을 입력하세요.");
+      return;
+    }
     const url = editingBenefit.benefitId
       ? `/api/benefits/${editingBenefit.benefitId}`
       : `/api/cards/${editingBenefit.cardId}/benefits`;
@@ -355,29 +371,47 @@
     return remainder * (doubled ? 2 : 1);
   }
 
+  function computePercentDiscount(amount, percent, cap) {
+    amount = Number(amount) || 0;
+    percent = Number(percent) || 0;
+    let base = amount;
+    if (cap && cap > 0) base = Math.min(base, cap);
+    return Math.round((base * percent) / 100);
+  }
+
   function updateUseChangePreview() {
-    if (!usingBenefit || usingBenefit.calc_mode !== "change_under_1000") return;
+    if (!usingBenefit) return;
     const amount = document.getElementById("use-value").value;
-    const doubled = document.getElementById("use-doubled").checked;
-    const earned = computeChangeEarned(amount, doubled);
     const preview = document.getElementById("use-change-preview");
-    if (!amount) {
-      preview.style.display = "none";
+    if (usingBenefit.calc_mode === "change_under_1000") {
+      const doubled = document.getElementById("use-doubled").checked;
+      if (!amount) { preview.style.display = "none"; return; }
+      preview.style.display = "block";
+      preview.textContent = Number(amount) < 5000
+        ? "건당 5,000원 미만은 적립되지 않습니다."
+        : `잔돈 적립 예상: ${fmt(computeChangeEarned(amount, doubled))}원${doubled ? " (2배 적용)" : ""}`;
       return;
     }
-    preview.style.display = "block";
-    preview.textContent = Number(amount) < 5000
-      ? "건당 5,000원 미만은 적립되지 않습니다."
-      : `잔돈 적립 예상: ${fmt(earned)}원${doubled ? " (2배 적용)" : ""}`;
+    if (usingBenefit.calc_mode === "percent_discount") {
+      if (!amount) { preview.style.display = "none"; return; }
+      const earned = computePercentDiscount(amount, usingBenefit.discount_percent, usingBenefit.per_txn_cap);
+      preview.style.display = "block";
+      preview.textContent = `할인 예상: ${fmt(earned)}원 (${usingBenefit.discount_percent}%${usingBenefit.per_txn_cap ? `, 결제금액 ${fmt(usingBenefit.per_txn_cap)}원까지만 적용` : ""})`;
+      return;
+    }
+    preview.style.display = "none";
   }
 
   function openUseModal(benefit) {
     usingBenefit = benefit;
     const isChange = benefit.calc_mode === "change_under_1000";
-    document.getElementById("use-modal-title").textContent = isChange ? "잔돈 적립 기록" : "혜택 사용 기록";
+    const isPercent = benefit.calc_mode === "percent_discount";
+    document.getElementById("use-modal-title").textContent = isChange
+      ? "잔돈 적립 기록"
+      : (isPercent ? "할인 받은 결제 기록" : "혜택 사용 기록");
     document.getElementById("use-value-label").firstChild.textContent =
-      isChange ? "결제 금액 (원) " : (benefit.limit_type === "count" ? "사용 횟수 (회) " : "사용 금액 (원) ");
-    document.getElementById("use-value").value = !isChange && benefit.limit_type === "count" ? 1 : "";
+      (isChange || isPercent) ? "결제 금액 (원) " : (benefit.limit_type === "count" ? "사용 횟수 (회) " : "사용 금액 (원) ");
+    document.getElementById("use-value").value = !isChange && !isPercent && benefit.limit_type === "count" ? 1 : "";
     document.getElementById("use-merchant-row").style.display = isChange ? "flex" : "none";
     document.getElementById("use-doubled-row").style.display = isChange ? "flex" : "none";
     document.getElementById("use-merchant").value = "";
@@ -442,19 +476,26 @@
   function updateAssignChangeUI() {
     const benefit = currentAssignBenefit();
     const isChange = !!benefit && benefit.calc_mode === "change_under_1000";
-    document.getElementById("assign-amount-label").firstChild.textContent = isChange ? "결제 금액 " : "금액 ";
+    const isPercent = !!benefit && benefit.calc_mode === "percent_discount";
+    document.getElementById("assign-amount-label").firstChild.textContent = (isChange || isPercent) ? "결제 금액 " : "금액 ";
     document.getElementById("assign-doubled-row").style.display = isChange ? "flex" : "none";
     const preview = document.getElementById("assign-change-preview");
     const amount = document.getElementById("assign-amount").value;
-    if (!isChange || !amount) {
-      preview.style.display = "none";
+    if (isChange && amount) {
+      const doubled = document.getElementById("assign-doubled").checked;
+      preview.style.display = "block";
+      preview.textContent = Number(amount) < 5000
+        ? "건당 5,000원 미만은 적립되지 않습니다."
+        : `잔돈 적립 예상: ${fmt(computeChangeEarned(amount, doubled))}원${doubled ? " (2배 적용)" : ""}`;
       return;
     }
-    const doubled = document.getElementById("assign-doubled").checked;
-    preview.style.display = "block";
-    preview.textContent = Number(amount) < 5000
-      ? "건당 5,000원 미만은 적립되지 않습니다."
-      : `잔돈 적립 예상: ${fmt(computeChangeEarned(amount, doubled))}원${doubled ? " (2배 적용)" : ""}`;
+    if (isPercent && amount) {
+      const earned = computePercentDiscount(amount, benefit.discount_percent, benefit.per_txn_cap);
+      preview.style.display = "block";
+      preview.textContent = `할인 예상: ${fmt(earned)}원 (${benefit.discount_percent}%${benefit.per_txn_cap ? `, 결제금액 ${fmt(benefit.per_txn_cap)}원까지만 적용` : ""})`;
+      return;
+    }
+    preview.style.display = "none";
   }
 
   function openAssignModal(item) {
@@ -497,7 +538,7 @@
 
   document.getElementById("assign-save").addEventListener("click", async () => {
     const benefitId = assignBenefitSelect.value;
-    if (!benefitId) { alert("혜택을 선택하세요."); return; }
+    if (!benefitId) { alert("\"혜택\" 항목이 아직 \"해당 없음\"으로 되어있습니다. 이 결제가 어떤 혜택에 해당하는지 위에서 골라야 기록됩니다."); return; }
     const benefit = currentAssignBenefit();
     const payload = {
       benefit_id: benefitId,

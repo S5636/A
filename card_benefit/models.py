@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS benefits (
     memo TEXT DEFAULT '',
     merchant_keywords TEXT DEFAULT '',   -- 쉼표로 구분된 가맹점명 키워드 - 매칭되면 배정 화면에서 이 혜택을 자동 선택
     tier_table TEXT DEFAULT '',          -- [[전월실적기준금액, 한도], ...] JSON - 있으면 카드의 이번달 실적에 따라 한도 자동 계산
-    calc_mode TEXT NOT NULL DEFAULT 'raw',   -- 'raw'(입력값 그대로) 또는 'change_under_1000'(결제금액 입력 → 1000원 미만 자투리 자동계산, 더모아형)
+    calc_mode TEXT NOT NULL DEFAULT 'raw',   -- 'raw' | 'change_under_1000'(더모아형) | 'percent_discount'(결제금액 입력 → 할인율 자동계산)
+    discount_percent REAL NOT NULL DEFAULT 0,   -- percent_discount용 할인율(%)
+    per_txn_cap REAL NOT NULL DEFAULT 0,        -- percent_discount용 건당 할인적용 대상 결제금액 한도(0=한도 없음)
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -112,6 +114,8 @@ def init_db():
         _ensure_column(conn, "benefits", "calc_mode", "calc_mode TEXT NOT NULL DEFAULT 'raw'")
         _ensure_column(conn, "usage_logs", "merchant", "merchant TEXT DEFAULT ''")
         _ensure_column(conn, "usage_logs", "source_inbox_id", "source_inbox_id INTEGER DEFAULT NULL")
+        _ensure_column(conn, "benefits", "discount_percent", "discount_percent REAL NOT NULL DEFAULT 0")
+        _ensure_column(conn, "benefits", "per_txn_cap", "per_txn_cap REAL NOT NULL DEFAULT 0")
         conn.commit()
     finally:
         conn.close()
@@ -201,6 +205,20 @@ def compute_change_earned(payment_amount: float, doubled: bool = False) -> float
         return 0
     remainder = payment_amount % 1000
     return remainder * (2 if doubled else 1)
+
+
+def compute_percent_discount(payment_amount: float, percent: float, per_txn_cap: float = 0) -> float:
+    """결제금액을 넣으면 실제 "받은 할인/캐시백 금액"을 계산한다.
+
+    카드사 안내장의 "할인받기 전 이용금액 기준 1회 X까지 할인" 문구는
+    결제금액 중 X까지만 할인율이 적용된다는 뜻이라, 할인액 = min(결제금액, 한도) × 할인율.
+    """
+    payment_amount = payment_amount or 0
+    percent = percent or 0
+    base = payment_amount
+    if per_txn_cap and per_txn_cap > 0:
+        base = min(base, per_txn_cap)
+    return round(base * percent / 100)
 
 
 def tier_limit_for_spend(tier_table_json: str, spend: float):
