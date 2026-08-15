@@ -41,9 +41,12 @@
   }
 
   function render() {
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
     renderInbox();
     renderNoBenefit();
     renderCards();
+    requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
   }
 
   function memoToggleTemplate(key, memo) {
