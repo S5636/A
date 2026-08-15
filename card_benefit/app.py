@@ -491,6 +491,13 @@ def regenerate_inbox_token():
 @app.route("/api/inbox", methods=["POST"])
 def create_inbox_item():
     data = request.get_json(force=True, silent=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        # 유효한 JSON이 아니거나 "text" 필드가 없으면, 본문 전체를 알림 원문으로
+        # 취급한다. MacroDroid 등에서 알림 텍스트를 JSON으로 정확히 감싸서
+        # 보내기 번거로운 경우, 그냥 알림 텍스트를 body에 그대로 넣어도 되게
+        # 하기 위함(줄바꿈/따옴표 이스케이프를 신경 쓸 필요가 없어짐).
+        text = (request.get_data(as_text=True) or "").strip()
 
     conn = get_conn()
     try:
@@ -498,7 +505,6 @@ def create_inbox_item():
         if not _inbox_authorized(request, expected_token):
             return jsonify({"error": "인증 토큰이 올바르지 않습니다."}), 401
 
-        text = (data.get("text") or "").strip()
         if not text:
             return jsonify({"error": "text가 비어 있습니다."}), 400
 
