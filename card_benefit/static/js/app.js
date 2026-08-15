@@ -4,8 +4,12 @@
   const inboxSection = document.getElementById("inbox-section");
   const inboxList = document.getElementById("inbox-list");
   const inboxCount = document.getElementById("inbox-count");
+  const noBenefitSection = document.getElementById("no-benefit-section");
+  const noBenefitList = document.getElementById("no-benefit-list");
+  const noBenefitCount = document.getElementById("no-benefit-count");
 
-  let state = { cards: [], inbox: [] };
+  let state = { cards: [], inbox: [], no_benefit: [] };
+  let noBenefitOpen = false;
   const openLogPanels = new Set(); // benefit id 목록 - 펼쳐진 사용내역 기억
   const openMemoPanels = new Set(); // "card-1", "benefit-3" 같은 키 - 펼쳐진 설명 기억
 
@@ -37,6 +41,7 @@
 
   function render() {
     renderInbox();
+    renderNoBenefit();
     renderCards();
   }
 
@@ -72,6 +77,44 @@
       })
     );
   }
+
+  // ---- 혜택 없음 처리 내역 ----
+  function renderNoBenefit() {
+    const items = state.no_benefit || [];
+    noBenefitSection.style.display = items.length ? "block" : "none";
+    noBenefitCount.textContent = items.length ? `${items.length}건` : "";
+    noBenefitList.style.display = noBenefitOpen ? "flex" : "none";
+    noBenefitList.innerHTML = items.map((it) => `
+      <div class="inbox-item" data-id="${it.id}">
+        <div class="inbox-item-info">
+          <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
+          <div class="inbox-item-sub">${it.occurred_at}${it.card_name ? " · " + escapeHtml(it.card_name) : ""}${it.merchant ? " · " + escapeHtml(it.merchant) : ""}</div>
+        </div>
+        <div class="benefit-buttons">
+          <button class="btn secondary small reopen-no-benefit" data-id="${it.id}">다시 확인</button>
+          <button class="btn secondary small delete-no-benefit" data-id="${it.id}">완전 삭제</button>
+        </div>
+      </div>
+    `).join("");
+
+    noBenefitList.querySelectorAll(".reopen-no-benefit").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        state = await api(`/api/inbox/${btn.dataset.id}/reopen`, { method: "POST" });
+        render();
+      })
+    );
+    noBenefitList.querySelectorAll(".delete-no-benefit").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("완전히 삭제할까요? 되돌릴 수 없습니다.")) return;
+        state = await api(`/api/inbox/${btn.dataset.id}`, { method: "DELETE" });
+        render();
+      })
+    );
+  }
+  document.getElementById("no-benefit-toggle").addEventListener("click", () => {
+    noBenefitOpen = !noBenefitOpen;
+    render();
+  });
 
   // ---- 카드 목록 ----
   function renderCards() {
@@ -532,6 +575,16 @@
   document.getElementById("assign-discard").addEventListener("click", async () => {
     if (!confirm("이 알림을 무시할까요? (광고 등 결제와 무관한 알림일 때)")) return;
     state = await api(`/api/inbox/${assigningItem.id}`, { method: "DELETE" });
+    assignModal.classList.remove("open");
+    render();
+  });
+
+  document.getElementById("assign-no-benefit").addEventListener("click", async () => {
+    state = await api(`/api/inbox/${assigningItem.id}/mark-no-benefit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_id: assignCardSelect.value || null }),
+    });
     assignModal.classList.remove("open");
     render();
   });

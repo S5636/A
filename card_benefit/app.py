@@ -94,10 +94,34 @@ def serialize_inbox(conn):
     return items
 
 
+def serialize_no_benefit(conn):
+    rows = conn.execute(
+        """SELECT inbox_items.*, cards.name AS card_name
+           FROM inbox_items LEFT JOIN cards ON cards.id = inbox_items.card_id
+           WHERE inbox_items.status = 'no_benefit'
+           ORDER BY inbox_items.occurred_at DESC, inbox_items.id DESC"""
+    ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "raw_text": r["raw_text"],
+            "amount": r["amount"],
+            "merchant": r["merchant"],
+            "occurred_at": r["occurred_at"],
+            "card_name": r["card_name"],
+        }
+        for r in rows
+    ]
+
+
 def serialize_full():
     conn = get_conn()
     try:
-        return {"cards": _serialize_cards(conn), "inbox": serialize_inbox(conn)}
+        return {
+            "cards": _serialize_cards(conn),
+            "inbox": serialize_inbox(conn),
+            "no_benefit": serialize_no_benefit(conn),
+        }
     finally:
         conn.close()
 
@@ -676,6 +700,44 @@ def assign_inbox_item(item_id):
         conn.execute(
             "UPDATE inbox_items SET status = 'assigned', card_id = ?, benefit_id = ? WHERE id = ?",
             (benefit["card_id"], benefit_id, item_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/inbox/<int:item_id>/mark-no-benefit", methods=["POST"])
+def mark_no_benefit(item_id):
+    """해당하는 혜택이 없는(그러나 실제로 결제는 한) 알림을 "받은 결제 알림"
+    목록에서 빼되, 완전히 삭제(=이 알림 무시)하지 않고 별도 목록에 남겨둔다."""
+    data = request.get_json(force=True, silent=True) or {}
+    card_id = data.get("card_id") or None
+
+    conn = get_conn()
+    try:
+        item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (item_id,)).fetchone()
+        if not item or item["status"] != "pending":
+            return jsonify({"error": "이미 처리되었거나 존재하지 않는 알림입니다."}), 404
+
+        conn.execute(
+            "UPDATE inbox_items SET status = 'no_benefit', card_id = ?, benefit_id = NULL WHERE id = ?",
+            (card_id, item_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/inbox/<int:item_id>/reopen", methods=["POST"])
+def reopen_inbox_item(item_id):
+    """"혜택 없음"으로 처리했던 알림을 다시 "받은 결제 알림" 목록으로 되돌린다."""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE inbox_items SET status = 'pending', card_id = NULL, benefit_id = NULL WHERE id = ?",
+            (item_id,),
         )
         conn.commit()
     finally:
