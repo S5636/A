@@ -252,30 +252,33 @@ def match_benefit_keyword(merchant: str, merchant_keywords: str) -> bool:
     return any(k in merchant_lower for k in keywords)
 
 
-def match_rate_table(merchant: str, rate_table_json: str, default_percent: float = 0) -> float:
-    """가맹점명과 rate_table(JSON [[키워드(쉼표구분), 할인율], ...])을 받아서
-    해당 업종의 할인율을 돌려준다. Daily Plan/Monthly Plan처럼 하나의 혜택
-    안에서 업종별로 할인율이 다른 경우에 쓴다. 매칭 안 되면 default_percent.
+def match_rate_table(merchant: str, rate_table_json: str, default_percent: float = 0, default_cap: float = 0):
+    """가맹점명과 rate_table(JSON [[키워드(쉼표구분), 할인율], ...] 또는
+    [[키워드, 할인율, 건당한도], ...])을 받아서 해당 업종의 (할인율, 건당한도)를
+    돌려준다. Daily Plan/Monthly Plan처럼 하나의 혜택 안에서 업종별로 할인율(과
+    건당한도)이 다른 경우에 쓴다. 매칭 안 되면 (default_percent, default_cap).
     """
     if not rate_table_json or not merchant:
-        return default_percent
+        return default_percent, default_cap
     try:
         rows = json.loads(rate_table_json)
     except (ValueError, TypeError):
-        return default_percent
+        return default_percent, default_cap
     if not isinstance(rows, list):
-        return default_percent
+        return default_percent, default_cap
 
     merchant_lower = merchant.lower()
     for entry in rows:
-        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+        if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3):
             continue
-        keywords, percent = entry
+        keywords = entry[0]
+        percent = entry[1]
+        cap = entry[2] if len(entry) == 3 else default_cap
         for kw in str(keywords).split(","):
             kw = kw.strip().lower()
             if kw and kw in merchant_lower:
-                return percent
-    return default_percent
+                return percent, cap
+    return default_percent, default_cap
 
 
 def annotate_merchant(name: str) -> str:

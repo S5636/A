@@ -364,7 +364,8 @@ def _clean_tier_table(raw):
 
 
 def _clean_rate_table(raw):
-    """[["키워드1,키워드2",할인율], ...] 형태인지 검증하고 정돈된 JSON 문자열(또는 '')을 돌려준다."""
+    """[["키워드1,키워드2",할인율], ...] 또는 [["키워드",할인율,건당한도], ...]
+    형태인지 검증하고 정돈된 JSON 문자열(또는 '')을 돌려준다."""
     raw = (raw or "").strip()
     if not raw:
         return ""
@@ -372,11 +373,17 @@ def _clean_rate_table(raw):
         rows = json.loads(raw)
         if not isinstance(rows, list):
             raise ValueError
-        cleaned = [[str(r[0]), float(r[1])] for r in rows]
+        cleaned = []
+        for r in rows:
+            if len(r) == 3:
+                cleaned.append([str(r[0]), float(r[1]), float(r[2])])
+            else:
+                cleaned.append([str(r[0]), float(r[1])])
     except (ValueError, TypeError, IndexError, KeyError):
         raise ValueError(
             "업종별 할인율 형식이 올바르지 않습니다. "
-            '예: [["쇼핑몰,백화점,이커머스",10],["버스,지하철,택시",5]]'
+            '예: [["쇼핑몰,백화점,이커머스",10],["버스,지하철,택시",5]] '
+            '(건당한도가 카테고리마다 다르면 [["공과금",10,50000],["디지털구독",20,10000]]처럼 3번째 값 추가 가능)'
         )
     return json.dumps(cleaned, ensure_ascii=False)
 
@@ -533,8 +540,10 @@ def _apply_calc_mode(benefit, raw_value, doubled, memo, merchant=""):
         return earned, " · ".join(parts)
 
     if benefit["calc_mode"] == "percent_discount":
-        percent = match_rate_table(merchant, benefit["rate_table"], benefit["discount_percent"])
-        earned = compute_percent_discount(raw_value, percent, benefit["per_txn_cap"])
+        percent, cap = match_rate_table(
+            merchant, benefit["rate_table"], benefit["discount_percent"], benefit["per_txn_cap"]
+        )
+        earned = compute_percent_discount(raw_value, percent, cap)
         parts = [f"결제 {raw_value:,.0f}원 → 할인 {earned:,.0f}원({percent:g}%)"]
         if memo:
             parts.append(memo)

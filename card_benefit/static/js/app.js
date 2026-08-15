@@ -488,25 +488,27 @@
     return Math.round((base * percent) / 100);
   }
 
-  function matchRateTable(merchant, rateTableJson, defaultPercent) {
-    if (!rateTableJson || !merchant) return defaultPercent;
+  function matchRateTable(merchant, rateTableJson, defaultPercent, defaultCap) {
+    if (!rateTableJson || !merchant) return [defaultPercent, defaultCap];
     let rows;
     try {
       rows = JSON.parse(rateTableJson);
     } catch (e) {
-      return defaultPercent;
+      return [defaultPercent, defaultCap];
     }
-    if (!Array.isArray(rows)) return defaultPercent;
+    if (!Array.isArray(rows)) return [defaultPercent, defaultCap];
     const merchantLower = merchant.toLowerCase();
     for (const entry of rows) {
-      if (!Array.isArray(entry) || entry.length !== 2) continue;
-      const [keywords, percent] = entry;
+      if (!Array.isArray(entry) || (entry.length !== 2 && entry.length !== 3)) continue;
+      const keywords = entry[0];
+      const percent = entry[1];
+      const cap = entry.length === 3 ? entry[2] : defaultCap;
       for (const kw of String(keywords).split(",")) {
         const k = kw.trim().toLowerCase();
-        if (k && merchantLower.includes(k)) return percent;
+        if (k && merchantLower.includes(k)) return [percent, cap];
       }
     }
-    return defaultPercent;
+    return [defaultPercent, defaultCap];
   }
 
   function updateUseChangePreview() {
@@ -525,10 +527,10 @@
     if (usingBenefit.calc_mode === "percent_discount") {
       if (!amount) { preview.style.display = "none"; return; }
       const merchant = document.getElementById("use-merchant").value.trim();
-      const percent = matchRateTable(merchant, usingBenefit.rate_table, usingBenefit.discount_percent);
-      const earned = computePercentDiscount(amount, percent, usingBenefit.per_txn_cap);
+      const [percent, cap] = matchRateTable(merchant, usingBenefit.rate_table, usingBenefit.discount_percent, usingBenefit.per_txn_cap);
+      const earned = computePercentDiscount(amount, percent, cap);
       preview.style.display = "block";
-      preview.textContent = `할인 예상: ${fmt(earned)}원 (${percent}%${usingBenefit.per_txn_cap ? `, 결제금액 ${fmt(usingBenefit.per_txn_cap)}원까지만 적용` : ""})`;
+      preview.textContent = `할인 예상: ${fmt(earned)}원 (${percent}%${cap ? `, 결제금액 ${fmt(cap)}원까지만 적용` : ""})`;
       return;
     }
     preview.style.display = "none";
@@ -626,10 +628,10 @@
     }
     if (isPercent && amount) {
       const merchant = (assigningItem && assigningItem.merchant) || "";
-      const percent = matchRateTable(merchant, benefit.rate_table, benefit.discount_percent);
-      const earned = computePercentDiscount(amount, percent, benefit.per_txn_cap);
+      const [percent, cap] = matchRateTable(merchant, benefit.rate_table, benefit.discount_percent, benefit.per_txn_cap);
+      const earned = computePercentDiscount(amount, percent, cap);
       preview.style.display = "block";
-      preview.textContent = `할인 예상: ${fmt(earned)}원 (${percent}%${benefit.per_txn_cap ? `, 결제금액 ${fmt(benefit.per_txn_cap)}원까지만 적용` : ""})`;
+      preview.textContent = `할인 예상: ${fmt(earned)}원 (${percent}%${cap ? `, 결제금액 ${fmt(cap)}원까지만 적용` : ""})`;
       return;
     }
     preview.style.display = "none";
