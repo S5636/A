@@ -117,12 +117,21 @@
         "할인율 자동계산": 결제금액을 넣으면 할인율(아래)을 곱한 실제 할인액만 한도에서 빠집니다 - 결제금액 전체가 아니라.
       </small>
     </label>
-    <label id="benefit-percent-row" style="display:none;">할인율 (%)
+    <label id="benefit-percent-row" style="display:none;">기본 할인율 (%)
       <input type="number" id="benefit-percent" min="0" max="100" step="0.1" placeholder="예: 10">
+      <small>아래 "업종별 할인율"에서 매칭되는 게 없을 때 적용되는 기본값입니다.</small>
     </label>
     <label id="benefit-cap-row" style="display:none;">건당 할인적용 대상 결제금액 한도 (원, 선택)
       <input type="number" id="benefit-cap" min="0" step="1" placeholder="예: 10000 (비우면 한도 없음)">
       <small>카드 안내장의 "할인받기 전 이용금액 기준 1회 OO까지"에 해당하는 숫자입니다.</small>
+    </label>
+    <label id="benefit-rate-table-row" style="display:none;">업종별 할인율 (선택, 고급)
+      <textarea id="benefit-rate-table" rows="2" placeholder='예: [["쇼핑몰,백화점,이커머스",10],["버스,지하철,택시",5],["편의점,마트,카페",5]]'></textarea>
+      <small>
+        Daily Plan/Monthly Plan처럼 하나의 혜택 안에서 가맹점 업종별로 할인율이 다를 때 씁니다.
+        [["키워드1,키워드2",할인율], ...] 형태의 JSON. 가맹점명에 키워드가 포함되면 그 할인율을 적용하고,
+        어디에도 안 걸리면 위 "기본 할인율"을 씁니다. 모르면 비워두세요(기본 할인율 하나만 적용됩니다).
+      </small>
     </label>
     <label>자동 매칭 가맹점 (선택, 쉼표로 구분)
       <input type="text" id="benefit-keywords" placeholder="예: 스타벅스,투썸플레이스,이디야">
@@ -150,7 +159,7 @@
       <input type="number" id="use-value" min="0" step="1">
     </label>
     <p id="use-change-preview" class="hint" style="display:none;"></p>
-    <label id="use-merchant-row" style="display:none;">가맹점 (당일 중복 적립 방지용)
+    <label id="use-merchant-row" style="display:none;">가맹점
       <input type="text" id="use-merchant" placeholder="예: 스타벅스 강남점">
     </label>
     <label id="use-doubled-row" class="checkbox-row" style="display:none;">

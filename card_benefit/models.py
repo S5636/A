@@ -116,6 +116,7 @@ def init_db():
         _ensure_column(conn, "usage_logs", "source_inbox_id", "source_inbox_id INTEGER DEFAULT NULL")
         _ensure_column(conn, "benefits", "discount_percent", "discount_percent REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "benefits", "per_txn_cap", "per_txn_cap REAL NOT NULL DEFAULT 0")
+        _ensure_column(conn, "benefits", "rate_table", "rate_table TEXT DEFAULT ''")
         conn.commit()
     finally:
         conn.close()
@@ -249,6 +250,32 @@ def match_benefit_keyword(merchant: str, merchant_keywords: str) -> bool:
     merchant_lower = merchant.lower()
     keywords = [k.strip().lower() for k in merchant_keywords.split(",") if k.strip()]
     return any(k in merchant_lower for k in keywords)
+
+
+def match_rate_table(merchant: str, rate_table_json: str, default_percent: float = 0) -> float:
+    """가맹점명과 rate_table(JSON [[키워드(쉼표구분), 할인율], ...])을 받아서
+    해당 업종의 할인율을 돌려준다. Daily Plan/Monthly Plan처럼 하나의 혜택
+    안에서 업종별로 할인율이 다른 경우에 쓴다. 매칭 안 되면 default_percent.
+    """
+    if not rate_table_json or not merchant:
+        return default_percent
+    try:
+        rows = json.loads(rate_table_json)
+    except (ValueError, TypeError):
+        return default_percent
+    if not isinstance(rows, list):
+        return default_percent
+
+    merchant_lower = merchant.lower()
+    for entry in rows:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+            continue
+        keywords, percent = entry
+        for kw in str(keywords).split(","):
+            kw = kw.strip().lower()
+            if kw and kw in merchant_lower:
+                return percent
+    return default_percent
 
 
 def annotate_merchant(name: str) -> str:

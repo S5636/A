@@ -27,6 +27,7 @@ from models import (
     init_db,
     is_cancelled_status,
     match_benefit_keyword,
+    match_rate_table,
     parse_amount_cell,
     parse_date_cell,
     parse_notification,
@@ -157,9 +158,12 @@ def _serialize_cards(conn):
             ).fetchone()["total"]
 
             logs = conn.execute(
-                """SELECT * FROM usage_logs WHERE benefit_id = ?
-                   AND used_at >= ? AND used_at < ?
-                   ORDER BY used_at DESC, id DESC""",
+                """SELECT usage_logs.*, inbox_items.occurred_at AS notif_occurred_at
+                   FROM usage_logs
+                   LEFT JOIN inbox_items ON inbox_items.id = usage_logs.source_inbox_id
+                   WHERE usage_logs.benefit_id = ?
+                   AND usage_logs.used_at >= ? AND usage_logs.used_at < ?
+                   ORDER BY usage_logs.used_at DESC, usage_logs.id DESC""",
                 (b["id"], start.isoformat(), end.isoformat()),
             ).fetchall()
 
@@ -183,6 +187,7 @@ def _serialize_cards(conn):
                 "calc_mode": b["calc_mode"],
                 "discount_percent": b["discount_percent"],
                 "per_txn_cap": b["per_txn_cap"],
+                "rate_table": b["rate_table"],
                 "used": used,
                 "remaining": remaining,
                 "percent": percent,
@@ -358,6 +363,24 @@ def _clean_tier_table(raw):
     return json.dumps(cleaned)
 
 
+def _clean_rate_table(raw):
+    """[["키워드1,키워드2",할인율], ...] 형태인지 검증하고 정돈된 JSON 문자열(또는 '')을 돌려준다."""
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    try:
+        rows = json.loads(raw)
+        if not isinstance(rows, list):
+            raise ValueError
+        cleaned = [[str(r[0]), float(r[1])] for r in rows]
+    except (ValueError, TypeError, IndexError, KeyError):
+        raise ValueError(
+            "업종별 할인율 형식이 올바르지 않습니다. "
+            '예: [["쇼핑몰,백화점,이커머스",10],["버스,지하철,택시",5]]'
+        )
+    return json.dumps(cleaned, ensure_ascii=False)
+
+
 @app.route("/api/cards/<int:card_id>/benefits", methods=["POST"])
 def create_benefit(card_id):
     data = request.get_json(force=True) or {}
@@ -382,6 +405,10 @@ def create_benefit(card_id):
         tier_table = _clean_tier_table(data.get("tier_table"))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    try:
+        rate_table = _clean_rate_table(data.get("rate_table"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     conn = get_conn()
     try:
@@ -393,8 +420,8 @@ def create_benefit(card_id):
         ).fetchone()["m"]
         conn.execute(
             """INSERT INTO benefits (card_id, name, limit_type, limit_value, memo, merchant_keywords, tier_table,
-               calc_mode, discount_percent, per_txn_cap, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               calc_mode, discount_percent, per_txn_cap, rate_table, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 card_id, name, limit_type, limit_value,
                 (data.get("memo") or "").strip(),
@@ -403,6 +430,7 @@ def create_benefit(card_id):
                 calc_mode,
                 discount_percent,
                 per_txn_cap,
+                rate_table,
                 max_order + 1,
             ),
         )
@@ -440,10 +468,14 @@ def update_benefit(benefit_id):
             tier_table = _clean_tier_table(data.get("tier_table", b["tier_table"]))
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
+        try:
+            rate_table = _clean_rate_table(data.get("rate_table", b["rate_table"]))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
 
         conn.execute(
             """UPDATE benefits SET name = ?, limit_type = ?, limit_value = ?, memo = ?, merchant_keywords = ?,
-               tier_table = ?, calc_mode = ?, discount_percent = ?, per_txn_cap = ? WHERE id = ?""",
+               tier_table = ?, calc_mode = ?, discount_percent = ?, per_txn_cap = ?, rate_table = ? WHERE id = ?""",
             (
                 name, limit_type, limit_value,
                 (data.get("memo", b["memo"]) or "").strip(),
@@ -452,6 +484,7 @@ def update_benefit(benefit_id):
                 calc_mode,
                 discount_percent,
                 per_txn_cap,
+                rate_table,
                 benefit_id,
             ),
         )
@@ -485,7 +518,7 @@ def _duplicate_merchant_today(conn, benefit_id, used_at, merchant):
     return row is not None
 
 
-def _apply_calc_mode(benefit, raw_value, doubled, memo):
+def _apply_calc_mode(benefit, raw_value, doubled, memo, merchant=""):
     """혜택의 calc_mode에 따라 입력값(결제금액 등)을 실제 한도 소진값으로 변환한다.
 
     "raw"는 입력값을 그대로 쓰고, 나머지는 결제금액을 자동으로 실제
@@ -500,8 +533,9 @@ def _apply_calc_mode(benefit, raw_value, doubled, memo):
         return earned, " · ".join(parts)
 
     if benefit["calc_mode"] == "percent_discount":
-        earned = compute_percent_discount(raw_value, benefit["discount_percent"], benefit["per_txn_cap"])
-        parts = [f"결제 {raw_value:,.0f}원 → 할인 {earned:,.0f}원({benefit['discount_percent']:g}%)"]
+        percent = match_rate_table(merchant, benefit["rate_table"], benefit["discount_percent"])
+        earned = compute_percent_discount(raw_value, percent, benefit["per_txn_cap"])
+        parts = [f"결제 {raw_value:,.0f}원 → 할인 {earned:,.0f}원({percent:g}%)"]
         if memo:
             parts.append(memo)
         return earned, " · ".join(parts)
@@ -541,7 +575,7 @@ def log_usage(benefit_id):
                          "이 결제는 적립 대상이 아닙니다."
             }), 400
 
-        used_value, memo = _apply_calc_mode(b, raw_value, bool(data.get("doubled")), memo)
+        used_value, memo = _apply_calc_mode(b, raw_value, bool(data.get("doubled")), memo, merchant)
 
         conn.execute(
             "INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo) VALUES (?, ?, ?, ?, ?)",
@@ -688,9 +722,7 @@ def assign_inbox_item(item_id):
                          "이 결제는 적립 대상이 아닙니다. 알림을 무시 처리해주세요."
             }), 400
 
-        used_value, memo = _apply_calc_mode(benefit, raw_value, bool(data.get("doubled")), memo)
-        if benefit["calc_mode"] == "raw" and not memo:
-            memo = merchant
+        used_value, memo = _apply_calc_mode(benefit, raw_value, bool(data.get("doubled")), memo, merchant)
 
         conn.execute(
             """INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo, source_inbox_id)

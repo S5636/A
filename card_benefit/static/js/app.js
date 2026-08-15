@@ -12,6 +12,7 @@
   let noBenefitOpen = false;
   const openLogPanels = new Set(); // benefit id 목록 - 펼쳐진 사용내역 기억
   const openMemoPanels = new Set(); // "card-1", "benefit-3" 같은 키 - 펼쳐진 설명 기억
+  const openCompactPanels = new Set(); // card id 목록 - "월/연 횟수 혜택" 펼침 기억
 
   async function api(url, options) {
     const res = await fetch(url, options);
@@ -131,8 +132,24 @@
   }
 
   function cardTemplate(card) {
-    const benefitsHtml = card.benefits.map((b) => benefitTemplate(card, b)).join("") ||
-      `<p class="hint">등록된 혜택이 없습니다.</p>`;
+    const mainBenefits = card.benefits.filter((b) => b.limit_type !== "count");
+    const compactBenefits = card.benefits.filter((b) => b.limit_type === "count");
+
+    const benefitsHtml = mainBenefits.map((b) => benefitTemplate(card, b)).join("") ||
+      (compactBenefits.length ? "" : `<p class="hint">등록된 혜택이 없습니다.</p>`);
+
+    const compactOpen = openCompactPanels.has(card.id);
+    const compactSectionHtml = compactBenefits.length ? `
+      <div class="benefit-compact-section">
+        <button class="benefit-compact-toggle" data-card-id="${card.id}">
+          🎫 월/연 횟수 혜택 (${compactBenefits.length}개) ${compactOpen ? "▲" : "▾"}
+        </button>
+        <div class="benefit-compact-list ${compactOpen ? "open" : ""}">
+          ${compactBenefits.map((b) => compactBenefitTemplate(card, b)).join("")}
+        </div>
+      </div>
+    ` : "";
+
     return `
       <div class="card-head">
         <div>
@@ -150,6 +167,7 @@
         </div>
       </div>
       <div class="benefit-list">${benefitsHtml}</div>
+      ${compactSectionHtml}
       <div class="add-benefit-row">
         <button class="btn secondary small add-benefit" data-card-id="${card.id}">+ 혜택 추가</button>
       </div>
@@ -169,16 +187,51 @@
     `;
   }
 
+  function logsListHtml(b, unit) {
+    return b.logs.length
+      ? b.logs.map((l) => {
+          const timePart = l.notif_occurred_at ? l.notif_occurred_at.split(" ")[1]?.slice(0, 5) : "";
+          const dateLabel = timePart ? `${l.used_at} ${timePart}` : l.used_at;
+          const merchantLabel = l.merchant ? `<strong>${escapeHtml(l.merchant)}</strong> · ` : "";
+          return `
+          <div class="log-item">
+            <span>${dateLabel} · ${merchantLabel}${fmt(l.used_value)}${unit}${l.memo ? " · " + escapeHtml(l.memo) : ""}</span>
+            <button class="delete-log" data-id="${l.id}">삭제</button>
+          </div>`;
+        }).join("")
+      : `<div class="log-item"><span>이번 기간 사용 기록 없음</span></div>`;
+  }
+
+  function compactBenefitTemplate(card, b) {
+    const unit = "회";
+    const logsOpen = openLogPanels.has(b.id);
+    const cls = statusClass(b.percent, b.over_limit);
+    const remainingText = b.unlimited
+      ? `누적 ${fmt(b.used)}${unit}`
+      : (b.over_limit ? `초과 ${fmt(Math.abs(b.remaining))}${unit}` : `${fmt(b.remaining)}${unit} 남음`);
+    return `
+      <div class="benefit-compact" data-benefit-id="${b.id}">
+        <div class="benefit-compact-top">
+          <span class="benefit-compact-name">${escapeHtml(b.name)}</span>
+          <span class="benefit-remaining ${b.unlimited ? "" : "remaining-" + cls}">${remainingText}</span>
+        </div>
+        <div class="benefit-sub">
+          <div class="benefit-buttons">
+            <button class="btn small use-benefit" data-id="${b.id}" data-card-id="${card.id}" data-type="${b.limit_type}">사용 기록</button>
+            <button class="btn secondary small toggle-log" data-id="${b.id}">내역</button>
+            <button class="icon-btn edit-benefit" data-id="${b.id}" data-card-id="${card.id}">✏️</button>
+            <button class="icon-btn delete-benefit" data-id="${b.id}">🗑️</button>
+          </div>
+        </div>
+        <div class="log-list ${logsOpen ? "open" : ""}" data-log-for="${b.id}">${logsListHtml(b, unit)}</div>
+      </div>
+    `;
+  }
+
   function benefitTemplate(card, b) {
     const unit = b.limit_type === "count" ? "회" : "원";
     const logsOpen = openLogPanels.has(b.id);
-    const logsHtml = b.logs.length
-      ? b.logs.map((l) => `
-          <div class="log-item">
-            <span>${l.used_at} · ${fmt(l.used_value)}${unit}${l.memo ? " · " + escapeHtml(l.memo) : ""}</span>
-            <button class="delete-log" data-id="${l.id}">삭제</button>
-          </div>`).join("")
-      : `<div class="log-item"><span>이번 기간 사용 기록 없음</span></div>`;
+    const logsHtml = logsListHtml(b, unit);
 
     const rightSideHtml = b.unlimited
       ? `<div class="benefit-remaining">이번 달 ${fmt(b.used)}${unit} 적립</div>`
@@ -237,6 +290,15 @@
       render();
     });
     el.querySelector(".add-benefit").addEventListener("click", () => openBenefitModal(card.id));
+    const compactToggleBtn = el.querySelector(".benefit-compact-toggle");
+    if (compactToggleBtn) {
+      compactToggleBtn.addEventListener("click", () => {
+        const id = Number(compactToggleBtn.dataset.cardId);
+        if (openCompactPanels.has(id)) openCompactPanels.delete(id);
+        else openCompactPanels.add(id);
+        render();
+      });
+    }
 
     el.querySelectorAll(".use-benefit").forEach((btn) =>
       btn.addEventListener("click", () => {
@@ -352,8 +414,10 @@
 
   function updateBenefitCalcFieldsUI() {
     const mode = document.getElementById("benefit-calc-mode").value;
-    document.getElementById("benefit-percent-row").style.display = mode === "percent_discount" ? "block" : "none";
-    document.getElementById("benefit-cap-row").style.display = mode === "percent_discount" ? "block" : "none";
+    const show = mode === "percent_discount" ? "block" : "none";
+    document.getElementById("benefit-percent-row").style.display = show;
+    document.getElementById("benefit-cap-row").style.display = show;
+    document.getElementById("benefit-rate-table-row").style.display = show;
   }
   document.getElementById("benefit-calc-mode").addEventListener("change", updateBenefitCalcFieldsUI);
 
@@ -366,6 +430,7 @@
     document.getElementById("benefit-calc-mode").value = benefit ? benefit.calc_mode : "raw";
     document.getElementById("benefit-percent").value = benefit && benefit.discount_percent ? benefit.discount_percent : "";
     document.getElementById("benefit-cap").value = benefit && benefit.per_txn_cap ? benefit.per_txn_cap : "";
+    document.getElementById("benefit-rate-table").value = benefit ? benefit.rate_table : "";
     document.getElementById("benefit-keywords").value = benefit ? benefit.merchant_keywords : "";
     document.getElementById("benefit-tiers").value = benefit ? benefit.tier_table : "";
     document.getElementById("benefit-memo").value = benefit ? benefit.memo : "";
@@ -381,13 +446,14 @@
       calc_mode: document.getElementById("benefit-calc-mode").value,
       discount_percent: document.getElementById("benefit-percent").value || 0,
       per_txn_cap: document.getElementById("benefit-cap").value || 0,
+      rate_table: document.getElementById("benefit-rate-table").value.trim(),
       merchant_keywords: document.getElementById("benefit-keywords").value.trim(),
       tier_table: document.getElementById("benefit-tiers").value.trim(),
       memo: document.getElementById("benefit-memo").value.trim(),
     };
     if (!payload.name) { alert("혜택 이름을 입력하세요."); return; }
     if (payload.calc_mode === "percent_discount" && (!payload.discount_percent || Number(payload.discount_percent) <= 0)) {
-      alert("할인율(%)을 입력하세요.");
+      alert("기본 할인율(%)을 입력하세요.");
       return;
     }
     const url = editingBenefit.benefitId
@@ -422,6 +488,27 @@
     return Math.round((base * percent) / 100);
   }
 
+  function matchRateTable(merchant, rateTableJson, defaultPercent) {
+    if (!rateTableJson || !merchant) return defaultPercent;
+    let rows;
+    try {
+      rows = JSON.parse(rateTableJson);
+    } catch (e) {
+      return defaultPercent;
+    }
+    if (!Array.isArray(rows)) return defaultPercent;
+    const merchantLower = merchant.toLowerCase();
+    for (const entry of rows) {
+      if (!Array.isArray(entry) || entry.length !== 2) continue;
+      const [keywords, percent] = entry;
+      for (const kw of String(keywords).split(",")) {
+        const k = kw.trim().toLowerCase();
+        if (k && merchantLower.includes(k)) return percent;
+      }
+    }
+    return defaultPercent;
+  }
+
   function updateUseChangePreview() {
     if (!usingBenefit) return;
     const amount = document.getElementById("use-value").value;
@@ -437,9 +524,11 @@
     }
     if (usingBenefit.calc_mode === "percent_discount") {
       if (!amount) { preview.style.display = "none"; return; }
-      const earned = computePercentDiscount(amount, usingBenefit.discount_percent, usingBenefit.per_txn_cap);
+      const merchant = document.getElementById("use-merchant").value.trim();
+      const percent = matchRateTable(merchant, usingBenefit.rate_table, usingBenefit.discount_percent);
+      const earned = computePercentDiscount(amount, percent, usingBenefit.per_txn_cap);
       preview.style.display = "block";
-      preview.textContent = `할인 예상: ${fmt(earned)}원 (${usingBenefit.discount_percent}%${usingBenefit.per_txn_cap ? `, 결제금액 ${fmt(usingBenefit.per_txn_cap)}원까지만 적용` : ""})`;
+      preview.textContent = `할인 예상: ${fmt(earned)}원 (${percent}%${usingBenefit.per_txn_cap ? `, 결제금액 ${fmt(usingBenefit.per_txn_cap)}원까지만 적용` : ""})`;
       return;
     }
     preview.style.display = "none";
@@ -455,7 +544,7 @@
     document.getElementById("use-value-label").firstChild.textContent =
       (isChange || isPercent) ? "결제 금액 (원) " : (benefit.limit_type === "count" ? "사용 횟수 (회) " : "사용 금액 (원) ");
     document.getElementById("use-value").value = !isChange && !isPercent && benefit.limit_type === "count" ? 1 : "";
-    document.getElementById("use-merchant-row").style.display = isChange ? "flex" : "none";
+    document.getElementById("use-merchant-row").style.display = (isChange || isPercent) ? "flex" : "none";
     document.getElementById("use-doubled-row").style.display = isChange ? "flex" : "none";
     document.getElementById("use-merchant").value = "";
     document.getElementById("use-doubled").checked = false;
@@ -466,6 +555,7 @@
   }
   document.getElementById("use-value").addEventListener("input", updateUseChangePreview);
   document.getElementById("use-doubled").addEventListener("change", updateUseChangePreview);
+  document.getElementById("use-merchant").addEventListener("input", updateUseChangePreview);
   document.getElementById("use-cancel").addEventListener("click", () => useModal.classList.remove("open"));
   document.getElementById("use-save").addEventListener("click", async () => {
     const payload = {
@@ -473,8 +563,10 @@
       used_at: document.getElementById("use-date").value,
       memo: document.getElementById("use-memo").value.trim(),
     };
-    if (usingBenefit.calc_mode === "change_under_1000") {
+    if (usingBenefit.calc_mode === "change_under_1000" || usingBenefit.calc_mode === "percent_discount") {
       payload.merchant = document.getElementById("use-merchant").value.trim();
+    }
+    if (usingBenefit.calc_mode === "change_under_1000") {
       payload.doubled = document.getElementById("use-doubled").checked;
     }
     if (!payload.used_value || Number(payload.used_value) <= 0) {
@@ -533,9 +625,11 @@
       return;
     }
     if (isPercent && amount) {
-      const earned = computePercentDiscount(amount, benefit.discount_percent, benefit.per_txn_cap);
+      const merchant = (assigningItem && assigningItem.merchant) || "";
+      const percent = matchRateTable(merchant, benefit.rate_table, benefit.discount_percent);
+      const earned = computePercentDiscount(amount, percent, benefit.per_txn_cap);
       preview.style.display = "block";
-      preview.textContent = `할인 예상: ${fmt(earned)}원 (${benefit.discount_percent}%${benefit.per_txn_cap ? `, 결제금액 ${fmt(benefit.per_txn_cap)}원까지만 적용` : ""})`;
+      preview.textContent = `할인 예상: ${fmt(earned)}원 (${percent}%${benefit.per_txn_cap ? `, 결제금액 ${fmt(benefit.per_txn_cap)}원까지만 적용` : ""})`;
       return;
     }
     preview.style.display = "none";
