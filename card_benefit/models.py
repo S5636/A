@@ -158,7 +158,9 @@ def parse_notification(text: str) -> dict:
 _DATE_HEADERS = ["이용일자", "이용일", "승인일자", "거래일자", "거래일", "일자", "날짜", "결제일자", "결제일"]
 _AMOUNT_HEADERS = ["이용금액", "승인금액", "결제금액", "청구금액", "이용대금", "금액"]
 _MERCHANT_HEADERS = ["가맹점명", "가맹점", "사용처", "이용가맹점", "적요", "내용", "상호"]
-_CARDNO_HEADERS = ["카드번호", "카드no", "카드 no", "카드"]
+_CARDNO_HEADERS = ["카드번호", "카드no", "카드 no", "이용카드", "카드"]
+_CANCEL_STATUS_HEADERS = ["취소상태", "매입구분", "승인상태", "거래상태", "상태"]
+_CANCEL_KEYWORDS = ["취소", "실패", "거절"]
 
 
 def _norm_cell(cell):
@@ -166,12 +168,20 @@ def _norm_cell(cell):
 
 
 def _match_col(header_cells, candidates):
-    # candidates는 구체적인 표현부터 순서대로 나열되어 있다고 보고, 후보를
-    # 바깥 루프로 돌려서 구체적인 헤더명이 더 넓은(포괄적인) 헤더명보다
-    # 먼저 매칭되게 한다 (예: "카드번호"가 그냥 "카드"보다 우선).
+    normed = [_norm_cell(c) for c in header_cells]
+
+    # 1) 정확히 일치하는 헤더를 최우선으로 찾는다. 부분 일치만으로 고르면
+    # "해외이용금액"처럼 다른 열 이름 안에 "이용금액"이 우연히 들어있는
+    # 경우에 엉뚱한 열(진짜 "금액" 열이 아니라 "해외이용금액")을 집어버리는
+    # 문제가 있어서, 정확히 같은 이름의 열을 항상 부분 일치보다 우선한다.
     for cand in candidates:
-        for idx, cell in enumerate(header_cells):
-            c = _norm_cell(cell)
+        for idx, c in enumerate(normed):
+            if c == cand:
+                return idx
+
+    # 2) 정확히 일치하는 열이 없으면 부분 일치로 찾는다 (구체적인 표현부터).
+    for cand in candidates:
+        for idx, c in enumerate(normed):
             if c and cand in c:
                 return idx
     return None
@@ -198,8 +208,14 @@ def find_statement_header(ws, max_scan=15):
                 "amount_col": amount_col,
                 "merchant_col": _match_col(cells, _MERCHANT_HEADERS),
                 "cardno_col": _match_col(cells, _CARDNO_HEADERS),
+                "status_col": _match_col(cells, _CANCEL_STATUS_HEADERS),
             }
     return None
+
+
+def is_cancelled_status(value):
+    text = _norm_cell(value)
+    return bool(text) and any(k in text for k in _CANCEL_KEYWORDS)
 
 
 def extract_last4(value):
@@ -232,14 +248,17 @@ def parse_date_cell(value):
     s = str(value).strip()
     if not s:
         return None
-    s_norm = s.replace(".", "-").replace("/", "-").strip("-")
+
+    # "2026.08.15 23:11"처럼 날짜 뒤에 시간이 붙어있는 경우 날짜 부분만 쓴다.
+    date_part = s.split()[0] if s.split() else s
+    s_norm = date_part.replace(".", "-").replace("/", "-").strip("-")
     for fmt in ("%Y-%m-%d", "%y-%m-%d"):
         try:
             return datetime.strptime(s_norm, fmt).date().isoformat()
         except ValueError:
             pass
 
-    digits = re.sub(r"\D", "", s)
+    digits = re.sub(r"\D", "", date_part)
     if len(digits) == 8:
         try:
             return datetime.strptime(digits, "%Y%m%d").date().isoformat()

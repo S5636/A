@@ -19,6 +19,7 @@ from models import (
     get_conn,
     get_setting,
     init_db,
+    is_cancelled_status,
     parse_amount_cell,
     parse_date_cell,
     parse_notification,
@@ -587,9 +588,15 @@ def _import_statement(ws, header_info):
             if row is None or all(v in (None, "") for v in row):
                 continue
 
+            status_col = header_info.get("status_col")
+            if status_col is not None and status_col < len(row) and is_cancelled_status(row[status_col]):
+                skipped.append(f"{i}행: 취소/실패 거래로 보여 건너뜀")
+                continue
+
             amount = parse_amount_cell(row[amount_col] if amount_col < len(row) else None)
-            if not amount:
-                skipped.append(f"{i}행: 금액을 확인할 수 없음")
+            if amount is None or amount <= 0:
+                skipped.append(f"{i}행: 취소·환불로 보이는 금액이라 건너뜀" if amount is not None and amount < 0
+                                else f"{i}행: 금액을 확인할 수 없음")
                 continue
 
             used_at = parse_date_cell(row[date_col] if date_col < len(row) else None)
