@@ -1,8 +1,11 @@
 (() => {
   const cardList = document.getElementById("card-list");
   const emptyHint = document.getElementById("empty-hint");
+  const inboxSection = document.getElementById("inbox-section");
+  const inboxList = document.getElementById("inbox-list");
+  const inboxCount = document.getElementById("inbox-count");
 
-  let state = [];
+  let state = { cards: [], inbox: [] };
   const openLogPanels = new Set(); // benefit id 목록 - 펼쳐진 사용내역 기억
 
   async function api(url, options) {
@@ -25,11 +28,46 @@
     return "good";
   }
 
-  function render() {
-    cardList.querySelectorAll(".card").forEach((el) => el.remove());
-    emptyHint.style.display = state.length ? "none" : "block";
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
 
-    state.forEach((card) => {
+  function render() {
+    renderInbox();
+    renderCards();
+  }
+
+  // ---- 받은 알림 ----
+  function renderInbox() {
+    const items = state.inbox;
+    inboxSection.style.display = items.length ? "block" : "none";
+    inboxCount.textContent = items.length ? `${items.length}건` : "";
+    inboxList.innerHTML = items.map((it) => `
+      <div class="inbox-item" data-id="${it.id}">
+        <div class="inbox-item-info">
+          <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
+          <div class="inbox-item-sub">${it.occurred_at}${it.matched_card_name ? " · " + escapeHtml(it.matched_card_name) : ""}${it.merchant ? " · " + escapeHtml(it.merchant) : ""}</div>
+        </div>
+        <button class="btn btn-small btn-primary assign-inbox" data-id="${it.id}">혜택 선택</button>
+      </div>
+    `).join("");
+
+    inboxList.querySelectorAll(".assign-inbox").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const item = state.inbox.find((x) => x.id == btn.dataset.id);
+        openAssignModal(item);
+      })
+    );
+  }
+
+  // ---- 카드 목록 ----
+  function renderCards() {
+    cardList.querySelectorAll(".card").forEach((el) => el.remove());
+    emptyHint.style.display = state.cards.length ? "none" : "block";
+
+    state.cards.forEach((card) => {
       const el = document.createElement("div");
       el.className = "card";
       el.innerHTML = cardTemplate(card);
@@ -102,12 +140,6 @@
     `;
   }
 
-  function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str ?? "";
-    return div.innerHTML;
-  }
-
   function wireCard(el, card) {
     el.querySelector(".edit-card").addEventListener("click", () => openCardModal(card));
     el.querySelector(".delete-card").addEventListener("click", async () => {
@@ -122,7 +154,7 @@
     );
     el.querySelectorAll(".edit-benefit").forEach((btn) =>
       btn.addEventListener("click", () => {
-        const c = state.find((x) => x.id == btn.dataset.cardId);
+        const c = state.cards.find((x) => x.id == btn.dataset.cardId);
         const b = c.benefits.find((x) => x.id == btn.dataset.id);
         openBenefitModal(c.id, b);
       })
@@ -159,6 +191,7 @@
     document.getElementById("card-modal-title").textContent = card ? "카드 수정" : "카드 추가";
     document.getElementById("card-name").value = card ? card.name : "";
     document.getElementById("card-issuer").value = card ? card.issuer : "";
+    document.getElementById("card-last4").value = card ? card.last4 : "";
     document.getElementById("card-reset-day").value = card ? card.reset_day : 1;
     document.getElementById("card-memo").value = card ? card.memo : "";
     cardModal.classList.add("open");
@@ -169,6 +202,7 @@
     const payload = {
       name: document.getElementById("card-name").value.trim(),
       issuer: document.getElementById("card-issuer").value.trim(),
+      last4: document.getElementById("card-last4").value.trim(),
       reset_day: document.getElementById("card-reset-day").value,
       memo: document.getElementById("card-memo").value.trim(),
     };
@@ -219,7 +253,7 @@
     render();
   });
 
-  // ---- 사용 기록 모달 ----
+  // ---- 사용 기록 모달 (수동 입력) ----
   const useModal = document.getElementById("use-modal");
   let usingBenefitId = null;
 
@@ -252,7 +286,91 @@
     render();
   });
 
-  [cardModal, benefitModal, useModal].forEach((modal) => {
+  // ---- 받은 알림 -> 혜택 배정 모달 ----
+  const assignModal = document.getElementById("assign-modal");
+  const assignCardSelect = document.getElementById("assign-card");
+  const assignBenefitSelect = document.getElementById("assign-benefit");
+  let assigningItem = null;
+
+  function fillAssignBenefitOptions(cardId) {
+    const card = state.cards.find((c) => c.id == cardId);
+    const benefits = card ? card.benefits : [];
+    assignBenefitSelect.innerHTML = benefits.length
+      ? benefits.map((b) => `<option value="${b.id}">${escapeHtml(b.name)} (${fmt(b.remaining)}${b.limit_type === "count" ? "회" : "원"} 남음)</option>`).join("")
+      : `<option value="">등록된 혜택이 없습니다</option>`;
+  }
+
+  function openAssignModal(item) {
+    if (!state.cards.length) {
+      alert("먼저 카드와 혜택을 등록해주세요.");
+      return;
+    }
+    assigningItem = item;
+    document.getElementById("assign-raw-text").textContent = item.raw_text;
+    assignCardSelect.innerHTML = state.cards
+      .map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
+      .join("");
+    const preselectCardId = item.matched_card_id || state.cards[0].id;
+    assignCardSelect.value = preselectCardId;
+    fillAssignBenefitOptions(preselectCardId);
+
+    document.getElementById("assign-amount").value = item.amount != null ? item.amount : "";
+    document.getElementById("assign-date").value = (item.occurred_at || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+    assignModal.classList.add("open");
+  }
+
+  assignCardSelect.addEventListener("change", () => fillAssignBenefitOptions(assignCardSelect.value));
+
+  document.getElementById("assign-cancel").addEventListener("click", () => assignModal.classList.remove("open"));
+
+  document.getElementById("assign-discard").addEventListener("click", async () => {
+    if (!confirm("이 알림을 무시할까요? (광고 등 결제와 무관한 알림일 때)")) return;
+    state = await api(`/api/inbox/${assigningItem.id}`, { method: "DELETE" });
+    assignModal.classList.remove("open");
+    render();
+  });
+
+  document.getElementById("assign-save").addEventListener("click", async () => {
+    const benefitId = assignBenefitSelect.value;
+    if (!benefitId) { alert("혜택을 선택하세요."); return; }
+    const payload = {
+      benefit_id: benefitId,
+      amount: document.getElementById("assign-amount").value,
+      used_at: document.getElementById("assign-date").value,
+    };
+    state = await api(`/api/inbox/${assigningItem.id}/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    assignModal.classList.remove("open");
+    render();
+  });
+
+  // ---- 자동수집(웹훅) 안내 모달 ----
+  const webhookModal = document.getElementById("webhook-modal");
+
+  async function loadWebhookInfo() {
+    const info = await api("/api/settings/inbox");
+    const url = `${location.origin}${info.webhook_path}?token=${info.token}`;
+    document.getElementById("webhook-url").value = url;
+    document.getElementById("webhook-token").value = info.token;
+  }
+
+  document.getElementById("btn-webhook-info").addEventListener("click", async () => {
+    await loadWebhookInfo();
+    webhookModal.classList.add("open");
+  });
+  document.getElementById("webhook-close").addEventListener("click", () => webhookModal.classList.remove("open"));
+  document.getElementById("webhook-regenerate").addEventListener("click", async () => {
+    if (!confirm("토큰을 재발급하면 기존 MacroDroid 설정을 새 주소로 다시 바꿔줘야 합니다. 계속할까요?")) return;
+    const info = await api("/api/settings/inbox/regenerate", { method: "POST" });
+    const url = `${location.origin}${info.webhook_path}?token=${info.token}`;
+    document.getElementById("webhook-url").value = url;
+    document.getElementById("webhook-token").value = info.token;
+  });
+
+  [cardModal, benefitModal, useModal, assignModal, webhookModal].forEach((modal) => {
     modal.addEventListener("click", (e) => {
       if (e.target === modal) modal.classList.remove("open");
     });
