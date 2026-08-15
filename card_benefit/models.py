@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS benefits (
     memo TEXT DEFAULT '',
     merchant_keywords TEXT DEFAULT '',   -- 쉼표로 구분된 가맹점명 키워드 - 매칭되면 배정 화면에서 이 혜택을 자동 선택
     tier_table TEXT DEFAULT '',          -- [[전월실적기준금액, 한도], ...] JSON - 있으면 카드의 이번달 실적에 따라 한도 자동 계산
+    calc_mode TEXT NOT NULL DEFAULT 'raw',   -- 'raw'(입력값 그대로) 또는 'change_under_1000'(결제금액 입력 → 1000원 미만 자투리 자동계산, 더모아형)
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS usage_logs (
     benefit_id INTEGER NOT NULL REFERENCES benefits(id) ON DELETE CASCADE,
     used_value REAL NOT NULL DEFAULT 0,
     used_at TEXT NOT NULL,          -- 'YYYY-MM-DD'
+    merchant TEXT DEFAULT '',       -- 당일 동일가맹점 중복 적립 체크용
     memo TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -106,6 +108,8 @@ def init_db():
         _ensure_column(conn, "cards", "perf_threshold", "perf_threshold REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "benefits", "merchant_keywords", "merchant_keywords TEXT DEFAULT ''")
         _ensure_column(conn, "benefits", "tier_table", "tier_table TEXT DEFAULT ''")
+        _ensure_column(conn, "benefits", "calc_mode", "calc_mode TEXT NOT NULL DEFAULT 'raw'")
+        _ensure_column(conn, "usage_logs", "merchant", "merchant TEXT DEFAULT ''")
         conn.commit()
     finally:
         conn.close()
@@ -182,6 +186,19 @@ _MERCHANT_ALIASES = {
     "비바리퍼블리카": "토스",
     "우아한형제들": "배달의민족",
 }
+
+
+def compute_change_earned(payment_amount: float, doubled: bool = False) -> float:
+    """더모아형 "1,000원 미만 자투리(잔돈)" 적립액을 계산한다.
+
+    건당 5,000원 이상 결제에서만 적립되고, 1,000원 미만 나머지 금액이
+    포인트로 적립된다(특별가맹점은 2배). 예: 5,900원 결제 → 900원 적립.
+    """
+    payment_amount = payment_amount or 0
+    if payment_amount < 5000:
+        return 0
+    remainder = payment_amount % 1000
+    return remainder * (2 if doubled else 1)
 
 
 def tier_limit_for_spend(tier_table_json: str, spend: float):

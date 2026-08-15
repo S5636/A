@@ -101,6 +101,13 @@
       <input type="number" id="benefit-limit" min="0" step="1" placeholder="예: 10000">
       <small>0 또는 비워두면 "한도 없음(무제한)"으로 등록되어, 남은 금액 대신 이번 달 누적 사용액만 보여줍니다.</small>
     </label>
+    <label>기록 방식
+      <select id="benefit-calc-mode">
+        <option value="raw">입력한 금액 그대로 기록</option>
+        <option value="change_under_1000">잔돈 자동계산 (결제금액 입력 → 1,000원 미만 자동 계산, 더모아형)</option>
+      </select>
+      <small>"잔돈 자동계산"을 고르면 사용 기록 시 결제금액을 넣으면 1,000원 미만 잔돈만 자동으로 적립액에 더해집니다(건당 5천원 이상만 인정, 동일 가맹점 당일 중복 자동 차단).</small>
+    </label>
     <label>자동 매칭 가맹점 (선택, 쉼표로 구분)
       <input type="text" id="benefit-keywords" placeholder="예: 스타벅스,투썸플레이스,이디야">
       <small>받은 알림/업로드 내역의 가맹점명에 이 단어가 들어있으면 배정 화면에서 이 혜택이 자동으로 선택됩니다.</small>
@@ -122,9 +129,16 @@
 <!-- 사용 기록 모달 -->
 <div class="modal-backdrop" id="use-modal">
   <div class="modal">
-    <h2>혜택 사용 기록</h2>
+    <h2 id="use-modal-title">혜택 사용 기록</h2>
     <label id="use-value-label">사용 금액 (원)
       <input type="number" id="use-value" min="0" step="1">
+    </label>
+    <p id="use-change-preview" class="hint" style="display:none;"></p>
+    <label id="use-merchant-row" style="display:none;">가맹점 (당일 중복 적립 방지용)
+      <input type="text" id="use-merchant" placeholder="예: 스타벅스 강남점">
+    </label>
+    <label id="use-doubled-row" class="checkbox-row" style="display:none;">
+      <input type="checkbox" id="use-doubled"> 특별가맹점 (2배 적립)
     </label>
     <label>사용 날짜
       <input type="date" id="use-date">
@@ -168,8 +182,12 @@
     <label>혜택
       <select id="assign-benefit"></select>
     </label>
-    <label>금액
+    <label id="assign-amount-label">금액
       <input type="number" id="assign-amount" min="0" step="1">
+    </label>
+    <p id="assign-change-preview" class="hint" style="display:none;"></p>
+    <label id="assign-doubled-row" class="checkbox-row" style="display:none;">
+      <input type="checkbox" id="assign-doubled"> 특별가맹점 (2배 적립)
     </label>
     <label>날짜
       <input type="date" id="assign-date">

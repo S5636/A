@@ -16,6 +16,7 @@ from openpyxl import Workbook, load_workbook
 from models import (
     annotate_merchant,
     card_codes_match,
+    compute_change_earned,
     current_year_month,
     cycle_bounds,
     extract_last4,
@@ -43,7 +44,7 @@ def serialize_inbox(conn):
     ).fetchall()
     cards_with_code = conn.execute("SELECT id, name, last4 FROM cards WHERE last4 != ''").fetchall()
     benefits_by_card = {}
-    for b in conn.execute("SELECT id, card_id, name, merchant_keywords FROM benefits"):
+    for b in conn.execute("SELECT id, card_id, name, merchant_keywords, calc_mode FROM benefits"):
         benefits_by_card.setdefault(b["card_id"], []).append(b)
 
     items = []
@@ -74,6 +75,7 @@ def serialize_inbox(conn):
             "matched_card_name": card["name"] if card else None,
             "matched_benefit_id": matched_benefit["id"] if matched_benefit else None,
             "matched_benefit_name": matched_benefit["name"] if matched_benefit else None,
+            "matched_benefit_doubled": bool(matched_benefit) and matched_benefit["calc_mode"] == "change_under_1000",
         })
     return items
 
@@ -140,6 +142,7 @@ def _serialize_cards(conn):
                 "tier_table": b["tier_table"],
                 "memo": b["memo"],
                 "merchant_keywords": b["merchant_keywords"],
+                "calc_mode": b["calc_mode"],
                 "used": used,
                 "remaining": remaining,
                 "percent": percent,
@@ -326,6 +329,7 @@ def create_benefit(card_id):
     except (TypeError, ValueError):
         limit_value = 0
     limit_type = data.get("limit_type") if data.get("limit_type") in ("amount", "count") else "amount"
+    calc_mode = data.get("calc_mode") if data.get("calc_mode") in ("raw", "change_under_1000") else "raw"
     try:
         tier_table = _clean_tier_table(data.get("tier_table"))
     except ValueError as e:
@@ -340,13 +344,14 @@ def create_benefit(card_id):
             "SELECT COALESCE(MAX(sort_order), -1) AS m FROM benefits WHERE card_id = ?", (card_id,)
         ).fetchone()["m"]
         conn.execute(
-            """INSERT INTO benefits (card_id, name, limit_type, limit_value, memo, merchant_keywords, tier_table, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO benefits (card_id, name, limit_type, limit_value, memo, merchant_keywords, tier_table,
+               calc_mode, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 card_id, name, limit_type, limit_value,
                 (data.get("memo") or "").strip(),
                 (data.get("merchant_keywords") or "").strip(),
                 tier_table,
+                calc_mode,
                 max_order + 1,
             ),
         )
@@ -371,6 +376,7 @@ def update_benefit(benefit_id):
         except (TypeError, ValueError):
             limit_value = b["limit_value"]
         limit_type = data.get("limit_type") if data.get("limit_type") in ("amount", "count") else b["limit_type"]
+        calc_mode = data.get("calc_mode") if data.get("calc_mode") in ("raw", "change_under_1000") else b["calc_mode"]
         try:
             tier_table = _clean_tier_table(data.get("tier_table", b["tier_table"]))
         except ValueError as e:
@@ -378,12 +384,13 @@ def update_benefit(benefit_id):
 
         conn.execute(
             """UPDATE benefits SET name = ?, limit_type = ?, limit_value = ?, memo = ?, merchant_keywords = ?,
-               tier_table = ? WHERE id = ?""",
+               tier_table = ?, calc_mode = ? WHERE id = ?""",
             (
                 name, limit_type, limit_value,
                 (data.get("memo", b["memo"]) or "").strip(),
                 (data.get("merchant_keywords", b["merchant_keywords"]) or "").strip(),
                 tier_table,
+                calc_mode,
                 benefit_id,
             ),
         )
@@ -404,6 +411,19 @@ def delete_benefit(benefit_id):
     return jsonify(serialize_full())
 
 
+def _duplicate_merchant_today(conn, benefit_id, used_at, merchant):
+    """더모아형 혜택은 "동일 가맹점 1일 1회"만 적립되므로, 같은 날 같은
+    가맹점으로 이미 기록이 있으면 그 뒤 결제는 적립 대상에서 제외한다."""
+    if not merchant:
+        return False
+    row = conn.execute(
+        """SELECT 1 FROM usage_logs WHERE benefit_id = ? AND used_at = ? AND merchant = ?
+           LIMIT 1""",
+        (benefit_id, used_at, merchant),
+    ).fetchone()
+    return row is not None
+
+
 @app.route("/api/benefits/<int:benefit_id>/use", methods=["POST"])
 def log_usage(benefit_id):
     data = request.get_json(force=True) or {}
@@ -414,10 +434,10 @@ def log_usage(benefit_id):
             return jsonify({"error": "혜택을 찾을 수 없습니다."}), 404
 
         try:
-            used_value = float(data.get("used_value"))
+            raw_value = float(data.get("used_value"))
         except (TypeError, ValueError):
-            used_value = 1 if b["limit_type"] == "count" else 0
-        if used_value == 0:
+            raw_value = 1 if b["limit_type"] == "count" else 0
+        if raw_value == 0:
             return jsonify({"error": "사용 금액(또는 횟수)을 입력하세요."}), 400
 
         used_at = (data.get("used_at") or "").strip()
@@ -426,9 +446,29 @@ def log_usage(benefit_id):
         except ValueError:
             used_at = date.today().isoformat()
 
+        merchant = (data.get("merchant") or "").strip()
+        memo = (data.get("memo") or "").strip()
+
+        if b["calc_mode"] == "change_under_1000":
+            if _duplicate_merchant_today(conn, benefit_id, used_at, merchant):
+                return jsonify({
+                    "error": f"같은 날 \"{merchant}\"에 이미 기록이 있습니다. "
+                             "동일 가맹점은 1일 1회만 적립되므로(가장 먼저 결제한 건만 인정), "
+                             "이 결제는 적립 대상이 아닙니다."
+                }), 400
+            doubled = bool(data.get("doubled"))
+            earned = compute_change_earned(raw_value, doubled)
+            memo_parts = [f"결제 {raw_value:,.0f}원 → 잔돈 {earned:,.0f}원{'(2배)' if doubled else ''}"]
+            if memo:
+                memo_parts.append(memo)
+            used_value = earned
+            memo = " · ".join(memo_parts)
+        else:
+            used_value = raw_value
+
         conn.execute(
-            "INSERT INTO usage_logs (benefit_id, used_value, used_at, memo) VALUES (?, ?, ?, ?)",
-            (benefit_id, used_value, used_at, (data.get("memo") or "").strip()),
+            "INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo) VALUES (?, ?, ?, ?, ?)",
+            (benefit_id, used_value, used_at, merchant, memo),
         )
         conn.commit()
     finally:
@@ -541,10 +581,10 @@ def assign_inbox_item(item_id):
             return jsonify({"error": "혜택을 찾을 수 없습니다."}), 404
 
         try:
-            used_value = float(data.get("amount") if data.get("amount") not in (None, "") else item["amount"])
+            raw_value = float(data.get("amount") if data.get("amount") not in (None, "") else item["amount"])
         except (TypeError, ValueError):
-            used_value = 0
-        if not used_value:
+            raw_value = 0
+        if not raw_value:
             return jsonify({"error": "금액을 확인할 수 없습니다. 직접 입력해주세요."}), 400
 
         used_at = (data.get("used_at") or "").strip() or (item["occurred_at"] or "")[:10]
@@ -553,11 +593,31 @@ def assign_inbox_item(item_id):
         except ValueError:
             used_at = date.today().isoformat()
 
-        memo = (data.get("memo") or item["merchant"] or "").strip()
+        merchant = (data.get("merchant") or item["merchant"] or "").strip()
+        memo = (data.get("memo") or "").strip()
+
+        if benefit["calc_mode"] == "change_under_1000":
+            if _duplicate_merchant_today(conn, benefit_id, used_at, merchant):
+                return jsonify({
+                    "error": f"같은 날 \"{merchant}\"에 이미 기록이 있습니다. "
+                             "동일 가맹점은 1일 1회만 적립되므로(가장 먼저 결제한 건만 인정), "
+                             "이 결제는 적립 대상이 아닙니다. 알림을 무시 처리해주세요."
+                }), 400
+            doubled = bool(data.get("doubled"))
+            earned = compute_change_earned(raw_value, doubled)
+            memo_parts = [f"결제 {raw_value:,.0f}원 → 잔돈 {earned:,.0f}원{'(2배)' if doubled else ''}"]
+            if memo:
+                memo_parts.append(memo)
+            used_value = earned
+            memo = " · ".join(memo_parts)
+        else:
+            used_value = raw_value
+            if not memo:
+                memo = merchant
 
         conn.execute(
-            "INSERT INTO usage_logs (benefit_id, used_value, used_at, memo) VALUES (?, ?, ?, ?)",
-            (benefit_id, used_value, used_at, memo),
+            "INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo) VALUES (?, ?, ?, ?, ?)",
+            (benefit_id, used_value, used_at, merchant, memo),
         )
         conn.execute(
             "UPDATE inbox_items SET status = 'assigned', card_id = ?, benefit_id = ? WHERE id = ?",

@@ -243,6 +243,8 @@ body { padding-bottom: 40px; }
 .modal h2 { margin: 0 0 14px; font-size: 16px; color: var(--text-primary); }
 
 .modal label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--text-secondary); font-weight: 600; margin-bottom: 12px; }
+.modal label.checkbox-row { flex-direction: row; align-items: center; gap: 8px; }
+.modal label.checkbox-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--series-1); }
 
 .modal input, .modal select, .modal textarea {
   font-family: inherit;

@@ -196,7 +196,11 @@
     el.querySelector(".add-benefit").addEventListener("click", () => openBenefitModal(card.id));
 
     el.querySelectorAll(".use-benefit").forEach((btn) =>
-      btn.addEventListener("click", () => openUseModal(btn.dataset.id, btn.dataset.type))
+      btn.addEventListener("click", () => {
+        const c = state.cards.find((x) => x.id == btn.dataset.cardId);
+        const b = c.benefits.find((x) => x.id == btn.dataset.id);
+        openUseModal(b);
+      })
     );
     el.querySelectorAll(".edit-benefit").forEach((btn) =>
       btn.addEventListener("click", () => {
@@ -309,6 +313,7 @@
     document.getElementById("benefit-name").value = benefit ? benefit.name : "";
     document.getElementById("benefit-type").value = benefit ? benefit.limit_type : "amount";
     document.getElementById("benefit-limit").value = benefit ? benefit.limit_value : "";
+    document.getElementById("benefit-calc-mode").value = benefit ? benefit.calc_mode : "raw";
     document.getElementById("benefit-keywords").value = benefit ? benefit.merchant_keywords : "";
     document.getElementById("benefit-tiers").value = benefit ? benefit.tier_table : "";
     document.getElementById("benefit-memo").value = benefit ? benefit.memo : "";
@@ -320,6 +325,7 @@
       name: document.getElementById("benefit-name").value.trim(),
       limit_type: document.getElementById("benefit-type").value,
       limit_value: document.getElementById("benefit-limit").value,
+      calc_mode: document.getElementById("benefit-calc-mode").value,
       merchant_keywords: document.getElementById("benefit-keywords").value.trim(),
       tier_table: document.getElementById("benefit-tiers").value.trim(),
       memo: document.getElementById("benefit-memo").value.trim(),
@@ -340,17 +346,49 @@
 
   // ---- 사용 기록 모달 (수동 입력) ----
   const useModal = document.getElementById("use-modal");
-  let usingBenefitId = null;
+  let usingBenefit = null;
 
-  function openUseModal(benefitId, limitType) {
-    usingBenefitId = benefitId;
+  function computeChangeEarned(amount, doubled) {
+    amount = Number(amount) || 0;
+    if (amount < 5000) return 0;
+    const remainder = amount % 1000;
+    return remainder * (doubled ? 2 : 1);
+  }
+
+  function updateUseChangePreview() {
+    if (!usingBenefit || usingBenefit.calc_mode !== "change_under_1000") return;
+    const amount = document.getElementById("use-value").value;
+    const doubled = document.getElementById("use-doubled").checked;
+    const earned = computeChangeEarned(amount, doubled);
+    const preview = document.getElementById("use-change-preview");
+    if (!amount) {
+      preview.style.display = "none";
+      return;
+    }
+    preview.style.display = "block";
+    preview.textContent = Number(amount) < 5000
+      ? "건당 5,000원 미만은 적립되지 않습니다."
+      : `잔돈 적립 예상: ${fmt(earned)}원${doubled ? " (2배 적용)" : ""}`;
+  }
+
+  function openUseModal(benefit) {
+    usingBenefit = benefit;
+    const isChange = benefit.calc_mode === "change_under_1000";
+    document.getElementById("use-modal-title").textContent = isChange ? "잔돈 적립 기록" : "혜택 사용 기록";
     document.getElementById("use-value-label").firstChild.textContent =
-      limitType === "count" ? "사용 횟수 (회) " : "사용 금액 (원) ";
-    document.getElementById("use-value").value = limitType === "count" ? 1 : "";
+      isChange ? "결제 금액 (원) " : (benefit.limit_type === "count" ? "사용 횟수 (회) " : "사용 금액 (원) ");
+    document.getElementById("use-value").value = !isChange && benefit.limit_type === "count" ? 1 : "";
+    document.getElementById("use-merchant-row").style.display = isChange ? "flex" : "none";
+    document.getElementById("use-doubled-row").style.display = isChange ? "flex" : "none";
+    document.getElementById("use-merchant").value = "";
+    document.getElementById("use-doubled").checked = false;
+    document.getElementById("use-change-preview").style.display = "none";
     document.getElementById("use-date").value = new Date().toISOString().slice(0, 10);
     document.getElementById("use-memo").value = "";
     useModal.classList.add("open");
   }
+  document.getElementById("use-value").addEventListener("input", updateUseChangePreview);
+  document.getElementById("use-doubled").addEventListener("change", updateUseChangePreview);
   document.getElementById("use-cancel").addEventListener("click", () => useModal.classList.remove("open"));
   document.getElementById("use-save").addEventListener("click", async () => {
     const payload = {
@@ -358,11 +396,15 @@
       used_at: document.getElementById("use-date").value,
       memo: document.getElementById("use-memo").value.trim(),
     };
+    if (usingBenefit.calc_mode === "change_under_1000") {
+      payload.merchant = document.getElementById("use-merchant").value.trim();
+      payload.doubled = document.getElementById("use-doubled").checked;
+    }
     if (!payload.used_value || Number(payload.used_value) <= 0) {
       alert("사용 금액(또는 횟수)을 입력하세요.");
       return;
     }
-    state = await api(`/api/benefits/${usingBenefitId}/use`, {
+    state = await api(`/api/benefits/${usingBenefit.id}/use`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -390,6 +432,30 @@
     if (preselectBenefitId) assignBenefitSelect.value = preselectBenefitId;
   }
 
+  function currentAssignBenefit() {
+    const card = state.cards.find((c) => c.id == assignCardSelect.value);
+    if (!card) return null;
+    return card.benefits.find((b) => b.id == assignBenefitSelect.value) || null;
+  }
+
+  function updateAssignChangeUI() {
+    const benefit = currentAssignBenefit();
+    const isChange = !!benefit && benefit.calc_mode === "change_under_1000";
+    document.getElementById("assign-amount-label").firstChild.textContent = isChange ? "결제 금액 " : "금액 ";
+    document.getElementById("assign-doubled-row").style.display = isChange ? "flex" : "none";
+    const preview = document.getElementById("assign-change-preview");
+    const amount = document.getElementById("assign-amount").value;
+    if (!isChange || !amount) {
+      preview.style.display = "none";
+      return;
+    }
+    const doubled = document.getElementById("assign-doubled").checked;
+    preview.style.display = "block";
+    preview.textContent = Number(amount) < 5000
+      ? "건당 5,000원 미만은 적립되지 않습니다."
+      : `잔돈 적립 예상: ${fmt(computeChangeEarned(amount, doubled))}원${doubled ? " (2배 적용)" : ""}`;
+  }
+
   function openAssignModal(item) {
     if (!state.cards.length) {
       alert("먼저 카드와 혜택을 등록해주세요.");
@@ -405,11 +471,19 @@
     fillAssignBenefitOptions(preselectCardId, item.matched_benefit_id);
 
     document.getElementById("assign-amount").value = item.amount != null ? item.amount : "";
+    document.getElementById("assign-doubled").checked = !!item.matched_benefit_doubled;
     document.getElementById("assign-date").value = (item.occurred_at || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+    updateAssignChangeUI();
     assignModal.classList.add("open");
   }
 
-  assignCardSelect.addEventListener("change", () => fillAssignBenefitOptions(assignCardSelect.value));
+  assignCardSelect.addEventListener("change", () => {
+    fillAssignBenefitOptions(assignCardSelect.value);
+    updateAssignChangeUI();
+  });
+  assignBenefitSelect.addEventListener("change", updateAssignChangeUI);
+  document.getElementById("assign-amount").addEventListener("input", updateAssignChangeUI);
+  document.getElementById("assign-doubled").addEventListener("change", updateAssignChangeUI);
 
   document.getElementById("assign-cancel").addEventListener("click", () => assignModal.classList.remove("open"));
 
@@ -423,11 +497,16 @@
   document.getElementById("assign-save").addEventListener("click", async () => {
     const benefitId = assignBenefitSelect.value;
     if (!benefitId) { alert("혜택을 선택하세요."); return; }
+    const benefit = currentAssignBenefit();
     const payload = {
       benefit_id: benefitId,
       amount: document.getElementById("assign-amount").value,
       used_at: document.getElementById("assign-date").value,
     };
+    if (benefit && benefit.calc_mode === "change_under_1000") {
+      payload.merchant = assigningItem.merchant || "";
+      payload.doubled = document.getElementById("assign-doubled").checked;
+    }
     state = await api(`/api/inbox/${assigningItem.id}/assign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
