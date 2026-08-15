@@ -7,6 +7,7 @@
 
   let state = { cards: [], inbox: [] };
   const openLogPanels = new Set(); // benefit id 목록 - 펼쳐진 사용내역 기억
+  const openMemoPanels = new Set(); // "card-1", "benefit-3" 같은 키 - 펼쳐진 설명 기억
 
   async function api(url, options) {
     const res = await fetch(url, options);
@@ -37,6 +38,15 @@
   function render() {
     renderInbox();
     renderCards();
+  }
+
+  function memoToggleTemplate(key, memo) {
+    if (!memo) return "";
+    const open = openMemoPanels.has(key);
+    return `
+      <button class="memo-toggle" data-memo-key="${key}">${open ? "설명 접기 ▲" : "설명 보기 ▾"}</button>
+      <div class="memo-text ${open ? "open" : ""}" data-memo-for="${key}">${escapeHtml(memo)}</div>
+    `;
   }
 
   // ---- 받은 알림 ----
@@ -79,7 +89,7 @@
 
   function cardTemplate(card) {
     const benefitsHtml = card.benefits.map((b) => benefitTemplate(card, b)).join("") ||
-      `<p class="benefit-memo">등록된 혜택이 없습니다.</p>`;
+      `<p class="hint">등록된 혜택이 없습니다.</p>`;
     return `
       <div class="card-head">
         <div>
@@ -89,7 +99,7 @@
           </div>
           <div class="card-cycle">이번 혜택 기간: ${card.cycle_start} ~ ${card.cycle_end} (D-${card.days_left})</div>
           ${perfRowTemplate(card)}
-          ${card.memo ? `<div class="card-memo">${escapeHtml(card.memo)}</div>` : ""}
+          ${memoToggleTemplate(`card-${card.id}`, card.memo)}
         </div>
         <div class="card-actions">
           <button class="icon-btn edit-card" data-id="${card.id}" title="카드 수정">✏️</button>
@@ -153,7 +163,7 @@
         <div class="benefit-top">
           <div>
             <div class="benefit-name">${escapeHtml(b.name)}${b.tiered ? ` <span class="tier-tag">📊 실적구간 자동조정</span>` : ""}</div>
-            ${b.memo ? `<div class="benefit-memo">${escapeHtml(b.memo)}</div>` : ""}
+            ${memoToggleTemplate(`benefit-${b.id}`, b.memo)}
           </div>
           ${rightSideHtml}
         </div>
@@ -207,6 +217,14 @@
         const id = Number(btn.dataset.id);
         if (openLogPanels.has(id)) openLogPanels.delete(id);
         else openLogPanels.add(id);
+        render();
+      })
+    );
+    el.querySelectorAll(".memo-toggle").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.memoKey;
+        if (openMemoPanels.has(key)) openMemoPanels.delete(key);
+        else openMemoPanels.add(key);
         render();
       })
     );
