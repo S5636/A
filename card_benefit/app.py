@@ -13,6 +13,7 @@ from flask import Flask, jsonify, render_template, request, send_file
 from openpyxl import Workbook, load_workbook
 
 from models import (
+    current_year_month,
     cycle_bounds,
     extract_last4,
     find_statement_header,
@@ -113,12 +114,25 @@ def _serialize_cards(conn):
             })
 
         days_left = (end - date.today()).days
+
+        this_month = current_year_month()
+        perf_row = conn.execute(
+            "SELECT total_spend FROM performance WHERE card_id = ? AND year_month = ?",
+            (card["id"], this_month),
+        ).fetchone()
+        perf_threshold = card["perf_threshold"] or 0
+        perf_spend = perf_row["total_spend"] if perf_row else 0
+
         result.append({
             "id": card["id"],
             "name": card["name"],
             "issuer": card["issuer"],
             "last4": card["last4"],
             "reset_day": card["reset_day"],
+            "perf_threshold": perf_threshold,
+            "perf_spend": perf_spend,
+            "perf_month": this_month,
+            "perf_met": (perf_spend >= perf_threshold) if perf_threshold > 0 else None,
             "memo": card["memo"],
             "cycle_start": start.isoformat(),
             "cycle_end": end.isoformat(),
@@ -148,17 +162,23 @@ def create_card():
         reset_day = int(data.get("reset_day") or 1)
     except (TypeError, ValueError):
         reset_day = 1
+    try:
+        perf_threshold = float(data.get("perf_threshold") or 0)
+    except (TypeError, ValueError):
+        perf_threshold = 0
 
     conn = get_conn()
     try:
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM cards").fetchone()["m"]
         conn.execute(
-            "INSERT INTO cards (name, issuer, last4, reset_day, memo, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+            """INSERT INTO cards (name, issuer, last4, reset_day, perf_threshold, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (data.get("issuer") or "").strip(),
                 (data.get("last4") or "").strip(),
                 reset_day,
+                perf_threshold,
                 (data.get("memo") or "").strip(),
                 max_order + 1,
             ),
@@ -183,17 +203,59 @@ def update_card(card_id):
             reset_day = int(data.get("reset_day", card["reset_day"]))
         except (TypeError, ValueError):
             reset_day = card["reset_day"]
+        try:
+            perf_threshold = float(data.get("perf_threshold", card["perf_threshold"]))
+        except (TypeError, ValueError):
+            perf_threshold = card["perf_threshold"]
 
         conn.execute(
-            "UPDATE cards SET name = ?, issuer = ?, last4 = ?, reset_day = ?, memo = ? WHERE id = ?",
+            """UPDATE cards SET name = ?, issuer = ?, last4 = ?, reset_day = ?, perf_threshold = ?, memo = ?
+               WHERE id = ?""",
             (
                 name,
                 (data.get("issuer", card["issuer"]) or "").strip(),
                 (data.get("last4", card["last4"]) or "").strip(),
                 reset_day,
+                perf_threshold,
                 (data.get("memo", card["memo"]) or "").strip(),
                 card_id,
             ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/cards/<int:card_id>/performance", methods=["POST"])
+def update_performance(card_id):
+    """전월실적 계산용 "이번 달 총 사용액"을 직접 입력/수정한다.
+
+    혜택별 사용기록과 달리, 전월실적은 보통 그 카드로 쓴 전체 금액을 보므로
+    (스타벅스 할인 같은 특정 혜택에 해당 안 하는 결제도 포함) 카드사 앱/문자로
+    확인한 "이번 달 실적" 숫자를 그대로 입력하는 방식으로 관리한다.
+    """
+    data = request.get_json(force=True) or {}
+    try:
+        total_spend = float(data.get("total_spend"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "사용액을 입력하세요."}), 400
+    if total_spend < 0:
+        return jsonify({"error": "사용액은 0 이상이어야 합니다."}), 400
+
+    year_month = (data.get("year_month") or "").strip() or current_year_month()
+
+    conn = get_conn()
+    try:
+        card = conn.execute("SELECT id FROM cards WHERE id = ?", (card_id,)).fetchone()
+        if not card:
+            return jsonify({"error": "카드를 찾을 수 없습니다."}), 404
+        conn.execute(
+            """INSERT INTO performance (card_id, year_month, total_spend, updated_at)
+               VALUES (?, ?, ?, datetime('now', 'localtime'))
+               ON CONFLICT(card_id, year_month)
+               DO UPDATE SET total_spend = excluded.total_spend, updated_at = excluded.updated_at""",
+            (card_id, year_month, total_spend),
         )
         conn.commit()
     finally:

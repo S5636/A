@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS cards (
     issuer TEXT DEFAULT '',
     last4 TEXT DEFAULT '',
     reset_day INTEGER NOT NULL DEFAULT 1,
+    perf_threshold REAL NOT NULL DEFAULT 0,   -- 전월실적 기준금액(원). 0이면 조건 없음
     memo TEXT DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -67,6 +68,17 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     benefit_id INTEGER REFERENCES benefits(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+-- 카드별 월(전월실적 계산용) 총 사용액. 카드사 "전월실적"은 보통 혜택과
+-- 무관하게 그 달에 쓴 전체 금액을 기준으로 하므로, 특정 혜택에 묶이지 않는
+-- 별도의 월별 합계로 관리한다.
+CREATE TABLE IF NOT EXISTS performance (
+    card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    year_month TEXT NOT NULL,        -- 'YYYY-MM'
+    total_spend REAL NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    PRIMARY KEY (card_id, year_month)
+);
 """
 
 
@@ -88,9 +100,15 @@ def init_db():
     try:
         conn.executescript(SCHEMA)
         _ensure_column(conn, "cards", "last4", "last4 TEXT DEFAULT ''")
+        _ensure_column(conn, "cards", "perf_threshold", "perf_threshold REAL NOT NULL DEFAULT 0")
         conn.commit()
     finally:
         conn.close()
+
+
+def current_year_month(today: date = None) -> str:
+    today = today or date.today()
+    return f"{today.year:04d}-{today.month:02d}"
 
 
 def get_setting(conn, key, default=""):

@@ -70,8 +70,12 @@
       <input type="number" id="card-reset-day" min="1" max="31" value="1">
       <small>매달 이 날짜에 혜택 사용량이 리셋됩니다. (결제일 기준이면 결제일 입력)</small>
     </label>
+    <label>전월실적 기준금액 (선택)
+      <input type="number" id="card-perf-threshold" min="0" step="1" placeholder="예: 300000">
+      <small>이 금액 이상 써야 혜택이 적용되는 카드면 입력하세요. 조건 없으면 비워두세요.</small>
+    </label>
     <label>메모 (선택)
-      <textarea id="card-memo" rows="2" placeholder="전월실적 조건 등"></textarea>
+      <textarea id="card-memo" rows="2" placeholder="카드 특이사항 등"></textarea>
     </label>
     <div class="modal-actions">
       <button class="btn secondary" id="card-cancel">취소</button>
@@ -122,6 +126,24 @@
     <div class="modal-actions">
       <button class="btn secondary" id="use-cancel">취소</button>
       <button class="btn" id="use-save">기록</button>
+    </div>
+  </div>
+</div>
+
+<!-- 전월실적 계산용 이번 달 사용액 입력 모달 -->
+<div class="modal-backdrop" id="perf-modal">
+  <div class="modal">
+    <h2>이번 달 실적 입력</h2>
+    <p class="hint" style="margin-top:0;">
+      카드사 앱/문자로 확인한 "이번 달 이용금액" 숫자를 그대로 입력하세요.
+      특정 혜택에 안 걸리는 결제도 포함한 전체 사용액 기준입니다.
+    </p>
+    <label id="perf-value-label">이번 달 사용액 (원)
+      <input type="number" id="perf-value" min="0" step="1">
+    </label>
+    <div class="modal-actions">
+      <button class="btn secondary" id="perf-cancel">취소</button>
+      <button class="btn" id="perf-save">저장</button>
     </div>
   </div>
 </div>

@@ -87,6 +87,7 @@
             ${card.issuer ? `<span class="card-issuer">${escapeHtml(card.issuer)}</span>` : ""}
           </div>
           <div class="card-cycle">이번 혜택 기간: ${card.cycle_start} ~ ${card.cycle_end} (D-${card.days_left})</div>
+          ${perfRowTemplate(card)}
           ${card.memo ? `<div class="card-memo">${escapeHtml(card.memo)}</div>` : ""}
         </div>
         <div class="card-actions">
@@ -97,6 +98,19 @@
       <div class="benefit-list">${benefitsHtml}</div>
       <div class="add-benefit-row">
         <button class="btn secondary small add-benefit" data-card-id="${card.id}">+ 혜택 추가</button>
+      </div>
+    `;
+  }
+
+  function perfRowTemplate(card) {
+    if (!card.perf_threshold) return "";
+    const cls = card.perf_met ? "met" : "unmet";
+    const label = card.perf_met ? "실적 충족" : "실적 부족";
+    return `
+      <div class="perf-row">
+        <span class="perf-badge ${cls}">${label}</span>
+        <span>이번 달 ${fmt(card.perf_spend)}원 / ${fmt(card.perf_threshold)}원</span>
+        <button class="perf-edit" data-id="${card.id}" data-spend="${card.perf_spend}">수정</button>
       </div>
     `;
   }
@@ -142,6 +156,10 @@
 
   function wireCard(el, card) {
     el.querySelector(".edit-card").addEventListener("click", () => openCardModal(card));
+    const perfEditBtn = el.querySelector(".perf-edit");
+    if (perfEditBtn) {
+      perfEditBtn.addEventListener("click", () => openPerfModal(card));
+    }
     el.querySelector(".delete-card").addEventListener("click", async () => {
       if (!confirm(`"${card.name}" 카드를 삭제할까요? 혜택/사용기록도 모두 삭제됩니다.`)) return;
       state = await api(`/api/cards/${card.id}`, { method: "DELETE" });
@@ -193,6 +211,7 @@
     document.getElementById("card-issuer").value = card ? card.issuer : "";
     document.getElementById("card-last4").value = card ? card.last4 : "";
     document.getElementById("card-reset-day").value = card ? card.reset_day : 1;
+    document.getElementById("card-perf-threshold").value = card && card.perf_threshold ? card.perf_threshold : "";
     document.getElementById("card-memo").value = card ? card.memo : "";
     cardModal.classList.add("open");
   }
@@ -204,6 +223,7 @@
       issuer: document.getElementById("card-issuer").value.trim(),
       last4: document.getElementById("card-last4").value.trim(),
       reset_day: document.getElementById("card-reset-day").value,
+      perf_threshold: document.getElementById("card-perf-threshold").value || 0,
       memo: document.getElementById("card-memo").value.trim(),
     };
     if (!payload.name) { alert("카드 이름을 입력하세요."); return; }
@@ -215,6 +235,31 @@
       body: JSON.stringify(payload),
     });
     cardModal.classList.remove("open");
+    render();
+  });
+
+  // ---- 전월실적 이번 달 사용액 입력 모달 ----
+  const perfModal = document.getElementById("perf-modal");
+  let editingPerfCardId = null;
+
+  function openPerfModal(card) {
+    editingPerfCardId = card.id;
+    document.getElementById("perf-value").value = card.perf_spend || "";
+    perfModal.classList.add("open");
+  }
+  document.getElementById("perf-cancel").addEventListener("click", () => perfModal.classList.remove("open"));
+  document.getElementById("perf-save").addEventListener("click", async () => {
+    const total_spend = document.getElementById("perf-value").value;
+    if (total_spend === "" || Number(total_spend) < 0) {
+      alert("사용액을 입력하세요.");
+      return;
+    }
+    state = await api(`/api/cards/${editingPerfCardId}/performance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ total_spend }),
+    });
+    perfModal.classList.remove("open");
     render();
   });
 
@@ -406,7 +451,7 @@
     importFile.value = "";
   });
 
-  [cardModal, benefitModal, useModal, assignModal, webhookModal].forEach((modal) => {
+  [cardModal, benefitModal, useModal, assignModal, webhookModal, perfModal].forEach((modal) => {
     modal.addEventListener("click", (e) => {
       if (e.target === modal) modal.classList.remove("open");
     });
