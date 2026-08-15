@@ -422,14 +422,15 @@
   function fillAssignBenefitOptions(cardId, preselectBenefitId) {
     const card = state.cards.find((c) => c.id == cardId);
     const benefits = card ? card.benefits : [];
-    assignBenefitSelect.innerHTML = benefits.length
-      ? benefits.map((b) => {
-          const unit = b.limit_type === "count" ? "회" : "원";
-          const tag = b.unlimited ? "한도 없음" : `${fmt(b.remaining)}${unit} 남음`;
-          return `<option value="${b.id}">${escapeHtml(b.name)} (${tag})</option>`;
-        }).join("")
+    const placeholder = benefits.length
+      ? `<option value="">해당 없음 (어떤 혜택인지 직접 확인)</option>`
       : `<option value="">등록된 혜택이 없습니다</option>`;
-    if (preselectBenefitId) assignBenefitSelect.value = preselectBenefitId;
+    assignBenefitSelect.innerHTML = placeholder + benefits.map((b) => {
+      const unit = b.limit_type === "count" ? "회" : "원";
+      const tag = b.unlimited ? "한도 없음" : `${fmt(b.remaining)}${unit} 남음`;
+      return `<option value="${b.id}">${escapeHtml(b.name)} (${tag})</option>`;
+    }).join("");
+    assignBenefitSelect.value = preselectBenefitId || "";
   }
 
   function currentAssignBenefit() {
