@@ -166,7 +166,26 @@ def parse_notification(text: str) -> dict:
         merchant = line
         break
 
-    return {"amount": amount, "last4": last4, "issuer": issuer, "merchant": merchant}
+    return {"amount": amount, "last4": last4, "issuer": issuer, "merchant": annotate_merchant(merchant)}
+
+
+# 카드 이용내역서의 "가맹점명"은 실제 서비스명이 아니라 결제대행(PG)/운영사
+# 법인명으로 찍히는 경우가 흔하다(예: 배달의민족 결제가 "(주)우아한형제들"로
+# 표시). 확실히 확인된 것만 최소한으로 매핑해서 옆에 실제 서비스명을 덧붙인다
+# - 잘못된 매핑을 넣느니 모르는 상호는 그대로 두는 쪽이 안전하다.
+_MERCHANT_ALIASES = {
+    "비바리퍼블리카": "토스",
+    "우아한형제들": "배달의민족",
+}
+
+
+def annotate_merchant(name: str) -> str:
+    if not name:
+        return name
+    for key, brand in _MERCHANT_ALIASES.items():
+        if key in name:
+            return f"{name} ({brand})"
+    return name
 
 
 # ---- 카드사에서 다운로드한 엑셀(이용내역서) 자동인식 ----

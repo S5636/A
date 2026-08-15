@@ -13,6 +13,7 @@ from flask import Flask, jsonify, render_template, request, send_file
 from openpyxl import Workbook, load_workbook
 
 from models import (
+    annotate_merchant,
     card_codes_match,
     current_year_month,
     cycle_bounds,
@@ -98,10 +99,9 @@ def _serialize_cards(conn):
             ).fetchall()
 
             limit_value = b["limit_value"] or 0
-            remaining = limit_value - used
-            percent = 0
-            if limit_value > 0:
-                percent = max(0, min(100, round(used / limit_value * 100)))
+            unlimited = limit_value <= 0
+            remaining = None if unlimited else limit_value - used
+            percent = None if unlimited else max(0, min(100, round(used / limit_value * 100))) if limit_value > 0 else 0
 
             benefit_list.append({
                 "id": b["id"],
@@ -109,11 +109,12 @@ def _serialize_cards(conn):
                 "name": b["name"],
                 "limit_type": b["limit_type"],
                 "limit_value": limit_value,
+                "unlimited": unlimited,
                 "memo": b["memo"],
                 "used": used,
                 "remaining": remaining,
                 "percent": percent,
-                "over_limit": remaining < 0,
+                "over_limit": (not unlimited) and remaining < 0,
                 "logs": [dict(l) for l in logs],
             })
 
@@ -678,7 +679,7 @@ def _import_statement(ws, header_info):
 
             merchant = ""
             if merchant_col is not None and merchant_col < len(row) and row[merchant_col] is not None:
-                merchant = str(row[merchant_col]).strip()
+                merchant = annotate_merchant(str(row[merchant_col]).strip())
 
             last4 = ""
             if cardno_col is not None and cardno_col < len(row):

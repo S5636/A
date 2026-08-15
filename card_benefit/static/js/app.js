@@ -116,11 +116,7 @@
   }
 
   function benefitTemplate(card, b) {
-    const cls = statusClass(b.percent, b.over_limit);
     const unit = b.limit_type === "count" ? "회" : "원";
-    const remainingText = b.over_limit
-      ? `초과 ${fmt(Math.abs(b.remaining))}${unit}`
-      : `${fmt(b.remaining)}${unit} 남음`;
     const logsOpen = openLogPanels.has(b.id);
     const logsHtml = b.logs.length
       ? b.logs.map((l) => `
@@ -130,6 +126,27 @@
           </div>`).join("")
       : `<div class="log-item"><span>이번 기간 사용 기록 없음</span></div>`;
 
+    const rightSideHtml = b.unlimited
+      ? `<div class="benefit-remaining">이번 달 ${fmt(b.used)}${unit} 적립</div>`
+      : (() => {
+          const cls = statusClass(b.percent, b.over_limit);
+          const remainingText = b.over_limit
+            ? `초과 ${fmt(Math.abs(b.remaining))}${unit}`
+            : `${fmt(b.remaining)}${unit} 남음`;
+          return `<div class="benefit-remaining remaining-${cls}">${remainingText}</div>`;
+        })();
+
+    const progressHtml = b.unlimited
+      ? ""
+      : (() => {
+          const cls = statusClass(b.percent, b.over_limit);
+          return `<div class="progress-track"><div class="progress-fill ${cls}" style="width:${b.percent}%"></div></div>`;
+        })();
+
+    const subText = b.unlimited
+      ? `한도 없음(무제한) · 누적 ${fmt(b.used)}${unit}`
+      : `한도 ${fmt(b.limit_value)}${unit} 중 ${fmt(b.used)}${unit} 사용`;
+
     return `
       <div class="benefit" data-benefit-id="${b.id}">
         <div class="benefit-top">
@@ -137,11 +154,11 @@
             <div class="benefit-name">${escapeHtml(b.name)}</div>
             ${b.memo ? `<div class="benefit-memo">${escapeHtml(b.memo)}</div>` : ""}
           </div>
-          <div class="benefit-remaining remaining-${cls}">${remainingText}</div>
+          ${rightSideHtml}
         </div>
-        <div class="progress-track"><div class="progress-fill ${cls}" style="width:${b.percent}%"></div></div>
+        ${progressHtml}
         <div class="benefit-sub">
-          <span>한도 ${fmt(b.limit_value)}${unit} 중 ${fmt(b.used)}${unit} 사용</span>
+          <span>${subText}</span>
           <div class="benefit-buttons">
             <button class="btn small use-benefit" data-id="${b.id}" data-card-id="${card.id}" data-type="${b.limit_type}">사용 기록</button>
             <button class="btn secondary small toggle-log" data-id="${b.id}">내역</button>
@@ -341,7 +358,11 @@
     const card = state.cards.find((c) => c.id == cardId);
     const benefits = card ? card.benefits : [];
     assignBenefitSelect.innerHTML = benefits.length
-      ? benefits.map((b) => `<option value="${b.id}">${escapeHtml(b.name)} (${fmt(b.remaining)}${b.limit_type === "count" ? "회" : "원"} 남음)</option>`).join("")
+      ? benefits.map((b) => {
+          const unit = b.limit_type === "count" ? "회" : "원";
+          const tag = b.unlimited ? "한도 없음" : `${fmt(b.remaining)}${unit} 남음`;
+          return `<option value="${b.id}">${escapeHtml(b.name)} (${tag})</option>`;
+        }).join("")
       : `<option value="">등록된 혜택이 없습니다</option>`;
   }
 
