@@ -57,10 +57,23 @@ def serialize_inbox(conn):
                     break
 
         matched_benefit = None
+        matched_doubled = False
+
         if card and r["merchant"]:
             for b in benefits_by_card.get(card["id"], []):
                 if match_benefit_keyword(r["merchant"], b["merchant_keywords"]):
                     matched_benefit = b
+                    matched_doubled = b["calc_mode"] == "change_under_1000"
+                    break
+
+        if not matched_benefit and card:
+            # 가맹점 키워드로 못 찾았어도, 이 카드에 "잔돈 자동계산"형 혜택이
+            # 있으면(더모아처럼 거의 모든 결제가 적립 대상인 카드) 기본으로
+            # 그 혜택을 제안한다 - 2배 여부만 위 키워드 매칭에 맡긴다.
+            for b in benefits_by_card.get(card["id"], []):
+                if b["calc_mode"] == "change_under_1000":
+                    matched_benefit = b
+                    matched_doubled = False
                     break
 
         items.append({
@@ -75,7 +88,7 @@ def serialize_inbox(conn):
             "matched_card_name": card["name"] if card else None,
             "matched_benefit_id": matched_benefit["id"] if matched_benefit else None,
             "matched_benefit_name": matched_benefit["name"] if matched_benefit else None,
-            "matched_benefit_doubled": bool(matched_benefit) and matched_benefit["calc_mode"] == "change_under_1000",
+            "matched_benefit_doubled": matched_doubled,
         })
     return items
 
@@ -480,7 +493,15 @@ def log_usage(benefit_id):
 def delete_log(log_id):
     conn = get_conn()
     try:
+        log = conn.execute("SELECT source_inbox_id FROM usage_logs WHERE id = ?", (log_id,)).fetchone()
         conn.execute("DELETE FROM usage_logs WHERE id = ?", (log_id,))
+        if log and log["source_inbox_id"]:
+            # 받은 알림에서 배정되어 만들어진 기록이면, 삭제할 때 알림을
+            # 없애버리지 않고 "받은 결제 알림" 목록으로 되돌린다(다시 배정 가능).
+            conn.execute(
+                "UPDATE inbox_items SET status = 'pending', card_id = NULL, benefit_id = NULL WHERE id = ?",
+                (log["source_inbox_id"],),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -616,8 +637,9 @@ def assign_inbox_item(item_id):
                 memo = merchant
 
         conn.execute(
-            "INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo) VALUES (?, ?, ?, ?, ?)",
-            (benefit_id, used_value, used_at, merchant, memo),
+            """INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo, source_inbox_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (benefit_id, used_value, used_at, merchant, memo, item_id),
         )
         conn.execute(
             "UPDATE inbox_items SET status = 'assigned', card_id = ?, benefit_id = ? WHERE id = ?",

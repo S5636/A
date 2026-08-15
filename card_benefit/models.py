@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS usage_logs (
     used_at TEXT NOT NULL,          -- 'YYYY-MM-DD'
     merchant TEXT DEFAULT '',       -- 당일 동일가맹점 중복 적립 체크용
     memo TEXT DEFAULT '',
+    source_inbox_id INTEGER DEFAULT NULL,  -- 받은 알림에서 배정되어 만들어진 기록이면 그 알림 id
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -110,6 +111,7 @@ def init_db():
         _ensure_column(conn, "benefits", "tier_table", "tier_table TEXT DEFAULT ''")
         _ensure_column(conn, "benefits", "calc_mode", "calc_mode TEXT NOT NULL DEFAULT 'raw'")
         _ensure_column(conn, "usage_logs", "merchant", "merchant TEXT DEFAULT ''")
+        _ensure_column(conn, "usage_logs", "source_inbox_id", "source_inbox_id INTEGER DEFAULT NULL")
         conn.commit()
     finally:
         conn.close()
