@@ -7,7 +7,7 @@
 import json
 import os
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from io import BytesIO
 
 from flask import Flask, jsonify, render_template, request, send_file
@@ -46,7 +46,9 @@ def serialize_inbox(conn):
     ).fetchall()
     cards_with_code = conn.execute("SELECT id, name, last4 FROM cards WHERE last4 != ''").fetchall()
     benefits_by_card = {}
-    for b in conn.execute("SELECT id, card_id, name, merchant_keywords, calc_mode FROM benefits"):
+    for b in conn.execute(
+        "SELECT id, card_id, name, merchant_keywords, calc_mode, always_doubled FROM benefits"
+    ):
         benefits_by_card.setdefault(b["card_id"], []).append(b)
 
     items = []
@@ -71,11 +73,13 @@ def serialize_inbox(conn):
         if not matched_benefit and card:
             # 가맹점 키워드로 못 찾았어도, 이 카드에 "잔돈 자동계산"형 혜택이
             # 있으면(더모아처럼 거의 모든 결제가 적립 대상인 카드) 기본으로
-            # 그 혜택을 제안한다 - 2배 여부만 위 키워드 매칭에 맡긴다.
+            # 그 혜택을 제안한다. 단, "특별적립 전용"으로 자동매칭 가맹점을
+            # 따로 등록해둔 혜택(예: 더모아 특별적립)은 키워드가 있을 때만
+            # 골라야 하므로, 키워드가 비어있는(catch-all) 혜택만 후보로 삼는다.
             for b in benefits_by_card.get(card["id"], []):
-                if b["calc_mode"] == "change_under_1000":
+                if b["calc_mode"] == "change_under_1000" and not b["merchant_keywords"]:
                     matched_benefit = b
-                    matched_doubled = False
+                    matched_doubled = bool(b["always_doubled"])
                     break
 
         items.append({
@@ -188,6 +192,7 @@ def _serialize_cards(conn):
                 "discount_percent": b["discount_percent"],
                 "per_txn_cap": b["per_txn_cap"],
                 "rate_table": b["rate_table"],
+                "always_doubled": bool(b["always_doubled"]),
                 "used": used,
                 "remaining": remaining,
                 "percent": percent,
@@ -209,7 +214,7 @@ def _serialize_cards(conn):
             "perf_met": (perf_spend >= perf_threshold) if perf_threshold > 0 else None,
             "memo": card["memo"],
             "cycle_start": start.isoformat(),
-            "cycle_end": end.isoformat(),
+            "cycle_end": (end - timedelta(days=1)).isoformat(),
             "days_left": days_left,
             "benefits": benefit_list,
         })
@@ -420,6 +425,7 @@ def create_benefit(card_id):
         rate_table = _clean_rate_table(data.get("rate_table"))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    always_doubled = 1 if data.get("always_doubled") else 0
 
     conn = get_conn()
     try:
@@ -431,8 +437,8 @@ def create_benefit(card_id):
         ).fetchone()["m"]
         conn.execute(
             """INSERT INTO benefits (card_id, name, limit_type, limit_value, memo, merchant_keywords, tier_table,
-               calc_mode, discount_percent, per_txn_cap, rate_table, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               calc_mode, discount_percent, per_txn_cap, rate_table, always_doubled, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 card_id, name, limit_type, limit_value,
                 (data.get("memo") or "").strip(),
@@ -442,6 +448,7 @@ def create_benefit(card_id):
                 discount_percent,
                 per_txn_cap,
                 rate_table,
+                always_doubled,
                 max_order + 1,
             ),
         )
@@ -483,10 +490,12 @@ def update_benefit(benefit_id):
             rate_table = _clean_rate_table(data.get("rate_table", b["rate_table"]))
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
+        always_doubled = 1 if data.get("always_doubled", b["always_doubled"]) else 0
 
         conn.execute(
             """UPDATE benefits SET name = ?, limit_type = ?, limit_value = ?, memo = ?, merchant_keywords = ?,
-               tier_table = ?, calc_mode = ?, discount_percent = ?, per_txn_cap = ?, rate_table = ? WHERE id = ?""",
+               tier_table = ?, calc_mode = ?, discount_percent = ?, per_txn_cap = ?, rate_table = ?,
+               always_doubled = ? WHERE id = ?""",
             (
                 name, limit_type, limit_value,
                 (data.get("memo", b["memo"]) or "").strip(),
@@ -496,6 +505,7 @@ def update_benefit(benefit_id):
                 discount_percent,
                 per_txn_cap,
                 rate_table,
+                always_doubled,
                 benefit_id,
             ),
         )
@@ -555,6 +565,7 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
     error가 있으면(업종별 일/월 횟수 한도 초과 등) 기록하지 않고 그 문구를 보여준다.
     """
     if benefit["calc_mode"] == "change_under_1000":
+        doubled = doubled or bool(benefit["always_doubled"])
         earned = compute_change_earned(raw_value, doubled)
         parts = [f"결제 {raw_value:,.0f}원 → 잔돈 {earned:,.0f}원{'(2배)' if doubled else ''}"]
         if memo:
@@ -571,7 +582,8 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
             if monthly_limit and _category_usage_count(conn, benefit_id, category, used_at, monthly=True) >= monthly_limit:
                 return None, None, None, f"이 업종은 이번 달 {monthly_limit:g}회까지만 할인되는데, 이미 한도를 채워서 이 결제는 할인 대상이 아닙니다."
         earned = compute_percent_discount(raw_value, percent, cap)
-        parts = [f"결제 {raw_value:,.0f}원 → 할인 {earned:,.0f}원({percent:g}%)"]
+        category_label = f"{category} " if category else ""
+        parts = [f"결제 {raw_value:,.0f}원 → 할인 {earned:,.0f}원({category_label}{percent:g}%)"]
         if memo:
             parts.append(memo)
         return earned, " · ".join(parts), (category or ""), None
@@ -711,11 +723,19 @@ def create_inbox_item():
         parsed = parse_notification(text)
         occurred_at = (data.get("occurred_at") or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        conn.execute(
-            """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (text, parsed["amount"], parsed["last4"], parsed["issuer"], parsed["merchant"], occurred_at),
-        )
+        # MacroDroid 등에서 알림 하나에 트리거가 두 번 발동하는 경우가 있어서,
+        # 같은 문구가 60초 안에 다시 들어오면 중복으로 보고 건너뛴다.
+        recent_dup = conn.execute(
+            """SELECT 1 FROM inbox_items WHERE raw_text = ?
+               AND created_at >= datetime('now', 'localtime', '-60 seconds') LIMIT 1""",
+            (text,),
+        ).fetchone()
+        if not recent_dup:
+            conn.execute(
+                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (text, parsed["amount"], parsed["last4"], parsed["issuer"], parsed["merchant"], occurred_at),
+            )
         conn.commit()
     finally:
         conn.close()

@@ -28,6 +28,14 @@
     return Number(n).toLocaleString("ko-KR");
   }
 
+  function shortDate(iso) {
+    return (iso || "").replaceAll("-", "").slice(2);
+  }
+
+  function shortCardName(name) {
+    return (name || "").replace(/신한카드\s*/g, "").trim();
+  }
+
   function statusClass(percent, overLimit) {
     if (overLimit) return "bad";
     if (percent >= 80) return "warn";
@@ -67,8 +75,8 @@
       <div class="inbox-item" data-id="${it.id}">
         <div class="inbox-item-info">
           <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
-          <div class="inbox-item-sub">${it.occurred_at}${it.matched_card_name ? " · " + escapeHtml(it.matched_card_name) : ""}${it.merchant ? " · " + escapeHtml(it.merchant) : ""}</div>
-          ${it.matched_benefit_name ? `<div class="inbox-item-sub">🎯 ${escapeHtml(it.matched_benefit_name)} 자동매칭</div>` : ""}
+          <div class="inbox-item-sub">${it.occurred_at}${it.matched_card_name ? " · " + escapeHtml(shortCardName(it.matched_card_name)) : ""}${it.merchant ? " · " + escapeHtml(it.merchant) : ""}</div>
+          ${it.matched_benefit_name ? `<div class="inbox-item-sub">🎯 ${escapeHtml(it.matched_benefit_name)}</div>` : ""}
         </div>
         <button class="btn small assign-inbox" data-id="${it.id}">혜택 선택</button>
       </div>
@@ -92,7 +100,7 @@
       <div class="inbox-item" data-id="${it.id}">
         <div class="inbox-item-info">
           <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
-          <div class="inbox-item-sub">${it.occurred_at}${it.card_name ? " · " + escapeHtml(it.card_name) : ""}${it.merchant ? " · " + escapeHtml(it.merchant) : ""}</div>
+          <div class="inbox-item-sub">${it.occurred_at}${it.card_name ? " · " + escapeHtml(shortCardName(it.card_name)) : ""}${it.merchant ? " · " + escapeHtml(it.merchant) : ""}</div>
         </div>
         <div class="benefit-buttons">
           <button class="btn secondary small reopen-no-benefit" data-id="${it.id}">다시 확인</button>
@@ -157,10 +165,10 @@
       <div class="card-head">
         <div>
           <div class="card-title-row">
-            <span class="card-title">${escapeHtml(card.name)}</span>
+            <span class="card-title">${escapeHtml(shortCardName(card.name))}</span>
             ${card.issuer ? `<span class="card-issuer">${escapeHtml(card.issuer)}</span>` : ""}
           </div>
-          <div class="card-cycle">이번 혜택 기간: ${card.cycle_start} ~ ${card.cycle_end} (D-${card.days_left})</div>
+          <div class="card-cycle">혜택기간 ${shortDate(card.cycle_start)}~${shortDate(card.cycle_end)} (D-${card.days_left})</div>
           ${perfRowTemplate(card)}
           ${memoToggleTemplate(`card-${card.id}`, card.memo)}
         </div>
@@ -211,7 +219,7 @@
     const cls = statusClass(b.percent, b.over_limit);
     const remainingText = b.unlimited
       ? `누적 ${fmt(b.used)}${unit}`
-      : (b.over_limit ? `초과 ${fmt(Math.abs(b.remaining))}${unit}` : `${fmt(b.remaining)}${unit} 남음`);
+      : (b.over_limit ? `초과 ${fmt(Math.abs(b.remaining))}${unit}` : `잔여 ${fmt(b.remaining)}${unit}`);
     return `
       <div class="benefit-compact" data-benefit-id="${b.id}">
         <div class="benefit-compact-top">
@@ -242,7 +250,7 @@
           const cls = statusClass(b.percent, b.over_limit);
           const remainingText = b.over_limit
             ? `초과 ${fmt(Math.abs(b.remaining))}${unit}`
-            : `${fmt(b.remaining)}${unit} 남음`;
+            : `잔여 ${fmt(b.remaining)}${unit}`;
           return `<div class="benefit-remaining remaining-${cls}">${remainingText}</div>`;
         })();
 
@@ -261,7 +269,7 @@
       <div class="benefit" data-benefit-id="${b.id}">
         <div class="benefit-top">
           <div>
-            <div class="benefit-name">${escapeHtml(b.name)}${b.tiered ? ` <span class="tier-tag">📊 실적구간 자동조정</span>` : ""}</div>
+            <div class="benefit-name">${escapeHtml(b.name)}${b.tiered ? ` <span class="tier-tag">📊 구간자동</span>` : ""}</div>
             ${memoToggleTemplate(`benefit-${b.id}`, b.memo)}
           </div>
           ${rightSideHtml}
@@ -421,6 +429,7 @@
     document.getElementById("benefit-percent-row").style.display = show;
     document.getElementById("benefit-cap-row").style.display = show;
     document.getElementById("benefit-rate-table-row").style.display = show;
+    document.getElementById("benefit-always-doubled-row").style.display = mode === "change_under_1000" ? "flex" : "none";
   }
   document.getElementById("benefit-calc-mode").addEventListener("change", updateBenefitCalcFieldsUI);
 
@@ -431,6 +440,7 @@
     document.getElementById("benefit-type").value = benefit ? benefit.limit_type : "amount";
     document.getElementById("benefit-limit").value = benefit ? benefit.limit_value : "";
     document.getElementById("benefit-calc-mode").value = benefit ? benefit.calc_mode : "raw";
+    document.getElementById("benefit-always-doubled").checked = !!(benefit && benefit.always_doubled);
     document.getElementById("benefit-percent").value = benefit && benefit.discount_percent ? benefit.discount_percent : "";
     document.getElementById("benefit-cap").value = benefit && benefit.per_txn_cap ? benefit.per_txn_cap : "";
     document.getElementById("benefit-rate-table").value = benefit ? benefit.rate_table : "";
@@ -447,6 +457,7 @@
       limit_type: document.getElementById("benefit-type").value,
       limit_value: document.getElementById("benefit-limit").value,
       calc_mode: document.getElementById("benefit-calc-mode").value,
+      always_doubled: document.getElementById("benefit-always-doubled").checked,
       discount_percent: document.getElementById("benefit-percent").value || 0,
       per_txn_cap: document.getElementById("benefit-cap").value || 0,
       rate_table: document.getElementById("benefit-rate-table").value.trim(),
@@ -492,26 +503,29 @@
   }
 
   function matchRateTable(merchant, rateTableJson, defaultPercent, defaultCap) {
-    if (!rateTableJson || !merchant) return [defaultPercent, defaultCap];
+    if (!rateTableJson || !merchant) return [defaultPercent, defaultCap, ""];
     let rows;
     try {
       rows = JSON.parse(rateTableJson);
     } catch (e) {
-      return [defaultPercent, defaultCap];
+      return [defaultPercent, defaultCap, ""];
     }
-    if (!Array.isArray(rows)) return [defaultPercent, defaultCap];
+    if (!Array.isArray(rows)) return [defaultPercent, defaultCap, ""];
     const merchantLower = merchant.toLowerCase();
     for (const entry of rows) {
       if (!Array.isArray(entry) || entry.length < 2 || entry.length > 5) continue;
-      const keywords = entry[0];
+      const rawKeywords = String(entry[0]);
+      const colonIdx = rawKeywords.indexOf(":");
+      const label = colonIdx >= 0 ? rawKeywords.slice(0, colonIdx) : rawKeywords;
+      const kwPart = colonIdx >= 0 ? rawKeywords.slice(colonIdx + 1) : rawKeywords;
       const percent = entry[1];
       const cap = entry.length >= 3 ? entry[2] : defaultCap;
-      for (const kw of String(keywords).split(",")) {
+      for (const kw of kwPart.split(",")) {
         const k = kw.trim().toLowerCase();
-        if (k && merchantLower.includes(k)) return [percent, cap];
+        if (k && merchantLower.includes(k)) return [percent, cap, label];
       }
     }
-    return [defaultPercent, defaultCap];
+    return [defaultPercent, defaultCap, ""];
   }
 
   function updateUseChangePreview() {
@@ -530,10 +544,10 @@
     if (usingBenefit.calc_mode === "percent_discount") {
       if (!amount) { preview.style.display = "none"; return; }
       const merchant = document.getElementById("use-merchant").value.trim();
-      const [percent, cap] = matchRateTable(merchant, usingBenefit.rate_table, usingBenefit.discount_percent, usingBenefit.per_txn_cap);
+      const [percent, cap, label] = matchRateTable(merchant, usingBenefit.rate_table, usingBenefit.discount_percent, usingBenefit.per_txn_cap);
       const earned = computePercentDiscount(amount, percent, cap);
       preview.style.display = "block";
-      preview.textContent = `할인 예상: ${fmt(earned)}원 (${percent}%${cap ? `, 결제금액 ${fmt(cap)}원까지만 적용` : ""})`;
+      preview.textContent = `할인 예상: ${fmt(earned)}원 (${label ? label + " " : ""}${percent}%${cap ? `, ${fmt(cap)}원까지만 적용` : ""})`;
       return;
     }
     preview.style.display = "none";
@@ -550,9 +564,9 @@
       (isChange || isPercent) ? "결제 금액 (원) " : (benefit.limit_type === "count" ? "사용 횟수 (회) " : "사용 금액 (원) ");
     document.getElementById("use-value").value = !isChange && !isPercent && benefit.limit_type === "count" ? 1 : "";
     document.getElementById("use-merchant-row").style.display = (isChange || isPercent) ? "flex" : "none";
-    document.getElementById("use-doubled-row").style.display = isChange ? "flex" : "none";
+    document.getElementById("use-doubled-row").style.display = (isChange && !benefit.always_doubled) ? "flex" : "none";
     document.getElementById("use-merchant").value = "";
-    document.getElementById("use-doubled").checked = false;
+    document.getElementById("use-doubled").checked = !!benefit.always_doubled;
     document.getElementById("use-change-preview").style.display = "none";
     document.getElementById("use-date").value = new Date().toISOString().slice(0, 10);
     document.getElementById("use-memo").value = "";
@@ -618,7 +632,8 @@
     const isChange = !!benefit && benefit.calc_mode === "change_under_1000";
     const isPercent = !!benefit && benefit.calc_mode === "percent_discount";
     document.getElementById("assign-amount-label").firstChild.textContent = (isChange || isPercent) ? "결제 금액 " : "금액 ";
-    document.getElementById("assign-doubled-row").style.display = isChange ? "flex" : "none";
+    document.getElementById("assign-doubled-row").style.display = (isChange && !benefit.always_doubled) ? "flex" : "none";
+    if (isChange && benefit.always_doubled) document.getElementById("assign-doubled").checked = true;
     const preview = document.getElementById("assign-change-preview");
     const amount = document.getElementById("assign-amount").value;
     if (isChange && amount) {
@@ -631,10 +646,10 @@
     }
     if (isPercent && amount) {
       const merchant = (assigningItem && assigningItem.merchant) || "";
-      const [percent, cap] = matchRateTable(merchant, benefit.rate_table, benefit.discount_percent, benefit.per_txn_cap);
+      const [percent, cap, label] = matchRateTable(merchant, benefit.rate_table, benefit.discount_percent, benefit.per_txn_cap);
       const earned = computePercentDiscount(amount, percent, cap);
       preview.style.display = "block";
-      preview.textContent = `할인 예상: ${fmt(earned)}원 (${percent}%${cap ? `, 결제금액 ${fmt(cap)}원까지만 적용` : ""})`;
+      preview.textContent = `할인 예상: ${fmt(earned)}원 (${label ? label + " " : ""}${percent}%${cap ? `, ${fmt(cap)}원까지만 적용` : ""})`;
       return;
     }
     preview.style.display = "none";
@@ -648,7 +663,7 @@
     assigningItem = item;
     document.getElementById("assign-raw-text").textContent = item.raw_text;
     assignCardSelect.innerHTML = state.cards
-      .map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
+      .map((c) => `<option value="${c.id}">${escapeHtml(shortCardName(c.name))}</option>`)
       .join("");
     const preselectCardId = item.matched_card_id || state.cards[0].id;
     assignCardSelect.value = preselectCardId;

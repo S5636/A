@@ -118,6 +118,7 @@ def init_db():
         _ensure_column(conn, "benefits", "per_txn_cap", "per_txn_cap REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "benefits", "rate_table", "rate_table TEXT DEFAULT ''")
         _ensure_column(conn, "usage_logs", "rate_category", "rate_category TEXT DEFAULT ''")
+        _ensure_column(conn, "benefits", "always_doubled", "always_doubled INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     finally:
         conn.close()
@@ -254,12 +255,13 @@ def match_benefit_keyword(merchant: str, merchant_keywords: str) -> bool:
 
 
 def match_rate_table(merchant: str, rate_table_json: str, default_percent: float = 0, default_cap: float = 0):
-    """가맹점명과 rate_table(JSON [[키워드(쉼표구분), 할인율], ...] 또는
-    [[키워드, 할인율, 건당한도], ...] 또는 [[키워드, 할인율, 건당한도, 일한도, 월한도], ...])을
-    받아서 해당 업종의 (할인율, 건당한도, 일 횟수한도, 월 횟수한도, 카테고리키)를 돌려준다.
+    """가맹점명과 rate_table(JSON [["라벨:키워드1,키워드2", 할인율], ...] 또는
+    [[..., 할인율, 건당한도], ...] 또는 [[..., 할인율, 건당한도, 일한도, 월한도], ...])을
+    받아서 해당 업종의 (할인율, 건당한도, 일 횟수한도, 월 횟수한도, 라벨)을 돌려준다.
+    첫 값에 "쇼핑:이마트,쿠팡"처럼 ":"로 라벨을 붙이면 그 라벨이 화면 표시/횟수한도
+    구분에 쓰이고, ":"가 없으면 키워드 문자열 자체가 라벨로 쓰인다.
     Daily Plan/Monthly Plan처럼 하나의 혜택 안에서 업종별로 할인율(과 한도)이 다른
-    경우에 쓴다. 매칭 안 되면 (default_percent, default_cap, 0, 0, None) - 카테고리별
-    횟수한도는 기본값에는 적용되지 않는다.
+    경우에 쓴다. 매칭 안 되면 (default_percent, default_cap, 0, 0, None).
     """
     if rate_table_json and merchant:
         try:
@@ -271,15 +273,19 @@ def match_rate_table(merchant: str, rate_table_json: str, default_percent: float
             for entry in rows:
                 if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3, 4, 5):
                     continue
-                keywords = entry[0]
+                raw_keywords = str(entry[0])
+                if ":" in raw_keywords:
+                    label, kw_part = raw_keywords.split(":", 1)
+                else:
+                    label, kw_part = raw_keywords, raw_keywords
                 percent = entry[1]
                 cap = entry[2] if len(entry) >= 3 else default_cap
                 daily_limit = entry[3] if len(entry) >= 4 else 0
                 monthly_limit = entry[4] if len(entry) >= 5 else 0
-                for kw in str(keywords).split(","):
+                for kw in kw_part.split(","):
                     kw = kw.strip().lower()
                     if kw and kw in merchant_lower:
-                        return percent, cap, daily_limit, monthly_limit, str(keywords)
+                        return percent, cap, daily_limit, monthly_limit, label
     return default_percent, default_cap, 0, 0, None
 
 
