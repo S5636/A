@@ -167,20 +167,18 @@
 
     return `
       <div class="card-head">
-        <div>
-          <div class="card-title-row">
-            <span class="card-title">${escapeHtml(shortCardName(card.name))}</span>
-            ${card.issuer ? `<span class="card-issuer">${escapeHtml(card.issuer)}</span>` : ""}
-          </div>
-          <div class="card-cycle">혜택기간 ${shortDate(card.cycle_start)}~${shortDate(card.cycle_end)} (D-${card.days_left})</div>
-          ${perfRowTemplate(card)}
-          ${memoToggleTemplate(`card-${card.id}`, card.memo)}
+        <div class="card-title-row">
+          <span class="card-title">${escapeHtml(shortCardName(card.name))}</span>
+          ${card.issuer ? `<span class="card-issuer">${escapeHtml(card.issuer)}</span>` : ""}
         </div>
         <div class="card-actions">
           <button class="icon-btn edit-card" data-id="${card.id}" title="카드 수정">✏️</button>
           <button class="icon-btn delete-card" data-id="${card.id}" title="카드 삭제">🗑️</button>
         </div>
       </div>
+      <div class="card-cycle">혜택기간 ${shortDate(card.cycle_start)}~${shortDate(card.cycle_end)} (D-${card.days_left})</div>
+      ${perfRowTemplate(card)}
+      ${memoToggleTemplate(`card-${card.id}`, card.memo)}
       <div class="benefit-list">${benefitsHtml}</div>
       ${compactSectionHtml}
       <div class="add-benefit-row">
@@ -193,15 +191,15 @@
     if (!card.perf_threshold) return "";
     const cls = card.perf_met ? "met" : "unmet";
     const label = card.perf_met ? "실적 충족" : "실적 부족";
-    const autoTag = card.perf_auto ? " (자동계산)" : "";
+    const autoTag = card.perf_auto ? " (자동)" : "";
     return `
       <div class="perf-row">
         <span class="perf-badge ${cls}">${label}</span>
-        <span>지난달 ${fmt(card.perf_spend)}원 / ${fmt(card.perf_threshold)}원${autoTag}</span>
-        <button class="perf-edit" data-id="${card.id}" data-spend="${card.perf_spend}">수정</button>
+        <span class="perf-current">당월 ${fmt(card.this_month_spend)}원 (다음달 반영)</span>
       </div>
-      <div class="perf-row perf-row-next">
-        <span>이번달 누적 ${fmt(card.this_month_spend)}원 (다음달 구간에 반영됨)</span>
+      <div class="perf-row perf-row-sub">
+        <span>전월 ${fmt(card.perf_spend)}원 / ${fmt(card.perf_threshold)}원${autoTag}</span>
+        <button class="perf-edit" data-id="${card.id}" data-spend="${card.perf_spend}">수정</button>
       </div>
     `;
   }
@@ -212,9 +210,15 @@
           const timePart = l.notif_occurred_at ? l.notif_occurred_at.split(" ")[1]?.slice(0, 5) : "";
           const dateLabel = timePart ? `${l.used_at} ${timePart}` : l.used_at;
           const merchantLabel = l.merchant ? `<strong>${escapeHtml(l.merchant)}</strong> · ` : "";
+          // memo가 이미 "결제 X원 → 잔돈/할인 Y원" 형태로 금액을 포함하면
+          // 앞에 금액을 또 안 보여준다 (같은 금액이 두 번 찍히는 것 방지)
+          const hasBreakdown = l.memo && l.memo.includes("→");
+          const valuePart = hasBreakdown
+            ? escapeHtml(l.memo)
+            : `${fmt(l.used_value)}${unit}${l.memo ? " · " + escapeHtml(l.memo) : ""}`;
           return `
           <div class="log-item">
-            <span>${dateLabel} · ${merchantLabel}${fmt(l.used_value)}${unit}${l.memo ? " · " + escapeHtml(l.memo) : ""}</span>
+            <span>${dateLabel} · ${merchantLabel}${valuePart}</span>
             <button class="delete-log" data-id="${l.id}">삭제</button>
           </div>`;
         }).join("")
@@ -283,12 +287,10 @@
     return `
       <div class="benefit" data-benefit-id="${b.id}">
         <div class="benefit-top">
-          <div>
-            <div class="benefit-name">${escapeHtml(shortBenefitName(b.name))}${b.tiered ? ` <span class="tier-tag">📊 구간자동</span>` : ""}</div>
-            ${memoToggleTemplate(`benefit-${b.id}`, b.memo)}
-          </div>
+          <div class="benefit-name">${escapeHtml(shortBenefitName(b.name))}${b.tiered ? ` <span class="tier-tag">📊 구간자동</span>` : ""}</div>
           ${rightSideHtml}
         </div>
+        ${memoToggleTemplate(`benefit-${b.id}`, b.memo)}
         ${progressHtml}
         ${categoryUsageHtml}
         <div class="benefit-sub">
