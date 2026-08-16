@@ -7,6 +7,7 @@
 import json
 import os
 import secrets
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from io import BytesIO
 
@@ -808,8 +809,8 @@ def create_inbox_item():
         ).fetchone()
         if not recent_dup:
             conn.execute(
-                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at, source)
+                   VALUES (?, ?, ?, ?, ?, ?, 'notification')""",
                 (text, parsed["amount"], parsed["last4"], parsed["issuer"], parsed["merchant"], occurred_at),
             )
         conn.commit()
@@ -1076,30 +1077,50 @@ def _import_statement(ws, header_info):
 
     conn = get_conn()
     try:
-        cards_with_code = conn.execute(
-            """SELECT c.id, c.name, c.last4, COUNT(b.id) AS benefit_count
-               FROM cards c LEFT JOIN benefits b ON b.card_id = c.id
-               WHERE c.last4 != '' GROUP BY c.id"""
-        ).fetchall()
+        # 엑셀에 있는 행은 원칙적으로 다 DB에 넣는다(취소거래/혜택 미등록
+        # 카드라고 여기서 걸러서 빼지 않는다) - 화면에 뭘 보여줄지는
+        # serialize_inbox 등 조회 쪽에서 결정한다. 다만 금액·날짜 자체를
+        # 못 읽은 행은 저장할 최소한의 정보가 없어서 어쩔 수 없이 건너뛴다.
 
-        # 같은 엑셀을 실수로(또는 빠진 내역을 채우려고) 다시 올려도, 그리고
-        # 이미 폰 알림(자동수집)으로 들어와 있는 같은 결제를 엑셀로 또 올려도
-        # 중복으로 안 쌓이도록 막는다. 승인번호가 있으면 그걸로, 없으면
-        # (카드뒤4자리+금액+날짜) 조합으로 막는다 - 가맹점명은 일부러 뺐다.
-        # 폰 알림은 "스타벅스 강남점"처럼, 엑셀은 "주식회사 스타벅스코리아"처럼
-        # 같은 결제를 서로 다른 문구로 남기는 경우가 많아서, 가맹점명까지
-        # 똑같아야 막는 조건이면 정작 이런 교차 중복을 못 걸러낸다.
-        seen_approval = {
-            r["approval_no"] for r in conn.execute(
-                "SELECT approval_no FROM inbox_items WHERE approval_no != ''"
-            )
-        }
-        seen_combo = {
-            (r["last4"], r["amount"], (r["occurred_at"] or "")[:10])
-            for r in conn.execute("SELECT last4, amount, occurred_at FROM inbox_items")
-        }
+        # 중복 판단: 승인번호가 있으면 승인번호로 우선 확인하고(단, 승인번호가
+        # 서로 다르면 별개 결제로 본다), 그 다음 (카드뒤4자리+금액)이 같은
+        # 기존 기록들과 시간을 비교한다 - 양쪽 다 시간(분초)까지 있으면 5분
+        # 이내를 같은 결제로 보고(폰 알림 수신 시각과 카드사 승인 시각이
+        # 몇 분 정도는 어긋날 수 있어서), 한쪽이라도 시간이 없으면 날짜만
+        # 비교한다. 이렇게 해야 폰 알림으로 이미 들어온 것과 나중에 엑셀로
+        # 또 들어오는 같은 결제를, 승인번호가 있든 없든 서로 잡아낼 수 있다.
+        seen_approval = set()
+        existing_by_key = defaultdict(list)
+        for r in conn.execute("SELECT last4, amount, occurred_at, approval_no FROM inbox_items"):
+            if r["approval_no"]:
+                seen_approval.add(r["approval_no"])
+            existing_by_key[(r["last4"], r["amount"])].append([r["occurred_at"] or "", r["approval_no"] or ""])
+
+        def _parse_ts(s):
+            if not s:
+                return None
+            try:
+                return datetime.strptime(s, "%Y-%m-%d %H:%M:%S") if len(s) > 10 else datetime.strptime(s, "%Y-%m-%d")
+            except ValueError:
+                return None
+
+        def _find_duplicate(last4, amount, occurred_at, approval_no):
+            if approval_no and approval_no in seen_approval:
+                return f"승인번호({approval_no})가 이미 등록되어 있어 중복으로 보고 건너뜀"
+            new_ts = _parse_ts(occurred_at)
+            for old_occurred_at, old_approval in existing_by_key.get((last4, amount), []):
+                if approval_no and old_approval and approval_no != old_approval:
+                    continue
+                if len(occurred_at) > 10 and len(old_occurred_at) > 10:
+                    old_ts = _parse_ts(old_occurred_at)
+                    if new_ts and old_ts and abs((new_ts - old_ts).total_seconds()) <= 300:
+                        return "같은 카드·금액·비슷한 시간 내역이 이미 있어 중복으로 보고 건너뜀"
+                elif occurred_at[:10] == old_occurred_at[:10]:
+                    return "같은 카드·금액·날짜 내역이 이미 있어 중복으로 보고 건너뜀"
+            return None
 
         queued = 0
+        cancelled = 0
         skipped = []
         for i, row in enumerate(
             ws.iter_rows(min_row=header_info["header_row"] + 1, values_only=True),
@@ -1108,16 +1129,12 @@ def _import_statement(ws, header_info):
             if row is None or all(v in (None, "") for v in row):
                 continue
 
-            status_col = header_info.get("status_col")
-            if status_col is not None and status_col < len(row) and is_cancelled_status(row[status_col]):
-                skipped.append(f"{i}행: 취소/실패 거래로 보여 건너뜀")
-                continue
-
             amount = parse_amount_cell(row[amount_col] if amount_col < len(row) else None)
-            if amount is None or amount <= 0:
-                skipped.append(f"{i}행: 취소·환불로 보이는 금액이라 건너뜀" if amount is not None and amount < 0
-                                else f"{i}행: 금액을 확인할 수 없음")
+            if amount is None or amount == 0:
+                skipped.append(f"{i}행: 금액을 확인할 수 없음")
                 continue
+            is_refund = amount < 0
+            amount = abs(amount)
 
             used_at = parse_date_cell(row[date_col] if date_col < len(row) else None)
             if not used_at:
@@ -1133,12 +1150,6 @@ def _import_statement(ws, header_info):
             if cardno_col is not None and cardno_col < len(row):
                 last4 = extract_last4(row[cardno_col])
 
-            if last4:
-                matched = next((c for c in cards_with_code if card_codes_match(c["last4"], last4)), None)
-                if matched and matched["benefit_count"] == 0:
-                    skipped.append(f"{i}행: \"{matched['name']}\"는 추적할 혜택이 등록되어 있지 않아 건너뜀")
-                    continue
-
             approval_no = ""
             if approval_col is not None and approval_col < len(row) and row[approval_col] not in (None, ""):
                 approval_no = str(row[approval_col]).strip()
@@ -1147,33 +1158,39 @@ def _import_statement(ws, header_info):
             if usage_type_col is not None and usage_type_col < len(row) and row[usage_type_col] not in (None, ""):
                 usage_type = str(row[usage_type_col]).strip()
 
-            # 승인번호가 있으면 승인번호로도, (카드뒤4자리+금액+날짜) 조합으로도
-            # 둘 다 확인한다 - 한쪽만 보면, 옛날에 승인번호 없이 들어간 내역과
-            # 지금 승인번호가 찍혀서 들어오는 내역을 서로 다른 걸로 오인해서
-            # 중복을 놓친다(승인번호 유무가 서로 다른 두 기록이 사실은 같은
-            # 결제인 경우).
-            combo = (last4, amount, used_at)
-            if (approval_no and approval_no in seen_approval) or combo in seen_combo:
-                reason = f"승인번호({approval_no})가 이미 등록되어 있어 중복으로 보고 건너뜀" if approval_no and approval_no in seen_approval \
-                    else "같은 카드·금액·날짜 내역이 이미 있어 중복으로 보고 건너뜀"
-                skipped.append(f"{i}행: {reason}")
+            dup_reason = _find_duplicate(last4, amount, occurred_at, approval_no)
+            if dup_reason:
+                skipped.append(f"{i}행: {dup_reason}")
                 continue
             if approval_no:
                 seen_approval.add(approval_no)
-            seen_combo.add(combo)
+            existing_by_key[(last4, amount)].append([occurred_at, approval_no])
+
+            status_col = header_info.get("status_col")
+            is_cancelled = is_refund or (
+                status_col is not None and status_col < len(row) and is_cancelled_status(row[status_col])
+            )
 
             raw_parts = [p for p in [merchant, f"{amount:,.0f}원", used_at] if p]
             raw_text = " · ".join(raw_parts)
 
             conn.execute(
-                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at, approval_no, usage_type)
-                   VALUES (?, ?, ?, '', ?, ?, ?, ?)""",
-                (raw_text, amount, last4, merchant, occurred_at, approval_no, usage_type),
+                """INSERT INTO inbox_items
+                   (raw_text, amount, last4, issuer, merchant, occurred_at, approval_no, usage_type, source, status)
+                   VALUES (?, ?, ?, '', ?, ?, ?, ?, 'excel', ?)""",
+                (raw_text, amount, last4, merchant, occurred_at, approval_no, usage_type,
+                 "cancelled" if is_cancelled else "pending"),
             )
-            queued += 1
+            if is_cancelled:
+                cancelled += 1
+            else:
+                queued += 1
         conn.commit()
     finally:
         conn.close()
+
+    if cancelled:
+        skipped.append(f"(참고) 취소/환불로 보이는 {cancelled}건은 DB에는 저장했지만 목록에는 안 띄웠습니다.")
 
     result = serialize_full()
     result["import_result"] = {"mode": "statement", "queued": queued, "skipped": skipped}
