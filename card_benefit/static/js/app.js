@@ -690,8 +690,8 @@
       : `<option value="">등록된 혜택이 없습니다</option>`;
     assignBenefitSelect.innerHTML = placeholder + benefits.map((b) => {
       const unit = b.limit_type === "count" ? "회" : "원";
-      const tag = b.unlimited ? "한도 없음" : `잔여 ${fmt(b.remaining)}${unit}`;
-      return `<option value="${b.id}">${escapeHtml(shortBenefitName(b.name))} (${tag})</option>`;
+      const tag = b.unlimited ? "" : ` (잔여 ${fmt(b.remaining)}${unit})`;
+      return `<option value="${b.id}">${escapeHtml(shortBenefitName(b.name))}${tag}</option>`;
     }).join("");
     assignBenefitSelect.value = preselectBenefitId || "";
   }
