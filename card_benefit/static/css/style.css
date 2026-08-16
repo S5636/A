@@ -210,9 +210,10 @@ body { padding-bottom: 40px; }
   align-items: center;
   gap: 8px;
 }
-.inbox-item-info { font-size: 13px; }
+.inbox-item-info { font-size: 13px; flex: 1; min-width: 0; }
 .inbox-item-amount { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .inbox-item-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.inbox-item .btn { flex-shrink: 0; white-space: nowrap; }
 
 /* ---------- 백업 / 일괄 업로드 ---------- */
 .backup-section { margin-bottom: 16px; }

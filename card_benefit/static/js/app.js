@@ -33,7 +33,11 @@
   }
 
   function shortCardName(name) {
-    return (name || "").replace(/신한카드\s*/g, "").trim();
+    return (name || "").replace(/신한카드\s*/g, "").replace(/\s*\([^)]*\)/g, "").trim();
+  }
+
+  function shortBenefitName(name) {
+    return (name || "").replace(/\s*\([^)]*\)/g, "").trim();
   }
 
   function statusClass(percent, overLimit) {
@@ -76,7 +80,7 @@
         <div class="inbox-item-info">
           <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
           <div class="inbox-item-sub">${it.occurred_at}${it.matched_card_name ? " · " + escapeHtml(shortCardName(it.matched_card_name)) : ""}${it.merchant ? " · " + escapeHtml(it.merchant) : ""}</div>
-          ${it.matched_benefit_name ? `<div class="inbox-item-sub">🎯 ${escapeHtml(it.matched_benefit_name)}</div>` : ""}
+          ${it.matched_benefit_name ? `<div class="inbox-item-sub">🎯 ${escapeHtml(shortBenefitName(it.matched_benefit_name))}</div>` : ""}
         </div>
         <button class="btn small assign-inbox" data-id="${it.id}">혜택 선택</button>
       </div>
@@ -223,7 +227,7 @@
     return `
       <div class="benefit-compact" data-benefit-id="${b.id}">
         <div class="benefit-compact-top">
-          <span class="benefit-compact-name">${escapeHtml(b.name)}</span>
+          <span class="benefit-compact-name">${escapeHtml(shortBenefitName(b.name))}</span>
           <span class="benefit-remaining ${b.unlimited ? "" : "remaining-" + cls}">${remainingText}</span>
         </div>
         <div class="benefit-sub">
@@ -262,14 +266,14 @@
         })();
 
     const subText = b.unlimited
-      ? `한도 없음(무제한) · 누적 ${fmt(b.used)}${unit}`
+      ? `한도 없음(무제한)`
       : `한도 ${fmt(b.limit_value)}${unit} 중 ${fmt(b.used)}${unit} 사용`;
 
     return `
       <div class="benefit" data-benefit-id="${b.id}">
         <div class="benefit-top">
           <div>
-            <div class="benefit-name">${escapeHtml(b.name)}${b.tiered ? ` <span class="tier-tag">📊 구간자동</span>` : ""}</div>
+            <div class="benefit-name">${escapeHtml(shortBenefitName(b.name))}${b.tiered ? ` <span class="tier-tag">📊 구간자동</span>` : ""}</div>
             ${memoToggleTemplate(`benefit-${b.id}`, b.memo)}
           </div>
           ${rightSideHtml}
@@ -611,12 +615,12 @@
     const card = state.cards.find((c) => c.id == cardId);
     const benefits = card ? card.benefits : [];
     const placeholder = benefits.length
-      ? `<option value="">해당 없음 (어떤 혜택인지 직접 확인)</option>`
+      ? `<option value="">해당 없음</option>`
       : `<option value="">등록된 혜택이 없습니다</option>`;
     assignBenefitSelect.innerHTML = placeholder + benefits.map((b) => {
       const unit = b.limit_type === "count" ? "회" : "원";
-      const tag = b.unlimited ? "한도 없음" : `${fmt(b.remaining)}${unit} 남음`;
-      return `<option value="${b.id}">${escapeHtml(b.name)} (${tag})</option>`;
+      const tag = b.unlimited ? "한도 없음" : `잔여 ${fmt(b.remaining)}${unit}`;
+      return `<option value="${b.id}">${escapeHtml(shortBenefitName(b.name))} (${tag})</option>`;
     }).join("");
     assignBenefitSelect.value = preselectBenefitId || "";
   }
