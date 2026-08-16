@@ -40,6 +40,12 @@
     return (name || "").replace(/\s*\([^)]*\)/g, "").trim();
   }
 
+  function splitBenefitName(name) {
+    const idx = (name || "").indexOf(" - ");
+    if (idx < 0) return [name, ""];
+    return [name.slice(0, idx).trim(), name.slice(idx + 3).trim()];
+  }
+
   function statusClass(percent, overLimit) {
     if (overLimit) return "bad";
     if (percent >= 80) return "warn";
@@ -240,8 +246,8 @@
         </div>
         <div class="benefit-sub">
           <div class="benefit-buttons">
-            <button class="btn small use-benefit" data-id="${b.id}" data-card-id="${card.id}" data-type="${b.limit_type}">사용 기록</button>
-            <button class="btn secondary small toggle-log" data-id="${b.id}">내역</button>
+            <button class="icon-btn use-benefit" data-id="${b.id}" data-card-id="${card.id}" data-type="${b.limit_type}" title="사용 기록">➕</button>
+            <button class="btn small toggle-log" data-id="${b.id}">내역</button>
             <button class="icon-btn edit-benefit" data-id="${b.id}" data-card-id="${card.id}">✏️</button>
             <button class="icon-btn delete-benefit" data-id="${b.id}">🗑️</button>
           </div>
@@ -274,31 +280,34 @@
         })();
 
     const subText = b.unlimited
-      ? `한도 없음(무제한)`
+      ? ``
       : `한도 ${fmt(b.limit_value)}${unit} 중 ${fmt(b.used)}${unit} 사용`;
 
     const categoryUsageHtml = (b.category_usage && b.category_usage.length)
       ? `<div class="category-usage">${b.category_usage.map((c) => {
-          const denom = c.monthly_limit || c.daily_limit;
-          const limitPart = denom ? `/${fmt(denom)}회` : "회";
-          return `${escapeHtml(c.label)} ${fmt(c.count)}${limitPart}`;
+          if (c.monthly_limit) return `${escapeHtml(c.label)} 월${fmt(c.count)}/${fmt(c.monthly_limit)}회`;
+          if (c.daily_limit) return `${escapeHtml(c.label)} 일${fmt(c.today_count)}/${fmt(c.daily_limit)}회`;
+          return `${escapeHtml(c.label)} ${fmt(c.count)}회`;
         }).join(" · ")}</div>`
       : "";
+
+    const [benefitTitle, benefitSubtitle] = splitBenefitName(shortBenefitName(b.name));
 
     return `
       <div class="benefit" data-benefit-id="${b.id}">
         <div class="benefit-top">
-          <div class="benefit-name">${escapeHtml(shortBenefitName(b.name))}${b.tiered ? ` <span class="tier-tag">📊 구간자동</span>` : ""}</div>
+          <div class="benefit-name">${escapeHtml(benefitTitle)}</div>
           ${rightSideHtml}
         </div>
+        ${benefitSubtitle ? `<div class="benefit-subtitle">${escapeHtml(benefitSubtitle)}</div>` : ""}
         ${memoToggleTemplate(`benefit-${b.id}`, b.memo)}
         ${progressHtml}
         ${categoryUsageHtml}
         <div class="benefit-sub">
           <span>${subText}</span>
           <div class="benefit-buttons">
-            <button class="btn small use-benefit" data-id="${b.id}" data-card-id="${card.id}" data-type="${b.limit_type}">사용 기록</button>
-            <button class="btn secondary small toggle-log" data-id="${b.id}">내역</button>
+            <button class="icon-btn use-benefit" data-id="${b.id}" data-card-id="${card.id}" data-type="${b.limit_type}" title="사용 기록">➕</button>
+            <button class="btn small toggle-log" data-id="${b.id}">내역</button>
             <button class="icon-btn edit-benefit" data-id="${b.id}" data-card-id="${card.id}">✏️</button>
             <button class="icon-btn delete-benefit" data-id="${b.id}">🗑️</button>
           </div>
@@ -547,6 +556,28 @@
     return [defaultPercent, defaultCap, ""];
   }
 
+  function rateTableEntryByLabel(rateTableJson, label, defaultPercent, defaultCap) {
+    if (!rateTableJson || !label) return [defaultPercent, defaultCap];
+    let rows;
+    try {
+      rows = JSON.parse(rateTableJson);
+    } catch (e) {
+      return [defaultPercent, defaultCap];
+    }
+    if (!Array.isArray(rows)) return [defaultPercent, defaultCap];
+    for (const entry of rows) {
+      if (!Array.isArray(entry) || entry.length < 2 || entry.length > 5) continue;
+      const rawKeywords = String(entry[0]);
+      const colonIdx = rawKeywords.indexOf(":");
+      const entryLabel = colonIdx >= 0 ? rawKeywords.slice(0, colonIdx) : rawKeywords;
+      if (entryLabel === label) {
+        const cap = entry.length >= 3 ? entry[2] : defaultCap;
+        return [entry[1], cap];
+      }
+    }
+    return [defaultPercent, defaultCap];
+  }
+
   function updateUseChangePreview() {
     if (!usingBenefit) return;
     const amount = document.getElementById("use-value").value;
@@ -562,8 +593,15 @@
     }
     if (usingBenefit.calc_mode === "percent_discount") {
       if (!amount) { preview.style.display = "none"; return; }
-      const merchant = document.getElementById("use-merchant").value.trim();
-      const [percent, cap, label] = matchRateTable(merchant, usingBenefit.rate_table, usingBenefit.discount_percent, usingBenefit.per_txn_cap);
+      const manualCategory = document.getElementById("use-category").value;
+      let percent, cap, label;
+      if (manualCategory) {
+        [percent, cap] = rateTableEntryByLabel(usingBenefit.rate_table, manualCategory, usingBenefit.discount_percent, usingBenefit.per_txn_cap);
+        label = manualCategory;
+      } else {
+        const merchant = document.getElementById("use-merchant").value.trim();
+        [percent, cap, label] = matchRateTable(merchant, usingBenefit.rate_table, usingBenefit.discount_percent, usingBenefit.per_txn_cap);
+      }
       const earned = computePercentDiscount(amount, percent, cap);
       preview.style.display = "block";
       preview.textContent = `할인 예상: ${fmt(earned)}원 (${label ? label + " " : ""}${percent}%${cap ? `, ${fmt(cap)}원까지만 적용` : ""})`;
@@ -589,11 +627,22 @@
     document.getElementById("use-change-preview").style.display = "none";
     document.getElementById("use-date").value = new Date().toISOString().slice(0, 10);
     document.getElementById("use-memo").value = "";
+    const useCategoryRow = document.getElementById("use-category-row");
+    const useCategorySelect = document.getElementById("use-category");
+    if (isPercent && benefit.category_usage && benefit.category_usage.length) {
+      useCategoryRow.style.display = "flex";
+      useCategorySelect.innerHTML = `<option value="">자동인식(가맹점명 기준)</option>` +
+        benefit.category_usage.map((c) => `<option value="${escapeHtml(c.label)}">${escapeHtml(c.label)}</option>`).join("");
+    } else {
+      useCategoryRow.style.display = "none";
+      useCategorySelect.innerHTML = `<option value="">자동인식(가맹점명 기준)</option>`;
+    }
     useModal.classList.add("open");
   }
   document.getElementById("use-value").addEventListener("input", updateUseChangePreview);
   document.getElementById("use-doubled").addEventListener("change", updateUseChangePreview);
   document.getElementById("use-merchant").addEventListener("input", updateUseChangePreview);
+  document.getElementById("use-category").addEventListener("change", updateUseChangePreview);
   document.getElementById("use-cancel").addEventListener("click", () => useModal.classList.remove("open"));
   document.getElementById("use-save").addEventListener("click", async () => {
     const payload = {
@@ -603,6 +652,9 @@
     };
     if (usingBenefit.calc_mode === "change_under_1000" || usingBenefit.calc_mode === "percent_discount") {
       payload.merchant = document.getElementById("use-merchant").value.trim();
+    }
+    if (usingBenefit.calc_mode === "percent_discount") {
+      payload.category = document.getElementById("use-category").value;
     }
     if (usingBenefit.calc_mode === "change_under_1000") {
       payload.doubled = document.getElementById("use-doubled").checked;
@@ -653,6 +705,20 @@
     document.getElementById("assign-amount-label").firstChild.textContent = (isChange || isPercent) ? "결제 금액 " : "금액 ";
     document.getElementById("assign-doubled-row").style.display = (isChange && !benefit.always_doubled) ? "flex" : "none";
     if (isChange && benefit.always_doubled) document.getElementById("assign-doubled").checked = true;
+
+    const categoryRow = document.getElementById("assign-category-row");
+    const categorySelect = document.getElementById("assign-category");
+    if (isPercent && benefit.category_usage && benefit.category_usage.length) {
+      categoryRow.style.display = "flex";
+      const existingValue = categorySelect.value;
+      categorySelect.innerHTML = `<option value="">자동인식(가맹점명 기준)</option>` +
+        benefit.category_usage.map((c) => `<option value="${escapeHtml(c.label)}">${escapeHtml(c.label)}</option>`).join("");
+      categorySelect.value = existingValue;
+    } else {
+      categoryRow.style.display = "none";
+      categorySelect.innerHTML = `<option value="">자동인식(가맹점명 기준)</option>`;
+    }
+
     const preview = document.getElementById("assign-change-preview");
     const amount = document.getElementById("assign-amount").value;
     if (isChange && amount) {
@@ -664,8 +730,15 @@
       return;
     }
     if (isPercent && amount) {
-      const merchant = (assigningItem && assigningItem.merchant) || "";
-      const [percent, cap, label] = matchRateTable(merchant, benefit.rate_table, benefit.discount_percent, benefit.per_txn_cap);
+      const manualCategory = categorySelect.value;
+      let percent, cap, label;
+      if (manualCategory) {
+        [percent, cap] = rateTableEntryByLabel(benefit.rate_table, manualCategory, benefit.discount_percent, benefit.per_txn_cap);
+        label = manualCategory;
+      } else {
+        const merchant = (assigningItem && assigningItem.merchant) || "";
+        [percent, cap, label] = matchRateTable(merchant, benefit.rate_table, benefit.discount_percent, benefit.per_txn_cap);
+      }
       const earned = computePercentDiscount(amount, percent, cap);
       preview.style.display = "block";
       preview.textContent = `할인 예상: ${fmt(earned)}원 (${label ? label + " " : ""}${percent}%${cap ? `, ${fmt(cap)}원까지만 적용` : ""})`;
@@ -702,6 +775,7 @@
   assignBenefitSelect.addEventListener("change", updateAssignChangeUI);
   document.getElementById("assign-amount").addEventListener("input", updateAssignChangeUI);
   document.getElementById("assign-doubled").addEventListener("change", updateAssignChangeUI);
+  document.getElementById("assign-category").addEventListener("change", updateAssignChangeUI);
 
   document.getElementById("assign-cancel").addEventListener("click", () => assignModal.classList.remove("open"));
 
@@ -734,6 +808,9 @@
     if (benefit && benefit.calc_mode === "change_under_1000") {
       payload.merchant = assigningItem.merchant || "";
       payload.doubled = document.getElementById("assign-doubled").checked;
+    }
+    if (benefit && benefit.calc_mode === "percent_discount") {
+      payload.category = document.getElementById("assign-category").value;
     }
     state = await api(`/api/inbox/${assigningItem.id}/assign`, {
       method: "POST",

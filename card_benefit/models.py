@@ -316,15 +316,27 @@ def parse_rate_table_categories(rate_table_json: str):
         raw_keywords = str(entry[0])
         label = raw_keywords.split(":", 1)[0] if ":" in raw_keywords else raw_keywords
         percent = entry[1]
+        cap = entry[2] if len(entry) >= 3 else 0
         daily_limit = entry[3] if len(entry) >= 4 else 0
         monthly_limit = entry[4] if len(entry) >= 5 else 0
         categories.append({
             "label": label,
             "percent": percent,
+            "cap": cap,
             "daily_limit": daily_limit,
             "monthly_limit": monthly_limit,
         })
     return categories
+
+
+def rate_table_entry_by_label(rate_table_json: str, label: str, default_percent: float = 0, default_cap: float = 0):
+    """사용자가 가맹점 자동인식 대신 업종을 직접 골랐을 때 쓴다. label과 정확히
+    일치하는 rate_table 항목의 (할인율, 건당한도, 일한도, 월한도)를 돌려준다."""
+    for cat in parse_rate_table_categories(rate_table_json):
+        if cat["label"] == label:
+            cap = cat["cap"] or default_cap
+            return cat["percent"], cap, cat["daily_limit"], cat["monthly_limit"]
+    return default_percent, default_cap, 0, 0
 
 
 def annotate_merchant(name: str) -> str:

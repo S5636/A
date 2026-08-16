@@ -29,6 +29,7 @@ from models import (
     match_benefit_keyword,
     match_rate_table,
     parse_rate_table_categories,
+    rate_table_entry_by_label,
     parse_amount_cell,
     parse_date_cell,
     parse_notification,
@@ -206,15 +207,20 @@ def _serialize_cards(conn):
             if b["calc_mode"] == "percent_discount" and b["rate_table"]:
                 categories = parse_rate_table_categories(b["rate_table"])
                 if categories:
+                    today_str = date.today().isoformat()
                     counts = {}
+                    today_counts = {}
                     for l in logs:
                         cat = l["rate_category"]
                         if cat:
                             counts[cat] = counts.get(cat, 0) + 1
+                            if l["used_at"] == today_str:
+                                today_counts[cat] = today_counts.get(cat, 0) + 1
                     category_usage = [
                         {
                             "label": c["label"],
                             "count": counts.get(c["label"], 0),
+                            "today_count": today_counts.get(c["label"], 0),
                             "daily_limit": c["daily_limit"],
                             "monthly_limit": c["monthly_limit"],
                         }
@@ -257,7 +263,7 @@ def _serialize_cards(conn):
             "perf_spend": perf_spend,
             "perf_month": prev_month,
             "perf_auto": manual_row is None,
-            "perf_met": (perf_spend >= perf_threshold) if perf_threshold > 0 else None,
+            "perf_met": (auto_this_month_spend >= perf_threshold) if perf_threshold > 0 else None,
             "this_month_spend": auto_this_month_spend,
             "memo": card["memo"],
             "cycle_start": start.isoformat(),
@@ -603,13 +609,15 @@ def _category_usage_count(conn, benefit_id, category, used_at, monthly=False):
     return row["c"]
 
 
-def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, merchant="", used_at=""):
+def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, merchant="", used_at="", category_override=""):
     """혜택의 calc_mode에 따라 입력값(결제금액 등)을 실제 한도 소진값으로 변환한다.
 
     "raw"는 입력값을 그대로 쓰고, 나머지는 결제금액을 자동으로 실제
     혜택금액(잔돈/할인액)으로 환산한다 - 결제금액 총액이 그대로 한도를
     깎아먹지 않도록. (used_value, memo, rate_category, error) 를 돌려준다.
     error가 있으면(업종별 일/월 횟수 한도 초과 등) 기록하지 않고 그 문구를 보여준다.
+    category_override가 있으면(네이버페이/토스페이처럼 가맹점명으로 업종을 알 수
+    없어서 사용자가 직접 고른 경우) 가맹점명 매칭 대신 그 업종 값을 그대로 쓴다.
     """
     if benefit["calc_mode"] == "change_under_1000":
         doubled = doubled or bool(benefit["always_doubled"])
@@ -620,9 +628,15 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
         return earned, " · ".join(parts), "", None
 
     if benefit["calc_mode"] == "percent_discount":
-        percent, cap, daily_limit, monthly_limit, category = match_rate_table(
-            merchant, benefit["rate_table"], benefit["discount_percent"], benefit["per_txn_cap"]
-        )
+        if category_override:
+            percent, cap, daily_limit, monthly_limit = rate_table_entry_by_label(
+                benefit["rate_table"], category_override, benefit["discount_percent"], benefit["per_txn_cap"]
+            )
+            category = category_override
+        else:
+            percent, cap, daily_limit, monthly_limit, category = match_rate_table(
+                merchant, benefit["rate_table"], benefit["discount_percent"], benefit["per_txn_cap"]
+            )
         if category and used_at:
             if daily_limit and _category_usage_count(conn, benefit_id, category, used_at) >= daily_limit:
                 return None, None, None, f"이 업종은 하루 {daily_limit:g}회까지만 할인되는데, 오늘 이미 한도를 채워서 이 결제는 할인 대상이 아닙니다."
@@ -662,6 +676,7 @@ def log_usage(benefit_id):
 
         merchant = (data.get("merchant") or "").strip()
         memo = (data.get("memo") or "").strip()
+        category_override = (data.get("category") or "").strip()
 
         if b["calc_mode"] == "change_under_1000" and _duplicate_merchant_today(conn, benefit_id, used_at, merchant):
             return jsonify({
@@ -671,7 +686,7 @@ def log_usage(benefit_id):
             }), 400
 
         used_value, memo, rate_category, error = _apply_calc_mode(
-            conn, benefit_id, b, raw_value, bool(data.get("doubled")), memo, merchant, used_at
+            conn, benefit_id, b, raw_value, bool(data.get("doubled")), memo, merchant, used_at, category_override
         )
         if error:
             return jsonify({"error": error}), 400
@@ -822,6 +837,7 @@ def assign_inbox_item(item_id):
 
         merchant = (data.get("merchant") or item["merchant"] or "").strip()
         memo = (data.get("memo") or "").strip()
+        category_override = (data.get("category") or "").strip()
 
         if benefit["calc_mode"] == "change_under_1000" and _duplicate_merchant_today(conn, benefit_id, used_at, merchant):
             return jsonify({
@@ -831,7 +847,7 @@ def assign_inbox_item(item_id):
             }), 400
 
         used_value, memo, rate_category, error = _apply_calc_mode(
-            conn, benefit_id, benefit, raw_value, bool(data.get("doubled")), memo, merchant, used_at
+            conn, benefit_id, benefit, raw_value, bool(data.get("doubled")), memo, merchant, used_at, category_override
         )
         if error:
             return jsonify({"error": error}), 400
