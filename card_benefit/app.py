@@ -32,6 +32,7 @@ from models import (
     parse_amount_cell,
     parse_date_cell,
     parse_notification,
+    previous_year_month,
     set_setting,
     tier_limit_for_spend,
 )
@@ -74,14 +75,18 @@ def serialize_inbox(conn):
         if not matched_benefit and card:
             # 가맹점 키워드로 못 찾았어도, 이 카드에 "잔돈 자동계산"형 혜택이
             # 있으면(더모아처럼 거의 모든 결제가 적립 대상인 카드) 기본으로
-            # 그 혜택을 제안한다. 단, "특별적립 전용"으로 자동매칭 가맹점을
-            # 따로 등록해둔 혜택(예: 더모아 특별적립)은 키워드가 있을 때만
-            # 골라야 하므로, 키워드가 비어있는(catch-all) 혜택만 후보로 삼는다.
-            for b in benefits_by_card.get(card["id"], []):
-                if b["calc_mode"] == "change_under_1000" and not b["merchant_keywords"]:
-                    matched_benefit = b
-                    matched_doubled = bool(b["always_doubled"])
-                    break
+            # 그 혜택을 제안한다. 키워드가 비어있는(catch-all) 혜택이 있으면
+            # 그걸 우선 쓰고("특별적립 전용" 혜택을 따로 등록해둔 경우 대비),
+            # 없으면(대부분의 경우 - 혜택이 하나뿐인 경우) 아무 change_under_1000
+            # 혜택이나 후보로 삼는다 - 혜택을 하나만 등록한 사람도 자동매칭돼야 하므로.
+            change_benefits = [
+                b for b in benefits_by_card.get(card["id"], []) if b["calc_mode"] == "change_under_1000"
+            ]
+            catch_all = [b for b in change_benefits if not b["merchant_keywords"]]
+            fallback_pool = catch_all or change_benefits
+            if fallback_pool:
+                matched_benefit = fallback_pool[0]
+                matched_doubled = bool(matched_benefit["always_doubled"])
 
         items.append({
             "id": r["id"],
@@ -142,12 +147,31 @@ def _serialize_cards(conn):
         start, end = cycle_bounds(card["reset_day"])
 
         this_month = current_year_month()
-        perf_row = conn.execute(
-            "SELECT total_spend FROM performance WHERE card_id = ? AND year_month = ?",
-            (card["id"], this_month),
-        ).fetchone()
+        prev_month = previous_year_month()
         perf_threshold = card["perf_threshold"] or 0
-        perf_spend = perf_row["total_spend"] if perf_row else 0
+
+        # 실적은 손으로 입력할 필요 없이, 그동안 받은 결제 알림(배정됐거나
+        # "혜택 없음" 처리된 것 - 즉 실제로 확인된 결제) 금액을 합산해서 자동
+        # 계산한다. 카드사 실적은 "지난달(전월)" 완결된 금액을 기준으로 이번 달
+        # 혜택 구간이 정해지므로, 지난달 알림 합계를 그 기준으로 쓴다.
+        auto_prev_spend = conn.execute(
+            """SELECT COALESCE(SUM(amount), 0) AS total FROM inbox_items
+               WHERE card_id = ? AND status IN ('assigned', 'no_benefit')
+               AND substr(occurred_at, 1, 7) = ?""",
+            (card["id"], prev_month),
+        ).fetchone()["total"]
+        auto_this_month_spend = conn.execute(
+            """SELECT COALESCE(SUM(amount), 0) AS total FROM inbox_items
+               WHERE card_id = ? AND status IN ('assigned', 'no_benefit')
+               AND substr(occurred_at, 1, 7) = ?""",
+            (card["id"], this_month),
+        ).fetchone()["total"]
+
+        manual_row = conn.execute(
+            "SELECT total_spend FROM performance WHERE card_id = ? AND year_month = ?",
+            (card["id"], prev_month),
+        ).fetchone()
+        perf_spend = manual_row["total_spend"] if manual_row else auto_prev_spend
 
         benefits = conn.execute(
             "SELECT * FROM benefits WHERE card_id = ? ORDER BY sort_order ASC, id ASC",
@@ -231,8 +255,10 @@ def _serialize_cards(conn):
             "reset_day": card["reset_day"],
             "perf_threshold": perf_threshold,
             "perf_spend": perf_spend,
-            "perf_month": this_month,
+            "perf_month": prev_month,
+            "perf_auto": manual_row is None,
             "perf_met": (perf_spend >= perf_threshold) if perf_threshold > 0 else None,
+            "this_month_spend": auto_this_month_spend,
             "memo": card["memo"],
             "cycle_start": start.isoformat(),
             "cycle_end": (end - timedelta(days=1)).isoformat(),
@@ -343,7 +369,7 @@ def update_performance(card_id):
     if total_spend < 0:
         return jsonify({"error": "사용액은 0 이상이어야 합니다."}), 400
 
-    year_month = (data.get("year_month") or "").strip() or current_year_month()
+    year_month = (data.get("year_month") or "").strip() or previous_year_month()
 
     conn = get_conn()
     try:

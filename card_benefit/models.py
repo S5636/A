@@ -129,6 +129,12 @@ def current_year_month(today: date = None) -> str:
     return f"{today.year:04d}-{today.month:02d}"
 
 
+def previous_year_month(today: date = None) -> str:
+    today = today or date.today()
+    y, m = (today.year - 1, 12) if today.month == 1 else (today.year, today.month - 1)
+    return f"{y:04d}-{m:02d}"
+
+
 def get_setting(conn, key, default=""):
     row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else default

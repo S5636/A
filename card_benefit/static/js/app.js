@@ -193,11 +193,15 @@
     if (!card.perf_threshold) return "";
     const cls = card.perf_met ? "met" : "unmet";
     const label = card.perf_met ? "실적 충족" : "실적 부족";
+    const autoTag = card.perf_auto ? " (자동계산)" : "";
     return `
       <div class="perf-row">
         <span class="perf-badge ${cls}">${label}</span>
-        <span>지난달 ${fmt(card.perf_spend)}원 / ${fmt(card.perf_threshold)}원</span>
+        <span>지난달 ${fmt(card.perf_spend)}원 / ${fmt(card.perf_threshold)}원${autoTag}</span>
         <button class="perf-edit" data-id="${card.id}" data-spend="${card.perf_spend}">수정</button>
+      </div>
+      <div class="perf-row perf-row-next">
+        <span>이번달 누적 ${fmt(card.this_month_spend)}원 (다음달 구간에 반영됨)</span>
       </div>
     `;
   }
@@ -249,7 +253,7 @@
     const logsHtml = logsListHtml(b, unit);
 
     const rightSideHtml = b.unlimited
-      ? `<div class="benefit-remaining">이번 달 ${fmt(b.used)}${unit} 적립</div>`
+      ? `<div class="benefit-remaining remaining-good">이번 달 ${fmt(b.used)}${unit} 적립</div>`
       : (() => {
           const cls = statusClass(b.percent, b.over_limit);
           const remainingText = b.over_limit
