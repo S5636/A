@@ -58,6 +58,10 @@
     return div.innerHTML;
   }
 
+  function highlightDouble(escapedText) {
+    return escapedText.replace(/\(2배\)/g, '<span class="badge-double">2배 특별적립</span>');
+  }
+
   function render() {
     const scrollX = window.scrollX;
     const scrollY = window.scrollY;
@@ -220,8 +224,8 @@
           // 앞에 금액을 또 안 보여준다 (같은 금액이 두 번 찍히는 것 방지)
           const hasBreakdown = l.memo && l.memo.includes("→");
           const valuePart = hasBreakdown
-            ? escapeHtml(l.memo)
-            : `${fmt(l.used_value)}${unit}${l.memo ? " · " + escapeHtml(l.memo) : ""}`;
+            ? highlightDouble(escapeHtml(l.memo))
+            : `${fmt(l.used_value)}${unit}${l.memo ? " · " + highlightDouble(escapeHtml(l.memo)) : ""}`;
           return `
           <div class="log-item">
             <span>${dateLabel} · ${merchantLabel}${valuePart}</span>

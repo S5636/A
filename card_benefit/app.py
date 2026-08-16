@@ -32,6 +32,7 @@ from models import (
     rate_table_entry_by_label,
     parse_amount_cell,
     parse_date_cell,
+    parse_datetime_cell,
     parse_notification,
     previous_year_month,
     set_setting,
@@ -87,7 +88,11 @@ def serialize_inbox(conn):
             fallback_pool = catch_all or change_benefits
             if fallback_pool:
                 matched_benefit = fallback_pool[0]
-                matched_doubled = bool(matched_benefit["always_doubled"])
+                # merchant_keywords가 있는 혜택은 "매칭되면 2배, 안 되면 1배"를
+                # 구분하려고 키워드를 등록해둔 것이므로, 여기(키워드 매칭 실패)로
+                # 온 이상 always_doubled를 적용하면 안 된다. always_doubled는
+                # 키워드가 아예 없는(=구분할 필요 없이 통째로 2배인) 혜택에만 쓴다.
+                matched_doubled = bool(matched_benefit["always_doubled"]) and not matched_benefit["merchant_keywords"]
 
         items.append({
             "id": r["id"],
@@ -1075,6 +1080,7 @@ def _import_statement(ws, header_info):
             if not used_at:
                 skipped.append(f"{i}행: 날짜를 확인할 수 없음")
                 continue
+            occurred_at = parse_datetime_cell(row[date_col] if date_col < len(row) else None) or used_at
 
             merchant = ""
             if merchant_col is not None and merchant_col < len(row) and row[merchant_col] is not None:
@@ -1096,7 +1102,7 @@ def _import_statement(ws, header_info):
             conn.execute(
                 """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at)
                    VALUES (?, ?, ?, '', ?, ?)""",
-                (raw_text, amount, last4, merchant, used_at),
+                (raw_text, amount, last4, merchant, occurred_at),
             )
             queued += 1
         conn.commit()

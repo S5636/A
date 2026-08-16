@@ -484,6 +484,52 @@ def parse_date_cell(value):
     return None
 
 
+def parse_datetime_cell(value):
+    """parse_date_cell과 같이 날짜를 인식하되, 셀에 시간까지 있으면
+    "YYYY-MM-DD HH:MM:SS"로 시간도 살려서 돌려준다. 카드사 이용내역서 엑셀에
+    "2026.08.15 23:11"처럼 시간이 같이 찍혀있는 경우, 결제 알림 시간표시에 쓴다.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, date):
+        return value.isoformat()
+
+    s = str(value).strip()
+    if not s:
+        return None
+
+    parts = s.split()
+    date_part = parts[0] if parts else s
+    time_part = parts[1] if len(parts) > 1 else ""
+
+    s_norm = date_part.replace(".", "-").replace("/", "-").strip("-")
+    parsed_date = None
+    for fmt in ("%Y-%m-%d", "%y-%m-%d"):
+        try:
+            parsed_date = datetime.strptime(s_norm, fmt).date()
+            break
+        except ValueError:
+            pass
+    if parsed_date is None:
+        digits = re.sub(r"\D", "", date_part)
+        if len(digits) == 8:
+            try:
+                parsed_date = datetime.strptime(digits, "%Y%m%d").date()
+            except ValueError:
+                return None
+        else:
+            return None
+
+    m = re.match(r"^(\d{1,2}):(\d{2})(?::(\d{2}))?$", time_part)
+    if m:
+        h, mi, se = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+        if 0 <= h < 24 and 0 <= mi < 60 and 0 <= se < 60:
+            return f"{parsed_date.isoformat()} {h:02d}:{mi:02d}:{se:02d}"
+    return parsed_date.isoformat()
+
+
 def _safe_date(year: int, month: int, day: int) -> date:
     last_day = calendar.monthrange(year, month)[1]
     return date(year, month, min(day, last_day))
