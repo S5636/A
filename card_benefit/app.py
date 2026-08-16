@@ -94,6 +94,15 @@ def serialize_inbox(conn):
                 # 키워드가 아예 없는(=구분할 필요 없이 통째로 2배인) 혜택에만 쓴다.
                 matched_doubled = bool(matched_benefit["always_doubled"]) and not matched_benefit["merchant_keywords"]
 
+        # 카드사 엑셀의 "이용구분"에 해외/할부라고 명시돼 있으면, 가맹점명으로
+        # 유추할 필요 없이 그 자체로 확실한 신호이므로 더모아형(잔돈 적립) 혜택은
+        # 무조건 특별적립(2배) 대상으로 본다(안내장 기준: 해외이용, 할부거래는
+        # 항상 2배).
+        if matched_benefit and matched_benefit["calc_mode"] == "change_under_1000":
+            usage_type = r["usage_type"] or ""
+            if "해외" in usage_type or "할부" in usage_type:
+                matched_doubled = True
+
         items.append({
             "id": r["id"],
             "raw_text": r["raw_text"],
@@ -1063,6 +1072,7 @@ def _import_statement(ws, header_info):
     merchant_col = header_info["merchant_col"]
     cardno_col = header_info["cardno_col"]
     approval_col = header_info.get("approval_col")
+    usage_type_col = header_info.get("usage_type_col")
 
     conn = get_conn()
     try:
@@ -1129,6 +1139,10 @@ def _import_statement(ws, header_info):
             if approval_col is not None and approval_col < len(row) and row[approval_col] not in (None, ""):
                 approval_no = str(row[approval_col]).strip()
 
+            usage_type = ""
+            if usage_type_col is not None and usage_type_col < len(row) and row[usage_type_col] not in (None, ""):
+                usage_type = str(row[usage_type_col]).strip()
+
             if approval_no:
                 if approval_no in seen_approval:
                     skipped.append(f"{i}행: 승인번호({approval_no})가 이미 등록되어 있어 중복으로 보고 건너뜀")
@@ -1145,9 +1159,9 @@ def _import_statement(ws, header_info):
             raw_text = " · ".join(raw_parts)
 
             conn.execute(
-                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at, approval_no)
-                   VALUES (?, ?, ?, '', ?, ?, ?)""",
-                (raw_text, amount, last4, merchant, occurred_at, approval_no),
+                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at, approval_no, usage_type)
+                   VALUES (?, ?, ?, '', ?, ?, ?, ?)""",
+                (raw_text, amount, last4, merchant, occurred_at, approval_no, usage_type),
             )
             queued += 1
         conn.commit()
