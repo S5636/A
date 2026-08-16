@@ -279,7 +279,8 @@
 
     const categoryUsageHtml = (b.category_usage && b.category_usage.length)
       ? `<div class="category-usage">${b.category_usage.map((c) => {
-          const limitPart = c.monthly_limit ? `/${fmt(c.monthly_limit)}회` : "회";
+          const denom = c.monthly_limit || c.daily_limit;
+          const limitPart = denom ? `/${fmt(denom)}회` : "회";
           return `${escapeHtml(c.label)} ${fmt(c.count)}${limitPart}`;
         }).join(" · ")}</div>`
       : "";
