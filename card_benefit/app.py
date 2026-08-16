@@ -1147,17 +1147,20 @@ def _import_statement(ws, header_info):
             if usage_type_col is not None and usage_type_col < len(row) and row[usage_type_col] not in (None, ""):
                 usage_type = str(row[usage_type_col]).strip()
 
+            # 승인번호가 있으면 승인번호로도, (카드뒤4자리+금액+날짜) 조합으로도
+            # 둘 다 확인한다 - 한쪽만 보면, 옛날에 승인번호 없이 들어간 내역과
+            # 지금 승인번호가 찍혀서 들어오는 내역을 서로 다른 걸로 오인해서
+            # 중복을 놓친다(승인번호 유무가 서로 다른 두 기록이 사실은 같은
+            # 결제인 경우).
+            combo = (last4, amount, used_at)
+            if (approval_no and approval_no in seen_approval) or combo in seen_combo:
+                reason = f"승인번호({approval_no})가 이미 등록되어 있어 중복으로 보고 건너뜀" if approval_no and approval_no in seen_approval \
+                    else "같은 카드·금액·날짜 내역이 이미 있어 중복으로 보고 건너뜀"
+                skipped.append(f"{i}행: {reason}")
+                continue
             if approval_no:
-                if approval_no in seen_approval:
-                    skipped.append(f"{i}행: 승인번호({approval_no})가 이미 등록되어 있어 중복으로 보고 건너뜀")
-                    continue
                 seen_approval.add(approval_no)
-            else:
-                combo = (last4, amount, used_at)
-                if combo in seen_combo:
-                    skipped.append(f"{i}행: 같은 카드·금액·날짜 내역이 이미 있어 중복으로 보고 건너뜀")
-                    continue
-                seen_combo.add(combo)
+            seen_combo.add(combo)
 
             raw_parts = [p for p in [merchant, f"{amount:,.0f}원", used_at] if p]
             raw_text = " · ".join(raw_parts)
