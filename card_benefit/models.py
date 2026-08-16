@@ -119,6 +119,7 @@ def init_db():
         _ensure_column(conn, "benefits", "rate_table", "rate_table TEXT DEFAULT ''")
         _ensure_column(conn, "usage_logs", "rate_category", "rate_category TEXT DEFAULT ''")
         _ensure_column(conn, "benefits", "always_doubled", "always_doubled INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "inbox_items", "approval_no", "approval_no TEXT DEFAULT ''")
         conn.commit()
     finally:
         conn.close()
@@ -358,6 +359,7 @@ _MERCHANT_HEADERS = ["가맹점명", "가맹점", "사용처", "이용가맹점"
 _CARDNO_HEADERS = ["카드번호", "카드no", "카드 no", "이용카드", "카드"]
 _CANCEL_STATUS_HEADERS = ["취소상태", "매입구분", "승인상태", "거래상태", "상태"]
 _CANCEL_KEYWORDS = ["취소", "실패", "거절"]
+_APPROVAL_HEADERS = ["승인번호", "승인번호(취소포함)", "거래번호", "승인no", "승인 no", "전표번호"]
 
 
 def _norm_cell(cell):
@@ -406,6 +408,7 @@ def find_statement_header(ws, max_scan=15):
                 "merchant_col": _match_col(cells, _MERCHANT_HEADERS),
                 "cardno_col": _match_col(cells, _CARDNO_HEADERS),
                 "status_col": _match_col(cells, _CANCEL_STATUS_HEADERS),
+                "approval_col": _match_col(cells, _APPROVAL_HEADERS),
             }
     return None
 

@@ -999,6 +999,13 @@ def _import_own_template(ws):
         ):
             benefit_lookup[(row["card_name"].strip(), row["benefit_name"].strip())] = row["benefit_id"]
 
+        # 같은 양식을 다시 올려도 중복으로 안 쌓이도록, 이미 있는 (혜택, 날짜,
+        # 금액, 메모) 조합을 미리 읽어둔다.
+        seen_combo = {
+            (r["benefit_id"], r["used_at"], r["used_value"], r["memo"] or "")
+            for r in conn.execute("SELECT benefit_id, used_at, used_value, memo FROM usage_logs")
+        }
+
         added = 0
         skipped = []
         for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
@@ -1006,6 +1013,7 @@ def _import_own_template(ws):
                 continue
             card_name, benefit_name, used_at, used_value = (list(row) + [None] * 4)[:4]
             memo = row[4] if len(row) > 4 else None
+            memo_str = str(memo).strip() if memo else ""
 
             key = ((str(card_name).strip() if card_name else ""), (str(benefit_name).strip() if benefit_name else ""))
             if key not in benefit_lookup:
@@ -1022,9 +1030,16 @@ def _import_own_template(ws):
                 skipped.append(f"{i}행: 날짜가 올바르지 않음 (YYYY-MM-DD)")
                 continue
 
+            benefit_id = benefit_lookup[key]
+            combo = (benefit_id, used_at_str, used_value, memo_str)
+            if combo in seen_combo:
+                skipped.append(f"{i}행: 같은 혜택·날짜·금액 내역이 이미 있어 중복으로 보고 건너뜀")
+                continue
+            seen_combo.add(combo)
+
             conn.execute(
                 "INSERT INTO usage_logs (benefit_id, used_value, used_at, memo) VALUES (?, ?, ?, ?)",
-                (benefit_lookup[key], used_value, used_at_str, (str(memo).strip() if memo else "")),
+                (benefit_id, used_value, used_at_str, memo_str),
             )
             added += 1
         conn.commit()
@@ -1047,6 +1062,7 @@ def _import_statement(ws, header_info):
     amount_col = header_info["amount_col"]
     merchant_col = header_info["merchant_col"]
     cardno_col = header_info["cardno_col"]
+    approval_col = header_info.get("approval_col")
 
     conn = get_conn()
     try:
@@ -1055,6 +1071,19 @@ def _import_statement(ws, header_info):
                FROM cards c LEFT JOIN benefits b ON b.card_id = c.id
                WHERE c.last4 != '' GROUP BY c.id"""
         ).fetchall()
+
+        # 같은 엑셀을 실수로(또는 빠진 내역을 채우려고) 다시 올려도 중복으로
+        # 안 쌓이도록, 이미 등록된 승인번호는 미리 다 읽어둔다. 승인번호 컬럼이
+        # 없는 엑셀이면 (카드뒤4자리+가맹점+금액+날짜) 조합으로 대신 막는다.
+        seen_approval = {
+            r["approval_no"] for r in conn.execute(
+                "SELECT approval_no FROM inbox_items WHERE approval_no != ''"
+            )
+        }
+        seen_combo = {
+            (r["last4"], r["merchant"], r["amount"], (r["occurred_at"] or "")[:10])
+            for r in conn.execute("SELECT last4, merchant, amount, occurred_at FROM inbox_items")
+        }
 
         queued = 0
         skipped = []
@@ -1096,13 +1125,29 @@ def _import_statement(ws, header_info):
                     skipped.append(f"{i}행: \"{matched['name']}\"는 추적할 혜택이 등록되어 있지 않아 건너뜀")
                     continue
 
+            approval_no = ""
+            if approval_col is not None and approval_col < len(row) and row[approval_col] not in (None, ""):
+                approval_no = str(row[approval_col]).strip()
+
+            if approval_no:
+                if approval_no in seen_approval:
+                    skipped.append(f"{i}행: 승인번호({approval_no})가 이미 등록되어 있어 중복으로 보고 건너뜀")
+                    continue
+                seen_approval.add(approval_no)
+            else:
+                combo = (last4, merchant, amount, used_at)
+                if combo in seen_combo:
+                    skipped.append(f"{i}행: 같은 카드·가맹점·금액·날짜 내역이 이미 있어 중복으로 보고 건너뜀")
+                    continue
+                seen_combo.add(combo)
+
             raw_parts = [p for p in [merchant, f"{amount:,.0f}원", used_at] if p]
             raw_text = " · ".join(raw_parts)
 
             conn.execute(
-                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at)
-                   VALUES (?, ?, ?, '', ?, ?)""",
-                (raw_text, amount, last4, merchant, occurred_at),
+                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at, approval_no)
+                   VALUES (?, ?, ?, '', ?, ?, ?)""",
+                (raw_text, amount, last4, merchant, occurred_at, approval_no),
             )
             queued += 1
         conn.commit()
