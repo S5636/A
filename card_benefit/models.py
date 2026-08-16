@@ -117,6 +117,7 @@ def init_db():
         _ensure_column(conn, "benefits", "discount_percent", "discount_percent REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "benefits", "per_txn_cap", "per_txn_cap REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "benefits", "rate_table", "rate_table TEXT DEFAULT ''")
+        _ensure_column(conn, "usage_logs", "rate_category", "rate_category TEXT DEFAULT ''")
         conn.commit()
     finally:
         conn.close()
@@ -254,31 +255,32 @@ def match_benefit_keyword(merchant: str, merchant_keywords: str) -> bool:
 
 def match_rate_table(merchant: str, rate_table_json: str, default_percent: float = 0, default_cap: float = 0):
     """가맹점명과 rate_table(JSON [[키워드(쉼표구분), 할인율], ...] 또는
-    [[키워드, 할인율, 건당한도], ...])을 받아서 해당 업종의 (할인율, 건당한도)를
-    돌려준다. Daily Plan/Monthly Plan처럼 하나의 혜택 안에서 업종별로 할인율(과
-    건당한도)이 다른 경우에 쓴다. 매칭 안 되면 (default_percent, default_cap).
+    [[키워드, 할인율, 건당한도], ...] 또는 [[키워드, 할인율, 건당한도, 일한도, 월한도], ...])을
+    받아서 해당 업종의 (할인율, 건당한도, 일 횟수한도, 월 횟수한도, 카테고리키)를 돌려준다.
+    Daily Plan/Monthly Plan처럼 하나의 혜택 안에서 업종별로 할인율(과 한도)이 다른
+    경우에 쓴다. 매칭 안 되면 (default_percent, default_cap, 0, 0, None) - 카테고리별
+    횟수한도는 기본값에는 적용되지 않는다.
     """
-    if not rate_table_json or not merchant:
-        return default_percent, default_cap
-    try:
-        rows = json.loads(rate_table_json)
-    except (ValueError, TypeError):
-        return default_percent, default_cap
-    if not isinstance(rows, list):
-        return default_percent, default_cap
-
-    merchant_lower = merchant.lower()
-    for entry in rows:
-        if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3):
-            continue
-        keywords = entry[0]
-        percent = entry[1]
-        cap = entry[2] if len(entry) == 3 else default_cap
-        for kw in str(keywords).split(","):
-            kw = kw.strip().lower()
-            if kw and kw in merchant_lower:
-                return percent, cap
-    return default_percent, default_cap
+    if rate_table_json and merchant:
+        try:
+            rows = json.loads(rate_table_json)
+        except (ValueError, TypeError):
+            rows = None
+        if isinstance(rows, list):
+            merchant_lower = merchant.lower()
+            for entry in rows:
+                if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3, 4, 5):
+                    continue
+                keywords = entry[0]
+                percent = entry[1]
+                cap = entry[2] if len(entry) >= 3 else default_cap
+                daily_limit = entry[3] if len(entry) >= 4 else 0
+                monthly_limit = entry[4] if len(entry) >= 5 else 0
+                for kw in str(keywords).split(","):
+                    kw = kw.strip().lower()
+                    if kw and kw in merchant_lower:
+                        return percent, cap, daily_limit, monthly_limit, str(keywords)
+    return default_percent, default_cap, 0, 0, None
 
 
 def annotate_merchant(name: str) -> str:

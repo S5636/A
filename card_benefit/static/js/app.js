@@ -184,7 +184,7 @@
     return `
       <div class="perf-row">
         <span class="perf-badge ${cls}">${label}</span>
-        <span>이번 달 ${fmt(card.perf_spend)}원 / ${fmt(card.perf_threshold)}원</span>
+        <span>지난달 ${fmt(card.perf_spend)}원 / ${fmt(card.perf_threshold)}원</span>
         <button class="perf-edit" data-id="${card.id}" data-spend="${card.perf_spend}">수정</button>
       </div>
     `;
@@ -386,7 +386,7 @@
     render();
   });
 
-  // ---- 전월실적 이번 달 사용액 입력 모달 ----
+  // ---- 전월실적(지난달 사용액) 입력 모달 ----
   const perfModal = document.getElementById("perf-modal");
   let editingPerfCardId = null;
 
@@ -502,10 +502,10 @@
     if (!Array.isArray(rows)) return [defaultPercent, defaultCap];
     const merchantLower = merchant.toLowerCase();
     for (const entry of rows) {
-      if (!Array.isArray(entry) || (entry.length !== 2 && entry.length !== 3)) continue;
+      if (!Array.isArray(entry) || entry.length < 2 || entry.length > 5) continue;
       const keywords = entry[0];
       const percent = entry[1];
-      const cap = entry.length === 3 ? entry[2] : defaultCap;
+      const cap = entry.length >= 3 ? entry[2] : defaultCap;
       for (const kw of String(keywords).split(",")) {
         const k = kw.trim().toLowerCase();
         if (k && merchantLower.includes(k)) return [percent, cap];

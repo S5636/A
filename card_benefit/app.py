@@ -364,8 +364,9 @@ def _clean_tier_table(raw):
 
 
 def _clean_rate_table(raw):
-    """[["키워드1,키워드2",할인율], ...] 또는 [["키워드",할인율,건당한도], ...]
-    형태인지 검증하고 정돈된 JSON 문자열(또는 '')을 돌려준다."""
+    """[["키워드1,키워드2",할인율], ...] 또는 [["키워드",할인율,건당한도], ...] 또는
+    [["키워드",할인율,건당한도,일한도,월한도], ...] 형태인지 검증하고 정돈된 JSON
+    문자열(또는 '')을 돌려준다."""
     raw = (raw or "").strip()
     if not raw:
         return ""
@@ -375,15 +376,18 @@ def _clean_rate_table(raw):
             raise ValueError
         cleaned = []
         for r in rows:
-            if len(r) == 3:
-                cleaned.append([str(r[0]), float(r[1]), float(r[2])])
-            else:
-                cleaned.append([str(r[0]), float(r[1])])
+            if len(r) not in (2, 3, 4, 5):
+                raise ValueError
+            row = [str(r[0]), float(r[1])]
+            for extra in r[2:]:
+                row.append(float(extra))
+            cleaned.append(row)
     except (ValueError, TypeError, IndexError, KeyError):
         raise ValueError(
             "업종별 할인율 형식이 올바르지 않습니다. "
             '예: [["쇼핑몰,백화점,이커머스",10],["버스,지하철,택시",5]] '
-            '(건당한도가 카테고리마다 다르면 [["공과금",10,50000],["디지털구독",20,10000]]처럼 3번째 값 추가 가능)'
+            '(건당한도는 3번째 값, 일/월 횟수한도는 4·5번째 값으로 추가 가능: '
+            '[["쇼핑",10,50000,1,5]])'
         )
     return json.dumps(cleaned, ensure_ascii=False)
 
@@ -525,31 +529,54 @@ def _duplicate_merchant_today(conn, benefit_id, used_at, merchant):
     return row is not None
 
 
-def _apply_calc_mode(benefit, raw_value, doubled, memo, merchant=""):
+def _category_usage_count(conn, benefit_id, category, used_at, monthly=False):
+    """rate_table 업종(category)별로 오늘(또는 이번 달) 몇 번 사용됐는지 센다.
+    Daily Plan처럼 "업종별 일 1회, 월 5회까지"인 경우 한도 초과 여부 확인에 쓴다."""
+    if monthly:
+        row = conn.execute(
+            """SELECT COUNT(*) AS c FROM usage_logs
+               WHERE benefit_id = ? AND rate_category = ? AND substr(used_at, 1, 7) = ?""",
+            (benefit_id, category, used_at[:7]),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM usage_logs WHERE benefit_id = ? AND rate_category = ? AND used_at = ?",
+            (benefit_id, category, used_at),
+        ).fetchone()
+    return row["c"]
+
+
+def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, merchant="", used_at=""):
     """혜택의 calc_mode에 따라 입력값(결제금액 등)을 실제 한도 소진값으로 변환한다.
 
     "raw"는 입력값을 그대로 쓰고, 나머지는 결제금액을 자동으로 실제
     혜택금액(잔돈/할인액)으로 환산한다 - 결제금액 총액이 그대로 한도를
-    깎아먹지 않도록.
+    깎아먹지 않도록. (used_value, memo, rate_category, error) 를 돌려준다.
+    error가 있으면(업종별 일/월 횟수 한도 초과 등) 기록하지 않고 그 문구를 보여준다.
     """
     if benefit["calc_mode"] == "change_under_1000":
         earned = compute_change_earned(raw_value, doubled)
         parts = [f"결제 {raw_value:,.0f}원 → 잔돈 {earned:,.0f}원{'(2배)' if doubled else ''}"]
         if memo:
             parts.append(memo)
-        return earned, " · ".join(parts)
+        return earned, " · ".join(parts), "", None
 
     if benefit["calc_mode"] == "percent_discount":
-        percent, cap = match_rate_table(
+        percent, cap, daily_limit, monthly_limit, category = match_rate_table(
             merchant, benefit["rate_table"], benefit["discount_percent"], benefit["per_txn_cap"]
         )
+        if category and used_at:
+            if daily_limit and _category_usage_count(conn, benefit_id, category, used_at) >= daily_limit:
+                return None, None, None, f"이 업종은 하루 {daily_limit:g}회까지만 할인되는데, 오늘 이미 한도를 채워서 이 결제는 할인 대상이 아닙니다."
+            if monthly_limit and _category_usage_count(conn, benefit_id, category, used_at, monthly=True) >= monthly_limit:
+                return None, None, None, f"이 업종은 이번 달 {monthly_limit:g}회까지만 할인되는데, 이미 한도를 채워서 이 결제는 할인 대상이 아닙니다."
         earned = compute_percent_discount(raw_value, percent, cap)
         parts = [f"결제 {raw_value:,.0f}원 → 할인 {earned:,.0f}원({percent:g}%)"]
         if memo:
             parts.append(memo)
-        return earned, " · ".join(parts)
+        return earned, " · ".join(parts), (category or ""), None
 
-    return raw_value, memo
+    return raw_value, memo, "", None
 
 
 @app.route("/api/benefits/<int:benefit_id>/use", methods=["POST"])
@@ -584,11 +611,16 @@ def log_usage(benefit_id):
                          "이 결제는 적립 대상이 아닙니다."
             }), 400
 
-        used_value, memo = _apply_calc_mode(b, raw_value, bool(data.get("doubled")), memo, merchant)
+        used_value, memo, rate_category, error = _apply_calc_mode(
+            conn, benefit_id, b, raw_value, bool(data.get("doubled")), memo, merchant, used_at
+        )
+        if error:
+            return jsonify({"error": error}), 400
 
         conn.execute(
-            "INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo) VALUES (?, ?, ?, ?, ?)",
-            (benefit_id, used_value, used_at, merchant, memo),
+            """INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo, rate_category)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (benefit_id, used_value, used_at, merchant, memo, rate_category),
         )
         conn.commit()
     finally:
@@ -731,12 +763,16 @@ def assign_inbox_item(item_id):
                          "이 결제는 적립 대상이 아닙니다. 알림을 무시 처리해주세요."
             }), 400
 
-        used_value, memo = _apply_calc_mode(benefit, raw_value, bool(data.get("doubled")), memo, merchant)
+        used_value, memo, rate_category, error = _apply_calc_mode(
+            conn, benefit_id, benefit, raw_value, bool(data.get("doubled")), memo, merchant, used_at
+        )
+        if error:
+            return jsonify({"error": error}), 400
 
         conn.execute(
-            """INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo, source_inbox_id)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (benefit_id, used_value, used_at, merchant, memo, item_id),
+            """INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo, source_inbox_id, rate_category)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (benefit_id, used_value, used_at, merchant, memo, item_id, rate_category),
         )
         conn.execute(
             "UPDATE inbox_items SET status = 'assigned', card_id = ?, benefit_id = ? WHERE id = ?",
