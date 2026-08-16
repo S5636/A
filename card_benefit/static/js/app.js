@@ -269,6 +269,13 @@
       ? `한도 없음(무제한)`
       : `한도 ${fmt(b.limit_value)}${unit} 중 ${fmt(b.used)}${unit} 사용`;
 
+    const categoryUsageHtml = (b.category_usage && b.category_usage.length)
+      ? `<div class="category-usage">${b.category_usage.map((c) => {
+          const limitPart = c.monthly_limit ? `/${fmt(c.monthly_limit)}회` : "회";
+          return `${escapeHtml(c.label)} ${fmt(c.count)}${limitPart}`;
+        }).join(" · ")}</div>`
+      : "";
+
     return `
       <div class="benefit" data-benefit-id="${b.id}">
         <div class="benefit-top">
@@ -279,6 +286,7 @@
           ${rightSideHtml}
         </div>
         ${progressHtml}
+        ${categoryUsageHtml}
         <div class="benefit-sub">
           <span>${subText}</span>
           <div class="benefit-buttons">

@@ -28,6 +28,7 @@ from models import (
     is_cancelled_status,
     match_benefit_keyword,
     match_rate_table,
+    parse_rate_table_categories,
     parse_amount_cell,
     parse_date_cell,
     parse_notification,
@@ -177,6 +178,25 @@ def _serialize_cards(conn):
             remaining = None if unlimited else limit_value - used
             percent = None if unlimited else max(0, min(100, round(used / limit_value * 100))) if limit_value > 0 else 0
 
+            category_usage = None
+            if b["calc_mode"] == "percent_discount" and b["rate_table"]:
+                categories = parse_rate_table_categories(b["rate_table"])
+                if categories:
+                    counts = {}
+                    for l in logs:
+                        cat = l["rate_category"]
+                        if cat:
+                            counts[cat] = counts.get(cat, 0) + 1
+                    category_usage = [
+                        {
+                            "label": c["label"],
+                            "count": counts.get(c["label"], 0),
+                            "daily_limit": c["daily_limit"],
+                            "monthly_limit": c["monthly_limit"],
+                        }
+                        for c in categories
+                    ]
+
             benefit_list.append({
                 "id": b["id"],
                 "card_id": b["card_id"],
@@ -192,6 +212,7 @@ def _serialize_cards(conn):
                 "discount_percent": b["discount_percent"],
                 "per_txn_cap": b["per_txn_cap"],
                 "rate_table": b["rate_table"],
+                "category_usage": category_usage,
                 "always_doubled": bool(b["always_doubled"]),
                 "used": used,
                 "remaining": remaining,

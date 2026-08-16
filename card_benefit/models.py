@@ -289,6 +289,38 @@ def match_rate_table(merchant: str, rate_table_json: str, default_percent: float
     return default_percent, default_cap, 0, 0, None
 
 
+def parse_rate_table_categories(rate_table_json: str):
+    """rate_table JSON에 정의된 업종(카테고리) 전체를 [{"label","percent","daily_limit",
+    "monthly_limit"}, ...] 목록으로 돌려준다. 가맹점 매칭과 무관하게, 혜택 카드에
+    "쇼핑 2/5회 · 이동 1/5회"처럼 업종별 사용 현황을 보여줄 때 쓴다.
+    """
+    if not rate_table_json:
+        return []
+    try:
+        rows = json.loads(rate_table_json)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(rows, list):
+        return []
+
+    categories = []
+    for entry in rows:
+        if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3, 4, 5):
+            continue
+        raw_keywords = str(entry[0])
+        label = raw_keywords.split(":", 1)[0] if ":" in raw_keywords else raw_keywords
+        percent = entry[1]
+        daily_limit = entry[3] if len(entry) >= 4 else 0
+        monthly_limit = entry[4] if len(entry) >= 5 else 0
+        categories.append({
+            "label": label,
+            "percent": percent,
+            "daily_limit": daily_limit,
+            "monthly_limit": monthly_limit,
+        })
+    return categories
+
+
 def annotate_merchant(name: str) -> str:
     if not name:
         return name

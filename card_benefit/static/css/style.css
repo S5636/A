@@ -168,6 +168,8 @@ body { padding-bottom: 40px; }
 .progress-fill.warn { background: var(--warning); }
 .progress-fill.bad { background: var(--critical); }
 
+.category-usage { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+
 .benefit-sub { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; font-size: 11.5px; color: var(--text-muted); }
 .benefit-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
 
