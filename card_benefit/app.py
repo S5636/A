@@ -1082,17 +1082,21 @@ def _import_statement(ws, header_info):
                WHERE c.last4 != '' GROUP BY c.id"""
         ).fetchall()
 
-        # 같은 엑셀을 실수로(또는 빠진 내역을 채우려고) 다시 올려도 중복으로
-        # 안 쌓이도록, 이미 등록된 승인번호는 미리 다 읽어둔다. 승인번호 컬럼이
-        # 없는 엑셀이면 (카드뒤4자리+가맹점+금액+날짜) 조합으로 대신 막는다.
+        # 같은 엑셀을 실수로(또는 빠진 내역을 채우려고) 다시 올려도, 그리고
+        # 이미 폰 알림(자동수집)으로 들어와 있는 같은 결제를 엑셀로 또 올려도
+        # 중복으로 안 쌓이도록 막는다. 승인번호가 있으면 그걸로, 없으면
+        # (카드뒤4자리+금액+날짜) 조합으로 막는다 - 가맹점명은 일부러 뺐다.
+        # 폰 알림은 "스타벅스 강남점"처럼, 엑셀은 "주식회사 스타벅스코리아"처럼
+        # 같은 결제를 서로 다른 문구로 남기는 경우가 많아서, 가맹점명까지
+        # 똑같아야 막는 조건이면 정작 이런 교차 중복을 못 걸러낸다.
         seen_approval = {
             r["approval_no"] for r in conn.execute(
                 "SELECT approval_no FROM inbox_items WHERE approval_no != ''"
             )
         }
         seen_combo = {
-            (r["last4"], r["merchant"], r["amount"], (r["occurred_at"] or "")[:10])
-            for r in conn.execute("SELECT last4, merchant, amount, occurred_at FROM inbox_items")
+            (r["last4"], r["amount"], (r["occurred_at"] or "")[:10])
+            for r in conn.execute("SELECT last4, amount, occurred_at FROM inbox_items")
         }
 
         queued = 0
@@ -1149,9 +1153,9 @@ def _import_statement(ws, header_info):
                     continue
                 seen_approval.add(approval_no)
             else:
-                combo = (last4, merchant, amount, used_at)
+                combo = (last4, amount, used_at)
                 if combo in seen_combo:
-                    skipped.append(f"{i}행: 같은 카드·가맹점·금액·날짜 내역이 이미 있어 중복으로 보고 건너뜀")
+                    skipped.append(f"{i}행: 같은 카드·금액·날짜 내역이 이미 있어 중복으로 보고 건너뜀")
                     continue
                 seen_combo.add(combo)
 
