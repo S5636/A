@@ -296,7 +296,13 @@ def _serialize_cards(conn):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    # 업데이트할 때마다 폰 브라우저가 예전에 캐시해둔 js/css를 계속
+    # 쓰는 바람에 화면이 안 바뀐 것처럼 보이는 문제가 있어서, 파일이
+    # 바뀔 때마다 값이 달라지는 버전 문자열을 붙여 강제로 새로 받게 한다.
+    js_path = os.path.join(app.static_folder, "js", "app.js")
+    css_path = os.path.join(app.static_folder, "css", "style.css")
+    asset_version = str(int(max(os.path.getmtime(js_path), os.path.getmtime(css_path))))
+    return render_template("index.html", asset_version=asset_version)
 
 
 @app.route("/api/state")
