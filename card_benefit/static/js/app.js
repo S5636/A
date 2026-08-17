@@ -106,8 +106,8 @@
     const monthLabel = `${new Date().getMonth() + 1}월`;
     document.getElementById("summary-earn-label").textContent = `${monthLabel} 적립`;
     document.getElementById("summary-cashback-label").textContent = `${monthLabel} 할인·캐시백`;
-    document.getElementById("summary-earn-value").textContent = `${fmt(earn)}원`;
-    document.getElementById("summary-cashback-value").textContent = `${fmt(cashback)}원`;
+    document.getElementById("summary-earn-value").textContent = `₩${fmt(earn)}`;
+    document.getElementById("summary-cashback-value").textContent = `₩${fmt(cashback)}`;
     document.getElementById("summary-rate-value").textContent = `${rate.toFixed(1)}%`;
 
     const jumpRow = document.getElementById("summary-jump-row");
