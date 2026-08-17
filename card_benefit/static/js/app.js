@@ -38,6 +38,20 @@
     return (name || "").replace(/신한카드\s*/g, "").replace(/\s*\([^)]*\)/g, "").trim();
   }
 
+  const CARD_NICKNAMES = [
+    [/더모아|the more/i, "더모아"],
+    [/discount plan|디스카운트/i, "디카플"],
+    [/lady classic|레이디\s*클래식/i, "더레클"],
+    [/네이버/i, "네이버"],
+  ];
+
+  function cardNickname(name) {
+    for (const [pattern, nick] of CARD_NICKNAMES) {
+      if (pattern.test(name || "")) return nick;
+    }
+    return shortCardName(name);
+  }
+
   function shortBenefitName(name) {
     return (name || "").replace(/\s*\([^)]*\)/g, "").trim();
   }
@@ -95,7 +109,7 @@
     const jumpRow = document.getElementById("summary-jump-row");
     jumpRow.innerHTML = state.cards.map((card, idx) => `
       <button class="jump-btn" data-card-id="${card.id}" style="border-color:${CARD_COLORS[idx % CARD_COLORS.length]};color:${CARD_COLORS[idx % CARD_COLORS.length]};">
-        ${escapeHtml(shortCardName(card.name))}
+        ${escapeHtml(cardNickname(card.name))}
       </button>
     `).join("");
     jumpRow.querySelectorAll(".jump-btn").forEach((btn) =>
