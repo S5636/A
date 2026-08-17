@@ -88,23 +88,27 @@
     requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
   }
 
-  // ---- 최상단 이번 달 적립/캐시백 합계 ----
+  // ---- 최상단 이번 달 적립/캐시백/혜택률 합계 ----
   function renderMonthlySummary() {
     const section = document.getElementById("monthly-summary");
     let earn = 0;
     let cashback = 0;
+    let totalSpend = 0;
     state.cards.forEach((card) => {
+      totalSpend += card.this_month_spend || 0;
       card.benefits.forEach((b) => {
         if (b.calc_mode === "change_under_1000") earn += b.used || 0;
         else if (b.calc_mode === "percent_discount") cashback += b.used || 0;
       });
     });
+    const rate = totalSpend > 0 ? ((earn + cashback) / totalSpend * 100) : 0;
     section.style.display = state.cards.length ? "block" : "none";
     const monthLabel = `${new Date().getMonth() + 1}월`;
     document.getElementById("summary-earn-label").textContent = `${monthLabel} 적립`;
     document.getElementById("summary-cashback-label").textContent = `${monthLabel} 할인·캐시백`;
     document.getElementById("summary-earn-value").textContent = `${fmt(earn)}원`;
     document.getElementById("summary-cashback-value").textContent = `${fmt(cashback)}원`;
+    document.getElementById("summary-rate-value").textContent = `${rate.toFixed(1)}%`;
 
     const jumpRow = document.getElementById("summary-jump-row");
     jumpRow.innerHTML = state.cards.map((card, idx) => `

@@ -120,6 +120,7 @@ def init_db():
         _ensure_column(conn, "benefits", "rate_table", "rate_table TEXT DEFAULT ''")
         _ensure_column(conn, "usage_logs", "rate_category", "rate_category TEXT DEFAULT ''")
         _ensure_column(conn, "benefits", "always_doubled", "always_doubled INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "benefits", "memo_edited_by_user", "memo_edited_by_user INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "inbox_items", "approval_no", "approval_no TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "usage_type", "usage_type TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "source", "source TEXT DEFAULT ''")

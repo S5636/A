@@ -574,14 +574,19 @@ def update_benefit(benefit_id):
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
         always_doubled = 1 if data.get("always_doubled", b["always_doubled"]) else 0
+        new_memo = (data.get("memo", b["memo"]) or "").strip()
+        # 사용자가 설명(memo)을 실제로 바꾼 경우에만 "직접 수정함" 표시를 남긴다.
+        # 이 표시가 있어야 update.py가 나중에 안내장 기준 설명으로 덮어쓰지 않고
+        # 사용자가 쓴 내용을 지켜준다.
+        memo_edited_by_user = 1 if new_memo != (b["memo"] or "") else b["memo_edited_by_user"]
 
         conn.execute(
             """UPDATE benefits SET name = ?, limit_type = ?, limit_value = ?, memo = ?, merchant_keywords = ?,
                tier_table = ?, calc_mode = ?, discount_percent = ?, per_txn_cap = ?, rate_table = ?,
-               always_doubled = ? WHERE id = ?""",
+               always_doubled = ?, memo_edited_by_user = ? WHERE id = ?""",
             (
                 name, limit_type, limit_value,
-                (data.get("memo", b["memo"]) or "").strip(),
+                new_memo,
                 (data.get("merchant_keywords", b["merchant_keywords"]) or "").strip(),
                 tier_table,
                 calc_mode,
@@ -589,6 +594,7 @@ def update_benefit(benefit_id):
                 per_txn_cap,
                 rate_table,
                 always_doubled,
+                memo_edited_by_user,
                 benefit_id,
             ),
         )
