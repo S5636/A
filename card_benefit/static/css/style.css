@@ -55,7 +55,6 @@ body { padding-bottom: 40px; }
   flex-wrap: wrap;
   margin-bottom: 18px;
   padding: 10px 0;
-  background: linear-gradient(var(--bg) 70%, transparent);
 }
 .app-title { display: flex; align-items: baseline; gap: 10px; }
 .app-title h1 { font-size: 19px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
@@ -103,7 +102,6 @@ body { padding-bottom: 40px; }
 .summary-boxes { display: flex; gap: 8px; }
 .summary-box {
   flex: 1;
-  background: var(--surface);
   border: 1px solid var(--border);
   border-top: 3px solid var(--accent);
   border-radius: var(--radius-md);
