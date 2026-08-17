@@ -130,6 +130,7 @@ body { padding-bottom: 40px; }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 18px 20px;
+  scroll-margin-top: 84px; /* 상단 고정 헤더에 카드 제목이 가려지지 않게 */
 }
 
 .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
@@ -282,6 +283,22 @@ body { padding-bottom: 40px; }
 .upload-log { margin-top: 12px; font-size: 12px; }
 .upload-log-item { display: flex; justify-content: space-between; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); margin-bottom: 6px; }
 .upload-log-item.err { background: rgba(230,103,103,0.14); color: var(--critical); }
+
+.scroll-top-btn {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: rgba(24, 34, 56, 0.6);
+  color: var(--text-primary);
+  font-size: 20px;
+  backdrop-filter: blur(4px);
+  cursor: pointer;
+  z-index: 50;
+}
 
 /* ---------- Modal ---------- */
 .modal-backdrop {

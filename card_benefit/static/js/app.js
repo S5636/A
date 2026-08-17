@@ -939,6 +939,12 @@
     });
   });
 
+  const scrollTopBtn = document.getElementById("scroll-top-btn");
+  window.addEventListener("scroll", () => {
+    scrollTopBtn.style.display = window.scrollY > 300 ? "block" : "none";
+  });
+  scrollTopBtn.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+
   async function init() {
     state = await api("/api/state");
     render();
