@@ -180,7 +180,10 @@ def _serialize_cards(conn):
                    AND substr(occurred_at, 1, 7) = ?""",
                 (card["id"], year_month),
             ).fetchall()
-            return sum(r["amount"] for r in rows if not is_performance_excluded(r["merchant"]))
+            return sum(
+                r["amount"] for r in rows
+                if not is_performance_excluded(r["merchant"], card["perf_excluded_keywords"])
+            )
 
         auto_prev_spend = _auto_spend(prev_month)
         auto_this_month_spend = _auto_spend(this_month)

@@ -109,6 +109,7 @@ def init_db():
         conn.executescript(SCHEMA)
         _ensure_column(conn, "cards", "last4", "last4 TEXT DEFAULT ''")
         _ensure_column(conn, "cards", "perf_threshold", "perf_threshold REAL NOT NULL DEFAULT 0")
+        _ensure_column(conn, "cards", "perf_excluded_keywords", "perf_excluded_keywords TEXT DEFAULT ''")
         _ensure_column(conn, "benefits", "merchant_keywords", "merchant_keywords TEXT DEFAULT ''")
         _ensure_column(conn, "benefits", "tier_table", "tier_table TEXT DEFAULT ''")
         _ensure_column(conn, "benefits", "calc_mode", "calc_mode TEXT NOT NULL DEFAULT 'raw'")
@@ -205,27 +206,20 @@ _MERCHANT_ALIASES = {
     "우아한형제들": "배달의민족",
 }
 
-# 신한카드 안내장 "전월(전년도) 이용금액 제외 대상" 기준. 이런 결제는
-# Monthly Plan 공과금 할인처럼 혜택 자체는 받을 수 있어도, 다음 달 구간을
-# 정하는 "전월 실적" 합계에는 안 들어간다.
-PERFORMANCE_EXCLUDED_KEYWORDS = [
-    "현금서비스", "카드론",
-    "연회비",
-    "기프트카드", "선불카드",
-    "지방세", "국세", "환경개선부담금", "지자체세입금", "세입금",
-    "국민연금", "고용보험", "건강보험", "산재보험",
-    "스쿨뱅킹", "등록금",
-    "아파트관리비", "도시가스", "전기요금", "한국전력", "한전", "TV수신료", "수도요금",
-    "상품권",
-    "포인트충전", "캐시충전", "사이버머니",
-    "철도",
-]
+# 카드마다 "전월(전년도) 이용금액 제외 대상"이 안내장 기준으로 서로
+# 다르다(예: Discount Plan+는 지방세/공과금/상품권까지 폭넓게 제외되지만,
+# The LADY CLASSIC은 학원·Gift카드·현금서비스·카드론·수수료이자·취소금액
+# 정도만 제외됨). 그래서 카드별 제외 키워드는 cards.perf_excluded_keywords에
+# 저장해두고 그걸 기준으로 판단한다 - 카드 종류를 몰라서 아직 안 채워진
+# 카드는 모든 카드사·상품이 공통으로 제외하는 최소 항목만 기본값으로 쓴다.
+DEFAULT_PERFORMANCE_EXCLUDED_KEYWORDS = "현금서비스,카드론,연회비,수수료,이자,거래취소"
 
 
-def is_performance_excluded(merchant: str) -> bool:
+def is_performance_excluded(merchant: str, excluded_keywords: str = "") -> bool:
     if not merchant:
         return False
-    return any(k in merchant for k in PERFORMANCE_EXCLUDED_KEYWORDS)
+    keywords = [k.strip() for k in (excluded_keywords or DEFAULT_PERFORMANCE_EXCLUDED_KEYWORDS).split(",") if k.strip()]
+    return any(k in merchant for k in keywords)
 
 
 def compute_change_earned(payment_amount: float, doubled: bool = False) -> float:
