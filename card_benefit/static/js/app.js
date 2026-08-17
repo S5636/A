@@ -337,9 +337,9 @@
     const categoryUsageHtml = (b.category_usage && b.category_usage.length)
       ? `<div class="category-usage">${b.category_usage.map((c) => {
           let text;
-          if (c.monthly_limit) text = `${escapeHtml(c.label)} 월${fmt(c.count)}/${fmt(c.monthly_limit)}회`;
-          else if (c.daily_limit) text = `${escapeHtml(c.label)} 일${fmt(c.today_count)}/${fmt(c.daily_limit)}회`;
-          else text = `${escapeHtml(c.label)} ${fmt(c.count)}회`;
+          if (c.monthly_limit) text = `${escapeHtml(c.label)} 월${fmt(c.count)}/${fmt(c.monthly_limit)}`;
+          else if (c.daily_limit) text = `${escapeHtml(c.label)} 일${fmt(c.today_count)}/${fmt(c.daily_limit)}`;
+          else text = `${escapeHtml(c.label)} ${fmt(c.count)}`;
           return `<span class="category-usage-item">${text}</span>`;
         }).join("")}</div>`
       : "";
@@ -938,12 +938,6 @@
       if (e.target === modal) modal.classList.remove("open");
     });
   });
-
-  const scrollTopBtn = document.getElementById("scroll-top-btn");
-  window.addEventListener("scroll", () => {
-    scrollTopBtn.style.display = window.scrollY > 300 ? "block" : "none";
-  });
-  scrollTopBtn.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
 
   async function init() {
     state = await api("/api/state");

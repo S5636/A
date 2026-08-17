@@ -198,14 +198,14 @@ body { padding-bottom: 40px; }
 .progress-fill.bad { background: var(--critical); }
 
 .category-usage {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 6px;
 }
-.category-usage-item { line-height: 1.3; }
+.category-usage-item { white-space: nowrap; }
 
 .badge-double {
   display: inline-block;
@@ -283,22 +283,6 @@ body { padding-bottom: 40px; }
 .upload-log { margin-top: 12px; font-size: 12px; }
 .upload-log-item { display: flex; justify-content: space-between; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); margin-bottom: 6px; }
 .upload-log-item.err { background: rgba(230,103,103,0.14); color: var(--critical); }
-
-.scroll-top-btn {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  border: 1px solid var(--border-strong);
-  background: rgba(24, 34, 56, 0.6);
-  color: var(--text-primary);
-  font-size: 20px;
-  backdrop-filter: blur(4px);
-  cursor: pointer;
-  z-index: 50;
-}
 
 /* ---------- Modal ---------- */
 .modal-backdrop {
