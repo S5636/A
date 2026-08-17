@@ -20,14 +20,17 @@
   </header>
 
   <section id="monthly-summary" class="monthly-summary" style="display:none;">
-    <div class="summary-box summary-earn">
-      <div class="summary-label">이번 달 적립</div>
-      <div class="summary-value" id="summary-earn-value">0원</div>
+    <div class="summary-boxes">
+      <div class="summary-box summary-earn">
+        <div class="summary-label" id="summary-earn-label">적립</div>
+        <div class="summary-value" id="summary-earn-value">0원</div>
+      </div>
+      <div class="summary-box summary-cashback">
+        <div class="summary-label" id="summary-cashback-label">할인·캐시백</div>
+        <div class="summary-value" id="summary-cashback-value">0원</div>
+      </div>
     </div>
-    <div class="summary-box summary-cashback">
-      <div class="summary-label">이번 달 할인·캐시백</div>
-      <div class="summary-value" id="summary-cashback-value">0원</div>
-    </div>
+    <div class="summary-jump-row" id="summary-jump-row"></div>
   </section>
 
   <section id="inbox-section" class="inbox-section" style="display:none;">

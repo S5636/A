@@ -8,6 +8,8 @@
   const noBenefitList = document.getElementById("no-benefit-list");
   const noBenefitCount = document.getElementById("no-benefit-count");
 
+  const CARD_COLORS = ["#3987e5", "#ec4899", "#fab219", "#22c55e", "#a78bfa", "#f97316"];
+
   let state = { cards: [], inbox: [], no_benefit: [] };
   let noBenefitOpen = false;
   const openLogPanels = new Set(); // benefit id 목록 - 펼쳐진 사용내역 기억
@@ -83,9 +85,24 @@
         else if (b.calc_mode === "percent_discount") cashback += b.used || 0;
       });
     });
-    section.style.display = (earn || cashback) ? "flex" : "none";
+    section.style.display = state.cards.length ? "block" : "none";
+    const monthLabel = `${new Date().getMonth() + 1}월`;
+    document.getElementById("summary-earn-label").textContent = `${monthLabel} 적립`;
+    document.getElementById("summary-cashback-label").textContent = `${monthLabel} 할인·캐시백`;
     document.getElementById("summary-earn-value").textContent = `${fmt(earn)}원`;
     document.getElementById("summary-cashback-value").textContent = `${fmt(cashback)}원`;
+
+    const jumpRow = document.getElementById("summary-jump-row");
+    jumpRow.innerHTML = state.cards.map((card, idx) => `
+      <button class="jump-btn" data-card-id="${card.id}" style="border-color:${CARD_COLORS[idx % CARD_COLORS.length]};color:${CARD_COLORS[idx % CARD_COLORS.length]};">
+        ${escapeHtml(shortCardName(card.name))}
+      </button>
+    `).join("");
+    jumpRow.querySelectorAll(".jump-btn").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        document.getElementById(`card-${btn.dataset.cardId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      })
+    );
   }
 
   function memoToggleTemplate(key, memo) {
@@ -164,10 +181,12 @@
     cardList.querySelectorAll(".card").forEach((el) => el.remove());
     emptyHint.style.display = state.cards.length ? "none" : "block";
 
-    state.cards.forEach((card) => {
+    state.cards.forEach((card, idx) => {
       const el = document.createElement("div");
       el.className = "card";
+      el.id = `card-${card.id}`;
       el.innerHTML = cardTemplate(card);
+      el.querySelector(".card-title").style.color = CARD_COLORS[idx % CARD_COLORS.length];
       cardList.appendChild(el);
       wireCard(el, card);
     });
