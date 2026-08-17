@@ -29,6 +29,24 @@ def local_ip():
         s.close()
 
 
+def tailscale_ip():
+    """Tailscale을 쓰면 이 PC에 100.64.0.0/10 대역 IP가 하나 더 생기는데,
+    그 주소는 밖에서(같은 와이파이가 아니어도) 접속할 때 써야 한다.
+    ipconfig 결과에서 그 대역 IPv4만 찾아서 돌려준다(없으면 None)."""
+    try:
+        result = subprocess.run(["ipconfig"], capture_output=True, text=True, timeout=5)
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.lower().startswith("ipv4"):
+                ip = line.split(":")[-1].strip()
+                parts = ip.split(".")
+                if len(parts) == 4 and parts[0] == "100" and parts[1].isdigit() and 64 <= int(parts[1]) <= 127:
+                    return ip
+    except Exception:
+        pass
+    return None
+
+
 def open_browser_later():
     time.sleep(2)
     try:
@@ -76,10 +94,13 @@ def main():
             pass
 
     ip = local_ip()
+    ts_ip = tailscale_ip()
     print()
     print("설치 완료. 서버를 시작합니다.")
     print(f"이 PC에서 볼 때:   http://127.0.0.1:{PORT}")
     print(f"폰에서 볼 때(같은 와이파이):   http://{ip}:{PORT}")
+    if ts_ip:
+        print(f"폰에서 볼 때(밖에서, Tailscale):   http://{ts_ip}:{PORT}")
     print()
     print("이 창을 닫으면 프로그램이 종료됩니다. 계속 이 창을 켜두세요.")
     print("============================================")
