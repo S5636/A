@@ -205,6 +205,28 @@ _MERCHANT_ALIASES = {
     "우아한형제들": "배달의민족",
 }
 
+# 신한카드 안내장 "전월(전년도) 이용금액 제외 대상" 기준. 이런 결제는
+# Monthly Plan 공과금 할인처럼 혜택 자체는 받을 수 있어도, 다음 달 구간을
+# 정하는 "전월 실적" 합계에는 안 들어간다.
+PERFORMANCE_EXCLUDED_KEYWORDS = [
+    "현금서비스", "카드론",
+    "연회비",
+    "기프트카드", "선불카드",
+    "지방세", "국세", "환경개선부담금",
+    "국민연금", "고용보험", "건강보험", "산재보험",
+    "스쿨뱅킹", "등록금",
+    "아파트관리비", "도시가스", "전기요금", "한국전력", "한전", "TV수신료", "수도요금",
+    "상품권",
+    "포인트충전", "캐시충전", "사이버머니",
+    "철도",
+]
+
+
+def is_performance_excluded(merchant: str) -> bool:
+    if not merchant:
+        return False
+    return any(k in merchant for k in PERFORMANCE_EXCLUDED_KEYWORDS)
+
 
 def compute_change_earned(payment_amount: float, doubled: bool = False) -> float:
     """더모아형 "1,000원 미만 자투리(잔돈)" 적립액을 계산한다.

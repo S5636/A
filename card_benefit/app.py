@@ -27,6 +27,7 @@ from models import (
     get_setting,
     init_db,
     is_cancelled_status,
+    is_performance_excluded,
     match_benefit_keyword,
     match_rate_table,
     parse_rate_table_categories,
@@ -170,18 +171,19 @@ def _serialize_cards(conn):
         # "혜택 없음" 처리된 것 - 즉 실제로 확인된 결제) 금액을 합산해서 자동
         # 계산한다. 카드사 실적은 "지난달(전월)" 완결된 금액을 기준으로 이번 달
         # 혜택 구간이 정해지므로, 지난달 알림 합계를 그 기준으로 쓴다.
-        auto_prev_spend = conn.execute(
-            """SELECT COALESCE(SUM(amount), 0) AS total FROM inbox_items
-               WHERE card_id = ? AND status IN ('assigned', 'no_benefit')
-               AND substr(occurred_at, 1, 7) = ?""",
-            (card["id"], prev_month),
-        ).fetchone()["total"]
-        auto_this_month_spend = conn.execute(
-            """SELECT COALESCE(SUM(amount), 0) AS total FROM inbox_items
-               WHERE card_id = ? AND status IN ('assigned', 'no_benefit')
-               AND substr(occurred_at, 1, 7) = ?""",
-            (card["id"], this_month),
-        ).fetchone()["total"]
+        # 안내장의 "전월 이용금액 제외 대상"(공과금·세금·상품권 등)은 혜택
+        # 대상이어도 실적 합계에서는 뺀다.
+        def _auto_spend(year_month):
+            rows = conn.execute(
+                """SELECT amount, merchant FROM inbox_items
+                   WHERE card_id = ? AND status IN ('assigned', 'no_benefit')
+                   AND substr(occurred_at, 1, 7) = ?""",
+                (card["id"], year_month),
+            ).fetchall()
+            return sum(r["amount"] for r in rows if not is_performance_excluded(r["merchant"]))
+
+        auto_prev_spend = _auto_spend(prev_month)
+        auto_this_month_spend = _auto_spend(this_month)
 
         manual_row = conn.execute(
             "SELECT total_spend FROM performance WHERE card_id = ? AND year_month = ?",

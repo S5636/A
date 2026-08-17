@@ -170,7 +170,15 @@ body { padding-bottom: 40px; }
 .progress-fill.warn { background: var(--warning); }
 .progress-fill.bad { background: var(--critical); }
 
-.category-usage { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+.category-usage {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+.category-usage-item { line-height: 1.3; }
 
 .badge-double {
   display: inline-block;

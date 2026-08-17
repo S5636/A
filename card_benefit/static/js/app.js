@@ -179,7 +179,7 @@
       <div class="card-head">
         <div class="card-title-row">
           <span class="card-title">${escapeHtml(shortCardName(card.name))}</span>
-          ${card.issuer ? `<span class="card-issuer">${escapeHtml(card.issuer)}</span>` : ""}
+          ${card.perf_threshold ? `<span class="perf-badge ${card.perf_met ? "met" : "unmet"}">${card.perf_met ? "실적 충족" : "실적 부족"}</span>` : ""}
         </div>
         <div class="card-actions">
           <button class="icon-btn edit-card" data-id="${card.id}" title="카드 수정">✏️</button>
@@ -199,12 +199,9 @@
 
   function perfRowTemplate(card) {
     if (!card.perf_threshold) return "";
-    const cls = card.perf_met ? "met" : "unmet";
-    const label = card.perf_met ? "실적 충족" : "실적 부족";
     const autoTag = card.perf_auto ? " (자동)" : "";
     return `
       <div class="perf-row">
-        <span class="perf-badge ${cls}">${label}</span>
         <span class="perf-current">당월 ${fmt(card.this_month_spend)}원 (다음달 반영)</span>
       </div>
       <div class="perf-row perf-row-sub">
@@ -289,10 +286,12 @@
 
     const categoryUsageHtml = (b.category_usage && b.category_usage.length)
       ? `<div class="category-usage">${b.category_usage.map((c) => {
-          if (c.monthly_limit) return `${escapeHtml(c.label)} 월${fmt(c.count)}/${fmt(c.monthly_limit)}회`;
-          if (c.daily_limit) return `${escapeHtml(c.label)} 일${fmt(c.today_count)}/${fmt(c.daily_limit)}회`;
-          return `${escapeHtml(c.label)} ${fmt(c.count)}회`;
-        }).join(" · ")}</div>`
+          let text;
+          if (c.monthly_limit) text = `${escapeHtml(c.label)} 월${fmt(c.count)}/${fmt(c.monthly_limit)}회`;
+          else if (c.daily_limit) text = `${escapeHtml(c.label)} 일${fmt(c.today_count)}/${fmt(c.daily_limit)}회`;
+          else text = `${escapeHtml(c.label)} ${fmt(c.count)}회`;
+          return `<span class="category-usage-item">${text}</span>`;
+        }).join("")}</div>`
       : "";
 
     const [benefitTitle, benefitSubtitle] = splitBenefitName(shortBenefitName(b.name));
