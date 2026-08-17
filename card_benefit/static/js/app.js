@@ -240,7 +240,6 @@
           <button class="icon-btn delete-card" data-id="${card.id}" title="카드 삭제">🗑️</button>
         </div>
       </div>
-      <div class="card-cycle">혜택기간 ${shortDate(card.cycle_start)}~${shortDate(card.cycle_end)} (D-${card.days_left})</div>
       ${perfRowTemplate(card)}
       ${memoToggleTemplate(`card-${card.id}`, card.memo)}
       <div class="benefit-list">${benefitsHtml}</div>
@@ -318,7 +317,7 @@
     const logsHtml = logsListHtml(b, unit);
 
     const rightSideHtml = b.unlimited
-      ? `<div class="benefit-remaining remaining-good">이번 달 ${fmt(b.used)}${unit} 적립</div>`
+      ? `<div class="benefit-remaining remaining-good">당월 ${fmt(b.used)}${unit} 적립</div>`
       : (() => {
           const cls = statusClass(b.percent, b.over_limit);
           const remainingText = b.over_limit
