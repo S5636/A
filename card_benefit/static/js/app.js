@@ -8,7 +8,7 @@
   const noBenefitList = document.getElementById("no-benefit-list");
   const noBenefitCount = document.getElementById("no-benefit-count");
 
-  const CARD_COLORS = ["#3987e5", "#ec4899", "#fab219", "#22c55e", "#a78bfa", "#f97316"];
+  const CARD_COLORS = ["#a78bfa", "#ec4899", "#fab219", "#22c55e", "#3987e5", "#f97316"];
 
   let state = { cards: [], inbox: [], no_benefit: [] };
   let noBenefitOpen = false;

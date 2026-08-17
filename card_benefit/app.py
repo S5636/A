@@ -11,7 +11,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from io import BytesIO
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, make_response, render_template, request, send_file
 from openpyxl import Workbook, load_workbook
 
 from models import (
@@ -302,7 +302,11 @@ def index():
     js_path = os.path.join(app.static_folder, "js", "app.js")
     css_path = os.path.join(app.static_folder, "css", "style.css")
     asset_version = str(int(max(os.path.getmtime(js_path), os.path.getmtime(css_path))))
-    return render_template("index.html", asset_version=asset_version)
+    resp = make_response(render_template("index.html", asset_version=asset_version))
+    # 이 HTML 자체를 폰 브라우저가 캐시해버리면 새 버전 번호가 붙은
+    # 링크조차 못 받아보게 되므로, 페이지 본문은 절대 캐시하지 않게 한다.
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return resp
 
 
 @app.route("/api/state")
