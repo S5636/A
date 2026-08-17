@@ -62,8 +62,11 @@
     return [name.slice(0, idx).trim(), name.slice(idx + 3).trim()];
   }
 
-  function statusClass(percent, overLimit) {
+  function statusClass(percent, overLimit, limitValue) {
     if (overLimit) return "bad";
+    // limitValue가 0인데 무제한도 아니면(전월실적 미달로 이번 달 한도가 0원이 된
+    // 경우) 아직 안 썼어도(percent 0) 초록으로 보이면 안 되니 빨강으로 표시.
+    if (limitValue != null && limitValue <= 0) return "bad";
     if (percent >= 80) return "warn";
     return "good";
   }
@@ -295,7 +298,7 @@
   function compactBenefitTemplate(card, b) {
     const unit = "회";
     const logsOpen = openLogPanels.has(b.id);
-    const cls = statusClass(b.percent, b.over_limit);
+    const cls = statusClass(b.percent, b.over_limit, b.limit_value);
     const remainingText = b.unlimited
       ? `누적 ${fmt(b.used)}${unit}`
       : (b.over_limit ? `초과 ${fmt(Math.abs(b.remaining))}${unit}` : `잔여 ${fmt(b.remaining)}${unit}`);
@@ -326,7 +329,7 @@
     const rightSideHtml = b.unlimited
       ? `<div class="benefit-remaining remaining-good">당월 ${fmt(b.used)}${unit} 적립</div>`
       : (() => {
-          const cls = statusClass(b.percent, b.over_limit);
+          const cls = statusClass(b.percent, b.over_limit, b.limit_value);
           const remainingText = b.over_limit
             ? `초과 ${fmt(Math.abs(b.remaining))}${unit}`
             : `잔여 ${fmt(b.remaining)}${unit}`;
@@ -336,7 +339,7 @@
     const progressHtml = b.unlimited
       ? ""
       : (() => {
-          const cls = statusClass(b.percent, b.over_limit);
+          const cls = statusClass(b.percent, b.over_limit, b.limit_value);
           return `<div class="progress-track"><div class="progress-fill ${cls}" style="width:${b.percent}%"></div></div>`;
         })();
 

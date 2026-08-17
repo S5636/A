@@ -218,10 +218,24 @@ def _serialize_cards(conn):
             ).fetchall()
 
             tiered_limit = tier_limit_for_spend(b["tier_table"], perf_spend)
-            limit_value = tiered_limit if tiered_limit is not None else (b["limit_value"] or 0)
-            unlimited = limit_value <= 0
+            # 구간표가 있는 혜택은 전월실적이 최저 구간에도 못 미치면 tiered_limit이
+            # 0으로 나온다 - 이건 "한도 없음(무제한)"이 아니라 "이번 달 한도 0원
+            # (혜택 대상 아님)"이라는 뜻이므로, 구간표가 아예 없는 혜택(limit_value가
+            # 0=무제한이라는 뜻)과 구분해서 처리해야 한다. 안 그러면 실적 미달인데도
+            # 화면에 "무제한 적립 가능"으로 잘못 보인다.
+            if tiered_limit is not None:
+                limit_value = tiered_limit
+                unlimited = False
+            else:
+                limit_value = b["limit_value"] or 0
+                unlimited = limit_value <= 0
             remaining = None if unlimited else limit_value - used
-            percent = None if unlimited else max(0, min(100, round(used / limit_value * 100))) if limit_value > 0 else 0
+            if unlimited:
+                percent = None
+            elif limit_value > 0:
+                percent = max(0, min(100, round(used / limit_value * 100)))
+            else:
+                percent = 100 if used > 0 else 0
 
             category_usage = None
             if b["calc_mode"] == "percent_discount" and b["rate_table"]:
@@ -645,6 +659,30 @@ def _category_usage_count(conn, benefit_id, category, used_at, monthly=False):
     return row["c"]
 
 
+def _perf_spend_for_card(conn, card):
+    """카드의 "전월실적" 합계 (_serialize_cards와 같은 기준: 수동 입력이 있으면
+    그걸 쓰고, 없으면 지난달 확인된 결제 알림 합계에서 실적 제외 항목을 뺀 자동
+    집계). 구간표(tier_table)가 있는 혜택이 전월실적 미달로 이번 달 혜택 대상이
+    아닌지 판단할 때 재사용한다."""
+    prev_month = previous_year_month()
+    manual_row = conn.execute(
+        "SELECT total_spend FROM performance WHERE card_id = ? AND year_month = ?",
+        (card["id"], prev_month),
+    ).fetchone()
+    if manual_row:
+        return manual_row["total_spend"]
+    rows = conn.execute(
+        """SELECT amount, merchant FROM inbox_items
+           WHERE card_id = ? AND status IN ('assigned', 'no_benefit')
+           AND substr(occurred_at, 1, 7) = ?""",
+        (card["id"], prev_month),
+    ).fetchall()
+    return sum(
+        r["amount"] for r in rows
+        if not is_performance_excluded(r["merchant"], card["perf_excluded_keywords"])
+    )
+
+
 def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, merchant="", used_at="", category_override=""):
     """혜택의 calc_mode에 따라 입력값(결제금액 등)을 실제 한도 소진값으로 변환한다.
 
@@ -655,6 +693,11 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
     category_override가 있으면(네이버페이/토스페이처럼 가맹점명으로 업종을 알 수
     없어서 사용자가 직접 고른 경우) 가맹점명 매칭 대신 그 업종 값을 그대로 쓴다.
     """
+    if benefit["tier_table"]:
+        card = conn.execute("SELECT * FROM cards WHERE id = ?", (benefit["card_id"],)).fetchone()
+        if card and tier_limit_for_spend(benefit["tier_table"], _perf_spend_for_card(conn, card)) == 0:
+            return None, None, None, "전월실적이 최저 구간에도 못 미쳐서 이번 달은 이 혜택을 받을 수 없습니다."
+
     if benefit["calc_mode"] == "change_under_1000":
         doubled = doubled or bool(benefit["always_doubled"])
         earned = compute_change_earned(raw_value, doubled)
