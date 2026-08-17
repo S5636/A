@@ -345,6 +345,10 @@ def rate_table_entry_by_label(rate_table_json: str, label: str, default_percent:
 def annotate_merchant(name: str) -> str:
     if not name:
         return name
+    # 카드사 엑셀에 "LG  U+통신요금  즉시결제"처럼 단어 사이 공백이 여러 개
+    # 섞여 나오는 경우가 있어서, 가맹점 키워드 매칭("LG U+")이 깨지지
+    # 않도록 저장 시점에 공백을 하나로 정리한다.
+    name = re.sub(r"\s+", " ", str(name).strip())
     for key, brand in _MERCHANT_ALIASES.items():
         if key in name:
             return f"{name} ({brand})"

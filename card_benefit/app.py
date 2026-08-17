@@ -1083,18 +1083,26 @@ def _import_statement(ws, header_info):
         # 못 읽은 행은 저장할 최소한의 정보가 없어서 어쩔 수 없이 건너뛴다.
 
         # 중복 판단: 승인번호가 있으면 승인번호로 우선 확인하고(단, 승인번호가
-        # 서로 다르면 별개 결제로 본다), 그 다음 (카드뒤4자리+금액)이 같은
-        # 기존 기록들과 시간을 비교한다 - 양쪽 다 시간(분초)까지 있으면 5분
-        # 이내를 같은 결제로 보고(폰 알림 수신 시각과 카드사 승인 시각이
-        # 몇 분 정도는 어긋날 수 있어서), 한쪽이라도 시간이 없으면 날짜만
-        # 비교한다. 이렇게 해야 폰 알림으로 이미 들어온 것과 나중에 엑셀로
-        # 또 들어오는 같은 결제를, 승인번호가 있든 없든 서로 잡아낼 수 있다.
+        # 서로 다르면 별개 결제로 본다), 그 다음 금액이 같은 기존 기록들과
+        # 카드번호·시간을 비교한다. 카드번호는 폰 알림은 4자리("8390"),
+        # 카드사 엑셀은 "본인839*"처럼 3자리("839")로 마스킹돼 나오는 등
+        # 자릿수가 다를 수 있어서 card_codes_match(접두 비교)로 확인한다.
+        # 시간은 양쪽 다 시간(분초)까지 있으면 5분 이내를 같은 결제로 보고
+        # (폰 알림 수신 시각과 카드사 승인 시각이 몇 분 정도는 어긋날 수
+        # 있어서), 한쪽이라도 시간이 없으면 날짜만 비교한다. 이렇게 해야
+        # 폰 알림으로 이미 들어온 것과 나중에 엑셀로 또 들어오는 같은 결제를,
+        # 승인번호·카드번호 자릿수가 다르더라도 서로 잡아낼 수 있다.
         seen_approval = set()
-        existing_by_key = defaultdict(list)
+        existing_by_amount = defaultdict(list)
         for r in conn.execute("SELECT last4, amount, occurred_at, approval_no FROM inbox_items"):
             if r["approval_no"]:
                 seen_approval.add(r["approval_no"])
-            existing_by_key[(r["last4"], r["amount"])].append([r["occurred_at"] or "", r["approval_no"] or ""])
+            existing_by_amount[r["amount"]].append([r["last4"] or "", r["occurred_at"] or "", r["approval_no"] or ""])
+
+        def _last4_compatible(a, b):
+            if not a or not b:
+                return a == b
+            return card_codes_match(a, b)
 
         def _parse_ts(s):
             if not s:
@@ -1108,7 +1116,9 @@ def _import_statement(ws, header_info):
             if approval_no and approval_no in seen_approval:
                 return f"승인번호({approval_no})가 이미 등록되어 있어 중복으로 보고 건너뜀"
             new_ts = _parse_ts(occurred_at)
-            for old_occurred_at, old_approval in existing_by_key.get((last4, amount), []):
+            for old_last4, old_occurred_at, old_approval in existing_by_amount.get(amount, []):
+                if not _last4_compatible(last4, old_last4):
+                    continue
                 if approval_no and old_approval and approval_no != old_approval:
                     continue
                 if len(occurred_at) > 10 and len(old_occurred_at) > 10:
@@ -1164,7 +1174,7 @@ def _import_statement(ws, header_info):
                 continue
             if approval_no:
                 seen_approval.add(approval_no)
-            existing_by_key[(last4, amount)].append([occurred_at, approval_no])
+            existing_by_amount[amount].append([last4, occurred_at, approval_no])
 
             status_col = header_info.get("status_col")
             is_cancelled = is_refund or (
