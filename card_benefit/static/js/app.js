@@ -78,6 +78,13 @@
     return escapedText.replace(/\(2배\)/g, '<span class="badge-double">2배 특별적립</span>');
   }
 
+  // 가맹점명 뒤에 자동매칭용으로 붙는 "(배달의민족)"/"(토스)" 같은 안내는
+  // 매칭에만 쓰고 화면에는 보여주지 않는다.
+  function displayMerchant(m) {
+    if (!m) return m;
+    return m.replace(/\s*\((배달의민족|토스)\)\s*$/, "");
+  }
+
   function render() {
     const scrollX = window.scrollX;
     const scrollY = window.scrollY;
@@ -141,7 +148,7 @@
       <div class="inbox-item" data-id="${it.id}">
         <div class="inbox-item-info">
           <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
-          <div class="inbox-item-sub">${it.occurred_at}${it.matched_card_name ? " · " + escapeHtml(shortCardName(it.matched_card_name)) : ""}${it.merchant ? " · " + escapeHtml(it.merchant) : ""}</div>
+          <div class="inbox-item-sub">${it.occurred_at}${it.matched_card_name ? " · " + escapeHtml(shortCardName(it.matched_card_name)) : ""}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""}</div>
           ${it.matched_benefit_name ? `<div class="inbox-item-sub">🎯 ${escapeHtml(shortBenefitName(it.matched_benefit_name))}</div>` : ""}
         </div>
         <button class="btn small assign-inbox" data-id="${it.id}">혜택 선택</button>
@@ -166,7 +173,7 @@
       <div class="inbox-item" data-id="${it.id}">
         <div class="inbox-item-info">
           <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
-          <div class="inbox-item-sub">${it.occurred_at}${it.card_name ? " · " + escapeHtml(shortCardName(it.card_name)) : ""}${it.merchant ? " · " + escapeHtml(it.merchant) : ""}</div>
+          <div class="inbox-item-sub">${it.occurred_at}${it.card_name ? " · " + escapeHtml(shortCardName(it.card_name)) : ""}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""}</div>
         </div>
         <div class="benefit-buttons">
           <button class="btn secondary small reopen-no-benefit" data-id="${it.id}">다시 확인</button>
@@ -269,7 +276,7 @@
       ? b.logs.map((l) => {
           const timePart = l.notif_occurred_at ? l.notif_occurred_at.split(" ")[1]?.slice(0, 5) : "";
           const dateLabel = timePart ? `${l.used_at} ${timePart}` : l.used_at;
-          const merchantLabel = l.merchant ? `<strong>${escapeHtml(l.merchant)}</strong> · ` : "";
+          const merchantLabel = l.merchant ? `<strong>${escapeHtml(displayMerchant(l.merchant))}</strong> · ` : "";
           // memo가 이미 "결제 X원 → 잔돈/할인 Y원" 형태로 금액을 포함하면
           // 앞에 금액을 또 안 보여준다 (같은 금액이 두 번 찍히는 것 방지)
           const hasBreakdown = l.memo && l.memo.includes("→");
