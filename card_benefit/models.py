@@ -161,6 +161,7 @@ _ISSUER_HINTS = [
     "카카오뱅크", "토스뱅크", "케이뱅크",
 ]
 _NOISE_KEYWORDS = ["승인", "일시불", "할부", "카드", "누적", "이용", "잔액", "한도", "포인트"]
+_MERCHANT_LABEL_RE = re.compile(r"^가맹점(?:명)?\s*[:：]\s*(.+)$")
 
 
 def parse_notification(text: str) -> dict:
@@ -188,12 +189,26 @@ def parse_notification(text: str) -> dict:
             issuer = hint
             break
 
+    lines = [ln.strip(" -\t") for ln in text.splitlines() if ln.strip()]
+
+    # 1순위: "가맹점명: OOO"처럼 라벨이 붙은 줄이 있으면 그 값을 그대로 쓴다 -
+    # 노이즈 키워드 필터를 여기엔 적용하면 안 된다. 상호명 자체에 "포인트"/"카드"
+    # 같은 단어가 들어있으면(예: "포인트병원") 노이즈 필터에 걸려서 진짜 가맹점명
+    # 줄까지 통째로 버려지기 때문이다.
     merchant = ""
-    for line in reversed([ln.strip(" -\t") for ln in text.splitlines() if ln.strip()]):
-        if not line or any(k in line for k in _NOISE_KEYWORDS):
-            continue
-        merchant = line
-        break
+    for line in lines:
+        m = _MERCHANT_LABEL_RE.match(line)
+        if m:
+            merchant = m.group(1).strip()
+            break
+
+    # 2순위: 라벨이 없는 알림 형식이면, 노이즈 키워드가 없는 마지막 줄을 추정한다.
+    if not merchant:
+        for line in reversed(lines):
+            if not line or any(k in line for k in _NOISE_KEYWORDS):
+                continue
+            merchant = line
+            break
 
     return {"amount": amount, "last4": last4, "issuer": issuer, "merchant": annotate_merchant(merchant)}
 
