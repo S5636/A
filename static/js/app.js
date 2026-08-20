@@ -18,10 +18,12 @@
     ['market', '마켓', 'l', 3.3], ['sell_status', '주문\n상태', 'l', 3.6], ['buy_status', '매입\n상태', 'l', 4.3],
     ['order_date', '주문\n일시', 'l', 6.5], ['prod_id', '상품ID', 'l', 4.3], ['prod_name', '상품명', 'l', 9.4],
     ['qty', '수량', 'r', 2.5], ['order_amt', '주문\n금액', 'r', 4.3], ['discount_amt', '할인액', 'r', 3.3],
-    ['settle_amt_dpj', '실정산가', 'r', 3.6], ['ship_fee', '배송비', 'r', 3.3],
+    ['ship_fee', '배송비', 'r', 3.3],
     ['add_ship_fee', '추가\n배송비', 'r', 3.6], ['fee_rate_display', '수수료율', 'r', 4.0], ['fee_amt', '마켓\n수수료', 'r', 4.0],
-    ['settle_amt', '정산\n예정액', 'r', 4.3], ['vendor_prod_id', '판매사\n상품코드', 'l', 4.7],
-    ['stock_status', '재고\n상태', 'c', 3.0], ['buy_cost', '매입가', 'r', 3.6],
+    ['settle_amt', '정산\n예정액', 'r', 4.3], ['settle_amt_dpj', '실정산가', 'r', 3.6],
+    ['vendor_prod_id', '판매사\n상품코드', 'l', 4.7],
+    ['stock_status', '재고\n상태', 'c', 3.0], ['est_buy_price', '매입\n예상가', 'r', 3.6],
+    ['order_chk', '발주', 'c', 2.6], ['buy_cost', '매입가', 'r', 3.6],
     ['buy_ship_fee', '매입\n배송비', 'r', 3.6], ['buy_total', '매입\n합계', 'r', 3.6], ['margin_amt', '최종\n마진', 'r', 4.0],
     ['margin_rate', '마진율', 'r', 3.3], ['margin_chk', '마진\n포함', 'c', 3.3], ['ad_chk', '광고', 'c', 2.9],
   ];
@@ -333,6 +335,10 @@
         // 있다 - 0원으로 보이면 실제로 0원 정산된 것처럼 오해할 수 있어서,
         // 값이 없을 땐 0이 아니라 '-'로 구분해서 보여준다.
         return row.settle_amt_dpj ? num(row.settle_amt_dpj) : '-';
+      case 'est_buy_price':
+        // STOCK 확인을 아직 안 했거나 확인실패면 값이 비어있다 - 0원으로
+        // 보이면 실제로 무료인 것처럼 오해할 수 있어 '-'로 구분한다.
+        return row.est_buy_price ? num(row.est_buy_price) : '-';
       case 'margin_amt':
         return row.is_included ? num(row.margin_amt) : `<span class="pill excluded">${row.margin_label}</span>`;
       case 'margin_rate':
@@ -427,7 +433,7 @@
       const th = document.createElement('th');
       th.className = align === 'l' ? 'al-l' : '';
       th.innerHTML = label.replace('\n', '<br>');
-      if (key !== 'margin_chk' && key !== 'ad_chk') {
+      if (key !== 'margin_chk' && key !== 'ad_chk' && key !== 'order_chk') {
         th.addEventListener('click', (e) => {
           if (e.target.classList.contains('col-resize-handle')) return;
           if (Date.now() - resizeJustEndedAt < 250) return; // 리사이즈 직후 합성 click 무시
@@ -490,6 +496,8 @@
           td.innerHTML = `<input type="checkbox" class="chk-box margin" ${row.is_included ? 'checked' : ''}>`;
         } else if (key === 'ad_chk') {
           td.innerHTML = row.is_toss ? `<input type="checkbox" class="chk-box ad" ${row.ad_chk === 'Y' ? 'checked' : ''}>` : '-';
+        } else if (key === 'order_chk') {
+          td.innerHTML = `<input type="checkbox" class="chk-box order" ${row.order_chk === 'Y' ? 'checked' : ''}>`;
         } else {
           td.innerHTML = cellValue(row, key);
           if (align === 'l' && row[key]) td.title = String(row[key]);
@@ -522,6 +530,7 @@
         const td = tr.children[i];
         if (key === 'margin_chk') { td.innerHTML = `<input type="checkbox" class="chk-box margin" ${data.row.is_included ? 'checked' : ''}>`; }
         else if (key === 'ad_chk') { td.innerHTML = data.row.is_toss ? `<input type="checkbox" class="chk-box ad" ${data.row.ad_chk === 'Y' ? 'checked' : ''}>` : '-'; }
+        else if (key === 'order_chk') { td.innerHTML = `<input type="checkbox" class="chk-box order" ${data.row.order_chk === 'Y' ? 'checked' : ''}>`; }
         else { td.innerHTML = cellValue(data.row, key); }
       });
     }
@@ -534,6 +543,9 @@
     } else if (e.target.matches('.chk-box.ad')) {
       const tr = e.target.closest('tr');
       toggleOrder(tr.dataset.orderId, 'ad_chk', e.target.checked ? 'Y' : 'N').catch(err => toast(err.message, 'err'));
+    } else if (e.target.matches('.chk-box.order')) {
+      const tr = e.target.closest('tr');
+      toggleOrder(tr.dataset.orderId, 'order_chk', e.target.checked ? 'Y' : 'N').catch(err => toast(err.message, 'err'));
     }
   });
 
@@ -719,6 +731,39 @@
   }
 
   document.getElementById('btn-check-stock').addEventListener('click', () => runCheckStock(false));
+
+  document.getElementById('btn-place-order').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-place-order');
+    const log = document.getElementById('collect-log');
+    const checkedCount = (state.dashRows || []).filter(r => r.order_chk === 'Y').length;
+    if (checkedCount === 0) {
+      toast('발주할 주문이 없습니다 - 표에서 "발주" 체크박스를 먼저 켜주세요.', 'err');
+      return;
+    }
+    if (!confirm(`체크된 ${checkedCount}건을 오너클랜에서 자동으로 발주(결제하기 클릭까지) 진행할까요?\n카드 정보 입력과 최종 결제는 직접 하셔야 합니다.`)) {
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = '⏳';
+    log.innerHTML = '<div class="hint">체크된 주문을 오너클랜에서 한 건씩 자동으로 발주하는 중... (건마다 결제창이 뜨면 직접 카드결제를 완료해주세요)</div>';
+    try {
+      const data = await api('/api/ownerclan/place_orders', { method: 'POST' });
+      renderCollectLog('collect-log', data);
+      if (data.ok) {
+        const results = data.results || [];
+        const okCount = results.filter(r => r.ok).length;
+        const failCount = results.length - okCount;
+        toast(`발주 자동화 완료 - 결제하기까지 진행 ${okCount}건${failCount ? `, 실패 ${failCount}건` : ''} (총 ${data.attempted || 0}건 시도).`, failCount ? 'err' : 'ok');
+        loadDashOrders();
+      } else {
+        toast('발주 자동화가 중간에 멈췄어요. 아래 로그를 확인해주세요.', 'err');
+      }
+    } catch (e) {
+      toast('발주 요청이 실패했습니다.', 'err');
+    }
+    btn.disabled = false;
+    btn.textContent = 'ORDER';
+  });
 
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');

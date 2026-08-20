@@ -87,7 +87,7 @@ def init_db():
         margin_chk TEXT DEFAULT 'AUTO', bundle_no TEXT DEFAULT '', ad_chk TEXT DEFAULT 'N',
         option_name TEXT DEFAULT '', recipient TEXT DEFAULT '', ship_address TEXT DEFAULT '',
         discount_amt TEXT DEFAULT '0', settle_amt_dpj TEXT DEFAULT '', recipient_phone TEXT DEFAULT '',
-        zipcode TEXT DEFAULT '', raw_json TEXT DEFAULT '')""")
+        zipcode TEXT DEFAULT '', raw_json TEXT DEFAULT '', order_chk TEXT DEFAULT 'N')""")
     # 이미 만들어져 있던(예전 버전) merged_orders에는 option_name 컬럼이
     # 없으므로, CREATE TABLE IF NOT EXISTS로는 안 생긴다 - 있는지 확인해서
     # 없으면 추가한다 (재고상태를 상품코드 단위가 아니라 실제 주문된 옵션
@@ -117,6 +117,10 @@ def init_db():
             cur.execute("ALTER TABLE merged_orders ADD COLUMN zipcode TEXT DEFAULT ''")
         if 'raw_json' not in cols_now:
             cur.execute("ALTER TABLE merged_orders ADD COLUMN raw_json TEXT DEFAULT ''")
+        # 오너클랜 자동발주 대상으로 사용자가 직접 체크한 건만 표시(사용자
+        # 지시: "신규건 다 할 필요없어 내가 지정한것만").
+        if 'order_chk' not in cols_now:
+            cur.execute("ALTER TABLE merged_orders ADD COLUMN order_chk TEXT DEFAULT 'N'")
     except Exception:
         pass
     cur.execute("""CREATE TABLE IF NOT EXISTS purchase_ledger (
@@ -172,7 +176,14 @@ def init_db():
         pass
     cur.execute("""CREATE TABLE IF NOT EXISTS stock_check (
         vendor_prod_id TEXT, option_name TEXT, status TEXT, checked_at TEXT,
-        PRIMARY KEY (vendor_prod_id, option_name))""")
+        est_buy_price TEXT DEFAULT '', PRIMARY KEY (vendor_prod_id, option_name))""")
+    try:
+        cur.execute("PRAGMA table_info(stock_check)")
+        cols = {row[1] for row in cur.fetchall()}
+        if 'est_buy_price' not in cols:
+            cur.execute("ALTER TABLE stock_check ADD COLUMN est_buy_price TEXT DEFAULT ''")
+    except Exception:
+        pass
     conn.commit()
     conn.close()
     if not os.path.exists(FEES_PATH):
@@ -250,11 +261,11 @@ def api_toggle_order(order_id):
     body = request.get_json(force=True) or {}
     field = body.get('field')
     value = body.get('value')
-    if field not in ('margin_chk', 'ad_chk'):
+    if field not in ('margin_chk', 'ad_chk', 'order_chk'):
         return jsonify({'error': 'invalid field'}), 400
     if field == 'margin_chk' and value not in ('Y', 'N', 'AUTO'):
         return jsonify({'error': 'invalid value'}), 400
-    if field == 'ad_chk' and value not in ('Y', 'N'):
+    if field in ('ad_chk', 'order_chk') and value not in ('Y', 'N'):
         return jsonify({'error': 'invalid value'}), 400
 
     conn = sqlite3.connect(DB_PATH)
@@ -437,11 +448,44 @@ def api_ownerclan_check_stock():
         cur = conn.cursor()
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         for entry in result['results']:
-            cur.execute("""INSERT OR REPLACE INTO stock_check (vendor_prod_id, option_name, status, checked_at)
-                VALUES (?, ?, ?, ?)""", (entry['vendor_prod_id'], entry['option_name'], entry['status'], now))
+            price = entry.get('price')
+            cur.execute("""INSERT OR REPLACE INTO stock_check (vendor_prod_id, option_name, status, checked_at, est_buy_price)
+                VALUES (?, ?, ?, ?, ?)""", (entry['vendor_prod_id'], entry['option_name'], entry['status'], now,
+                                             str(price) if price is not None else ''))
         conn.commit()
         conn.close()
     result['checked'] = len(result.get('results') or [])
+    return jsonify(result)
+
+
+@app.route('/api/ownerclan/place_orders', methods=['POST'])
+def api_ownerclan_place_orders():
+    settings = load_settings()
+    rows = ce.compute_dataset(DB_PATH, FEES_PATH)
+    # 표에서 '발주' 체크박스를 켠 건만 처리한다(사용자 지시: "신규건 다 할
+    # 필요없어 내가 지정한것만").
+    checked = [r for r in rows if r.get('order_chk') == 'Y']
+    items = [{
+        'vendor_prod_id': r.get('vendor_prod_id', ''),
+        'option_name': r.get('option_name', ''),
+        'qty': r.get('qty', '1'),
+        'order_id': r.get('order_id', ''),
+        'recipient': r.get('recipient', ''),
+        'recipient_phone': r.get('recipient_phone', ''),
+        'zipcode': r.get('zipcode', ''),
+        'ship_address': r.get('ship_address', ''),
+    } for r in checked]
+    result = ownerclan_auto.place_orders(settings.get('ownerclan_url', ''), items)
+    # 시도한 건은 성공/실패와 무관하게 체크를 해제한다 - 재시도하려면 다시
+    # 체크해야 하게 만들어서, 뭘 이미 시도했는지 헷갈리지 않게 한다.
+    if checked:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        for r in checked:
+            cur.execute("UPDATE merged_orders SET order_chk='N' WHERE order_id=?", (r['order_id'],))
+        conn.commit()
+        conn.close()
+    result['attempted'] = len(items)
     return jsonify(result)
 
 

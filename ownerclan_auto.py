@@ -462,18 +462,68 @@ def _find_matching_option_li(option_lis, option_count, target_option, code, L):
     return None, None
 
 
+def _extract_base_price(page, L, code):
+    """상품 상세페이지 상단에 표시되는 판매가를 읽는다. 실제 화면 구조(사용자
+    스크린샷으로 확인): "상품코드 W..." 줄 바로 아래 상품명/별점이 나오고,
+    그 다음 취소선(정가) 가격 -> 실제 판매가 순서로 두 개의 '~원' 숫자가
+    나온 뒤 "예상배송일자" 문구가 이어진다. 사이드바 광고에도 '~원' 가격이
+    많아서 페이지 전체 텍스트에서 그냥 찾으면 엉뚱한 숫자를 집을 위험이 커,
+    "상품코드"~"예상배송일자" 사이 구간으로 좁혀서 그 안에서만 찾는다. 정가
+    취소선 없이 가격이 하나만 뜨는 상품도 있을 수 있어 그 경우는 그 값을
+    쓴다. (멤버십 전용 추가할인가는 셀러가 별도로 선점해야 적용되는 값이라
+    기본 판매가로 보지 않는다 - 실제 발주 시 결제금액과 다르면 조정 필요.)"""
+    try:
+        text = page.locator('body').inner_text()
+    except Exception as e:
+        L(f"[{code}] 가격 확인용 페이지 텍스트 읽기 실패: {type(e).__name__}: {e}")
+        return None
+    start = text.find('상품코드')
+    end = text.find('예상배송일자')
+    if start == -1 or end == -1 or end <= start:
+        L(f"[{code}] 가격이 있어야 할 화면 영역(상품코드~예상배송일자)을 못 찾았습니다 - 가격 확인을 건너뜁니다.")
+        return None
+    region = text[start:end]
+    prices = re.findall(r'([\d,]{3,})원', region)
+    if not prices:
+        L(f"[{code}] 해당 영역에서 '~원' 가격을 못 찾았습니다.")
+        return None
+    try:
+        return int(prices[1].replace(',', '')) if len(prices) >= 2 else int(prices[0].replace(',', ''))
+    except Exception:
+        return None
+
+
+def _extract_option_addon(li, L, code):
+    """선택된 옵션에 추가금이 있으면(예: "2세대-기본형(+850원)") 그 금액을
+    더한다 - 실제 화면에서 옵션에 따라 가격이 달라지는 걸 스크린샷으로
+    확인했다. 추가금 표기가 없는 옵션은 0원."""
+    try:
+        li_text = li.inner_text()
+    except Exception:
+        return 0
+    m = re.search(r'\(\s*\+\s*([\d,]+)\s*원\s*\)', li_text)
+    if not m:
+        return 0
+    try:
+        return int(m.group(1).replace(',', ''))
+    except Exception:
+        return 0
+
+
 def _check_one_stock(page, order_url, code, option, L):
     """판매사상품코드로 오너클랜 검색결과 페이지에 직접 이동해서(검색창을 직접
     누르지 않고) 재고상태를 확인한다. 상품에 옵션(색상/사이즈 등)이 있으면
     '아무 옵션이나 하나 살아있으면 정상'이 아니라, 실제 주문에 찍힌 그 옵션
     하나만 정확히 찾아서 그 옵션의 품절여부로 판정한다. 옵션 자체가 없는
-    단일상품은 '바로구매' 버튼 유무로 본다."""
+    단일상품은 '바로구매' 버튼 유무로 본다. 재고상태와 함께, 매입가를
+    가늠할 수 있도록 화면에 보이는 판매가(+옵션 추가금)도 같이 읽어온다 -
+    실제 매입가와 정확히 같다는 보장은 없는 추정치임을 호출부에 알린다."""
     url = _search_url_for_code(order_url, code)
     try:
         page.goto(url, wait_until='domcontentloaded', timeout=30000)
     except Exception as e:
         L(f"[{code}] 검색 페이지 이동 실패: {type(e).__name__}: {e}")
-        return '확인실패'
+        return '확인실패', None
 
     # 이동이 '성공'으로 처리돼도 실제로는 엉뚱한 페이지(예: 브라우저가 이전
     # 비정상종료 복원 알림 때문에 원래 열려있던 다른 페이지에 머물러 있는 등)에
@@ -487,7 +537,7 @@ def _check_one_stock(page, order_url, code, option, L):
         current_url = ''
     if 'search.php' not in current_url or 'topSearchKeyword' not in current_url:
         L(f"[{code}] 검색 페이지로 이동한 것 같지 않습니다(현재 주소: {current_url}) - 브라우저가 다른 페이지에 머물러 있을 수 있어요.")
-        return '확인실패'
+        return '확인실패', None
 
     # 검색결과 목록에서 이 상품코드로 가는 카드를 찾아 상세페이지로 들어간다.
     # 검색결과는 페이지 이동 직후 곧바로 다 그려져 있는 게 아니라 뒤이어
@@ -508,7 +558,7 @@ def _check_one_stock(page, order_url, code, option, L):
             L(f"[{code}] 검색결과 0건입니다 - 코드가 오너클랜에 없거나 판매중지된 상품일 수 있습니다.")
         else:
             L(f"[{code}] 15초를 기다려도 검색결과 화면에서 이 코드가 안 보입니다 - 엉뚱한 페이지일 위험이 있어 여기서 멈춥니다.")
-        return '확인실패'
+        return '확인실패', None
 
     try:
         code_link.click(timeout=10000)
@@ -524,7 +574,7 @@ def _check_one_stock(page, order_url, code, option, L):
             code_link.evaluate('el => el.click()')
         except Exception as e2:
             L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e2).__name__}: {e2}")
-            return '확인실패'
+            return '확인실패', None
 
     # 검색결과 페이지에서 겪었던 것과 같은 문제(.count()는 안 기다림)가
     # 상세페이지에서도 똑같이 날 수 있다 - '바로구매' 글자 하나만 기다리는
@@ -555,7 +605,9 @@ def _check_one_stock(page, order_url, code, option, L):
         option_count = option_lis.count()
     except Exception as e:
         L(f"[{code}] 옵션 목록 확인 실패: {type(e).__name__}: {e}")
-        return '확인실패'
+        return '확인실패', None
+
+    base_price = _extract_base_price(page, L, code)
 
     # 판정 기준(사용자 지시): '바로구매' 버튼 유무는 더 이상 기준으로 안
     # 쓴다. ①찾는 옵션칸 자체에 '품절'이라고 써있거나 ②찾는 옵션이 목록에
@@ -564,19 +616,23 @@ def _check_one_stock(page, order_url, code, option, L):
     if option_count > 0:
         if not option:
             L(f"[{code}] 이 상품은 옵션이 {option_count}개 있는데 주문에 기록된 옵션 정보가 없어서 정확히 판정할 수 없습니다.")
-            return '확인실패'
+            return '확인실패', None
         li, matched_name = _find_matching_option_li(option_lis, option_count, option, code, L)
         if li is None:
             # 찾는 옵션이 목록에 없음 -> 품절로 본다.
             L(f"[{code}] 주문 옵션 '{option}'을 오너클랜 옵션 목록에서 못 찾았습니다 - 품절로 처리합니다.")
-            return '품절'
+            return '품절', None
         try:
             soldout = li.get_attribute('option-soldout')
         except Exception as e:
             L(f"[{code}] 옵션 품절여부 확인 실패: {type(e).__name__}: {e}")
-            return '확인실패'
+            return '확인실패', None
+        addon = _extract_option_addon(li, L, code)
+        price = (base_price + addon) if base_price is not None else None
+        if addon and price is not None:
+            L(f"[{code}] 옵션 '{matched_name}'에 추가금 {addon}원 확인 - 매입예상가 {price}원(기본 {base_price}원 + 추가금 {addon}원).")
         L(f"[{code}] 주문 옵션 '{option}' → 오너클랜 옵션 '{matched_name}' 매칭, {'구매 가능' if soldout == '0' else '품절'}.")
-        return '정상' if soldout == '0' else '품절'
+        return ('정상' if soldout == '0' else '품절'), price
 
     # 옵션 목록 자체가 없는 단일 상품. 페이지 전체에서 '품절'을 느슨하게
     # (exact=False) 찾으면 리뷰/추천상품/안내문구 등 상품 자체와 무관한
@@ -589,10 +645,10 @@ def _check_one_stock(page, order_url, code, option, L):
         has_soldout = page.get_by_text('품절', exact=True).count() > 0
     except Exception as e:
         L(f"[{code}] 상품 페이지 상태 확인 실패: {type(e).__name__}: {e}")
-        return '확인실패'
+        return '확인실패', None
 
     L(f"[{code}] 옵션 없는 단일상품 - '품절' 배지 {'있음' if has_soldout else '없음'}.")
-    return '품절' if has_soldout else '정상'
+    return ('품절' if has_soldout else '정상'), base_price
 
 
 def _check_stock_impl(order_url, items, L):
@@ -612,9 +668,9 @@ def _check_stock_impl(order_url, items, L):
             continue
         label = f"{code}/{option}" if option else code
         L(f"[{label}] 오너클랜에서 재고상태 확인 중...")
-        status = _check_one_stock(page, order_url, code, option, L)
-        results.append({'vendor_prod_id': code, 'option_name': option, 'status': status})
-        L(f"[{label}] → {status}")
+        status, price = _check_one_stock(page, order_url, code, option, L)
+        results.append({'vendor_prod_id': code, 'option_name': option, 'status': status, 'price': price})
+        L(f"[{label}] → {status}" + (f" (매입예상가 {price}원)" if price is not None else ""))
     return results
 
 
@@ -647,6 +703,252 @@ def check_stock(order_url, items):
 
     try:
         results = _run_on_worker(_check_stock_impl, order_url, items, L)
+    except Exception as e:
+        L(f'자동화 중 오류 발생 - {_friendly_error(e)}')
+        return {'ok': False, 'log': log, 'results': []}
+
+    return {'ok': True, 'log': log, 'results': results}
+
+
+# ---------------------------------------------------------------------------
+# ORDER 버튼 - 체크된 주문만 오너클랜에서 옵션선택→배송정보 입력→결제수단
+# (카드) 선택→'결제하기' 클릭까지 자동으로 하고, 그 다음(실제 카드번호 입력·
+# 최종 결제 확정)은 절대 자동으로 하지 않는다 - 카드정보는 코드/DB 어디에도
+# 남기지 않는다는 원칙(사용자 지시). 첫 버전이라 재고확인 자동화처럼 여러
+# 라운드의 실제 화면 검증 없이 만들었다 - 특히 수령인 '이름' 입력칸은 화면에
+# placeholder 등 확실한 표식이 없어서 자동으로 못 채운다(아래에서 로그로
+# 알림, 결제 전 직접 확인 필요).
+# ---------------------------------------------------------------------------
+
+def _place_one_order(page, order_url, item, L):
+    """item: {'vendor_prod_id','option_name','qty','order_id','recipient',
+    'recipient_phone','zipcode','ship_address'}"""
+    code = str(item.get('vendor_prod_id') or '').strip()
+    option = str(item.get('option_name') or '').strip()
+    order_id = str(item.get('order_id') or '').strip()
+    recipient = str(item.get('recipient') or '').strip()
+    recipient_phone = str(item.get('recipient_phone') or '').strip()
+    zipcode = str(item.get('zipcode') or '').strip()
+    ship_address = str(item.get('ship_address') or '').strip()
+    try:
+        qty = max(1, int(float(item.get('qty') or 1)))
+    except Exception:
+        qty = 1
+
+    if not code:
+        return {'ok': False, 'reason': '판매사상품코드가 없습니다.'}
+
+    url = _search_url_for_code(order_url, code)
+    try:
+        page.goto(url, wait_until='domcontentloaded', timeout=30000)
+    except Exception as e:
+        return {'ok': False, 'reason': f'검색 페이지 이동 실패: {type(e).__name__}: {e}'}
+    try:
+        current_url = page.url
+    except Exception:
+        current_url = ''
+    if 'search.php' not in current_url or 'topSearchKeyword' not in current_url:
+        return {'ok': False, 'reason': f'검색 페이지로 이동하지 못했습니다(현재 주소: {current_url}).'}
+
+    try:
+        code_link = page.get_by_text(code, exact=False).first
+        code_link.wait_for(state='attached', timeout=15000)
+    except Exception:
+        return {'ok': False, 'reason': '검색결과에서 이 상품코드를 찾지 못했습니다.'}
+    try:
+        code_link.click(timeout=10000)
+    except Exception:
+        try:
+            code_link.evaluate('el => el.click()')
+        except Exception as e2:
+            return {'ok': False, 'reason': f'상품 페이지로 들어가지 못했습니다: {type(e2).__name__}: {e2}'}
+    try:
+        page.wait_for_load_state('networkidle', timeout=15000)
+    except Exception:
+        pass
+
+    try:
+        option_lis = page.locator('li.option[option-soldout]')
+        option_count = option_lis.count()
+    except Exception as e:
+        return {'ok': False, 'reason': f'옵션 목록 확인 실패: {type(e).__name__}: {e}'}
+
+    if option_count > 0:
+        if not option:
+            return {'ok': False, 'reason': f'이 상품은 옵션이 {option_count}개인데 주문에 옵션 정보가 없어 정확히 선택할 수 없습니다.'}
+        li, matched_name = _find_matching_option_li(option_lis, option_count, option, code, L)
+        if li is None:
+            return {'ok': False, 'reason': f"주문 옵션 '{option}'을 오너클랜 옵션 목록에서 찾지 못했습니다."}
+        try:
+            soldout = li.get_attribute('option-soldout')
+        except Exception:
+            soldout = None
+        if soldout == '1':
+            return {'ok': False, 'reason': f"옵션 '{matched_name}'이 품절 상태입니다."}
+        try:
+            li.click(timeout=5000)
+        except Exception:
+            try:
+                li.evaluate('el => el.click()')
+            except Exception as e:
+                return {'ok': False, 'reason': f'옵션 선택(클릭) 실패: {type(e).__name__}: {e}'}
+        L(f"[{order_id}/{code}] 옵션 '{matched_name}' 선택 완료.")
+        time.sleep(0.5)
+
+    # 수량 - 기본값 1에서 (qty-1)번 '+' 버튼을 눌러 맞춘다. 옵션이 여러
+    # 단계(색상→사이즈 등)인 상품은 이 시점에 두 번째 단계 선택이 아직 안
+    # 끝나있을 수 있다 - 그런 경우 이 자동화는 아직 대응 못 한다(1차 버전).
+    if qty > 1:
+        try:
+            plus_btn = page.get_by_text('+', exact=True).first
+            for _ in range(qty - 1):
+                plus_btn.click(timeout=3000)
+                time.sleep(0.2)
+            L(f"[{order_id}/{code}] 수량을 {qty}개로 설정.")
+        except Exception as e:
+            L(f"[{order_id}/{code}] 수량 설정 실패({type(e).__name__}) - 기본값(1개)으로 진행합니다. 결제 전 직접 확인해주세요.")
+
+    # 바로 구매
+    try:
+        buy_btn = page.get_by_text('바로 구매', exact=False).first
+        if buy_btn.count() == 0:
+            buy_btn = page.get_by_text('바로구매', exact=False).first
+        buy_btn.click(timeout=10000)
+    except Exception:
+        try:
+            page.get_by_text('바로구매', exact=False).first.evaluate('el => el.click()')
+        except Exception as e2:
+            return {'ok': False, 'reason': f"'바로 구매' 버튼 클릭 실패: {type(e2).__name__}: {e2}"}
+    try:
+        page.wait_for_load_state('domcontentloaded', timeout=15000)
+    except Exception:
+        pass
+    time.sleep(1)
+
+    # 주문서(ORDER SHEET) 페이지 - 원장주문코드에 상품주문번호(order_id)를
+    # 남긴다(사용자 지시) - 나중에 오너클랜 발주내역을 다시 받으면 이 값으로
+    # 매입 매칭이 자동으로 된다.
+    try:
+        page.get_by_placeholder('외부적으로 주문서를 관리할 수 있는 코드를 남길 수 있습니다').fill(order_id)
+    except Exception as e:
+        L(f"[{order_id}/{code}] 원장주문코드 입력 실패({type(e).__name__}) - 결제 전 직접 입력해주세요.")
+
+    # 배송정보 - "직접입력"으로 바꿔야 우리가 원하는 주소를 쓸 수 있다
+    # (기본주소/신규배송지는 계정에 저장된 다른 주소를 쓰는 옵션이라
+    # 지금 배송지와 다를 수 있다).
+    try:
+        page.get_by_text('직접입력', exact=True).first.click(timeout=5000)
+    except Exception as e:
+        L(f"[{order_id}/{code}] 주소 '직접입력' 선택 실패({type(e).__name__}) - 배송지가 다른 값으로 남아있을 수 있습니다. 결제 전 직접 확인해주세요.")
+
+    try:
+        page.get_by_placeholder('000-0000-0000형식').first.fill(recipient_phone)
+    except Exception as e:
+        L(f"[{order_id}/{code}] 연락처 입력 실패({type(e).__name__}) - 결제 전 직접 입력해주세요.")
+    try:
+        page.get_by_placeholder('우편번호').fill(zipcode)
+    except Exception as e:
+        L(f"[{order_id}/{code}] 우편번호 입력 실패({type(e).__name__}) - 결제 전 직접 입력해주세요.")
+    try:
+        page.get_by_placeholder('기본주소').fill(ship_address)
+    except Exception as e:
+        L(f"[{order_id}/{code}] 주소 입력 실패({type(e).__name__}) - 결제 전 직접 입력해주세요.")
+
+    # 수령인 '이름' 칸은 화면에 placeholder 등 확실한 표식이 없어서(실제
+    # 화면 검증 전이라) 자동으로 못 채운다 - 반드시 결제 전에 직접 확인해야
+    # 한다는 걸 로그로 분명히 남긴다.
+    L(f"[{order_id}/{code}] 수령인 '이름' 칸은 자동으로 못 채웁니다 - 결제 전에 '{recipient}'로 직접 입력/확인해주세요.")
+
+    # 결제수단: 카드
+    try:
+        page.get_by_text('카드', exact=True).first.click(timeout=5000)
+    except Exception as e:
+        L(f"[{order_id}/{code}] 결제수단 '카드' 선택 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
+
+    # '결제하기' - 여기까지만 자동이다. 이 버튼을 누르면 카드결제창이
+    # 뜨는데, 카드번호 입력과 최종 결제 확정은 절대 자동으로 하지 않고
+    # 반드시 사람이 직접 한다.
+    try:
+        page.get_by_text('결제하기', exact=True).first.click(timeout=10000)
+    except Exception as e:
+        return {'ok': False, 'reason': f"'결제하기' 버튼 클릭 실패({type(e).__name__}) - 주문서 화면에서 직접 확인해주세요."}
+
+    L(f"[{order_id}/{code}] '결제하기' 클릭 완료 - 카드결제창이 뜨면 직접 카드정보를 입력하고 결제를 완료해주세요.")
+    return {'ok': True, 'reason': "주문서 작성 및 '결제하기' 클릭까지 완료(카드결제는 직접 진행 필요)."}
+
+
+def _wait_for_payment_finish(page, L, max_wait=600):
+    """카드결제는 사람이 직접 하니, 다음 건으로 넘어가기 전에 그 시간을
+    기다려준다. '주문완료'/'결제완료' 같은 문구가 뜨면 바로 다음으로
+    넘어가고, 그 문구를 아직 실제로 확인해본 적이 없어(1차 버전) 못
+    찾으면 최대 대기시간(기본 10분) 후 무조건 다음 건으로 넘어간다 -
+    감지가 안 된다고 자동화가 거기서 영영 멈춰있으면 안 되기 때문."""
+    waited = 0
+    interval = 3
+    while waited < max_wait:
+        time.sleep(interval)
+        waited += interval
+        try:
+            text = page.locator('body').inner_text()
+        except Exception:
+            continue
+        if re.search(r'(주문|결제)\s*(이|가)?\s*완료', text):
+            L('결제/주문 완료로 보이는 화면을 확인했습니다.')
+            return True
+    L(f'{max_wait}초를 기다려도 완료 화면을 확인하지 못했습니다 - 직접 확인해주세요. 다음 건으로 진행합니다.')
+    return False
+
+
+def _place_orders_impl(order_url, items, L):
+    page = _get_or_launch_page(L, launch_if_missing=False)
+    if page is None:
+        raise RuntimeError("아직 로그인된 브라우저가 없습니다 - 먼저 '오너클랜 로그인 설정'을 눌러 로그인해주세요.")
+
+    results = []
+    for item in items:
+        code = item.get('vendor_prod_id', '')
+        order_id = item.get('order_id', '')
+        label = f"{order_id}/{code}"
+        L(f"[{label}] 발주 자동화 시작...")
+        try:
+            r = _place_one_order(page, order_url, item, L)
+        except Exception as e:
+            r = {'ok': False, 'reason': f'자동화 중 오류: {_friendly_error(e)}'}
+        r['order_id'] = order_id
+        results.append(r)
+        L(f"[{label}] → {'성공(결제하기 클릭까지)' if r['ok'] else '실패: ' + r['reason']}")
+        if r['ok']:
+            L(f"[{label}] 카드결제를 직접 완료(또는 취소)해주세요 - 완료되면 자동으로 다음 건으로 넘어갑니다(최대 10분 대기).")
+            _wait_for_payment_finish(page, L)
+    return results
+
+
+def place_orders(order_url, items):
+    """[{'vendor_prod_id','option_name','qty','order_id','recipient',
+    'recipient_phone','zipcode','ship_address'}, ...] 목록을 한 건씩 순서대로
+    오너클랜에서 옵션선택→배송정보 입력→결제수단(카드) 선택→'결제하기'
+    클릭까지 자동으로 진행한다. 카드번호 입력과 최종 결제 확정은 절대
+    자동으로 하지 않는다 - 이 프로젝트는 카드정보를 코드/DB 어디에도
+    저장하거나 입력하지 않는다는 원칙을 지킨다."""
+    log = []
+
+    def L(msg):
+        log.append(msg)
+
+    if platform.system() != 'Windows':
+        L('이 기능은 윈도우 PC에서만 동작합니다.')
+        return {'ok': False, 'log': log, 'results': []}
+
+    if not order_url:
+        L("오너클랜 주소가 설정되어 있지 않습니다. '데이터 업로드' 탭에서 '바로가기 주소 설정'으로 오너클랜 발주내역 페이지 주소를 먼저 저장해주세요.")
+        return {'ok': False, 'log': log, 'results': []}
+
+    if not items:
+        L('발주 대상으로 체크된 주문이 없습니다 (표에서 "발주" 체크박스를 먼저 켜주세요).')
+        return {'ok': True, 'log': log, 'results': []}
+
+    try:
+        results = _run_on_worker(_place_orders_impl, order_url, items, L)
     except Exception as e:
         L(f'자동화 중 오류 발생 - {_friendly_error(e)}')
         return {'ok': False, 'log': log, 'results': []}

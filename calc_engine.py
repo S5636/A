@@ -238,8 +238,8 @@ def compute_dataset(db_path, fees_path):
     owner_group_of = _build_owner_matches(cur, purchase_dict)
     stock_map = {}
     try:
-        cur.execute("SELECT vendor_prod_id, option_name, status FROM stock_check")
-        stock_map = {(row[0], row[1] or ''): row[2] for row in cur.fetchall()}
+        cur.execute("SELECT vendor_prod_id, option_name, status, est_buy_price FROM stock_check")
+        stock_map = {(row[0], row[1] or ''): (row[2], row[3] or '') for row in cur.fetchall()}
     except sqlite3.OperationalError:
         pass  # 아직 stock_check 테이블이 없는 예전 DB일 수 있음
     conn.close()
@@ -449,7 +449,10 @@ def compute_dataset(db_path, fees_path):
             # 대상 자체가 '신규주문' 건으로 한정돼있으니(app.py), 표시도
             # 똑같이 신규주문 건에만 보이게 맞춘다.
             'stock_status': (stock_map.get(
-                (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), '')
+                (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ('', ''))[0]
+                if sell_status == '신규주문' else ''),
+            'est_buy_price': (stock_map.get(
+                (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ('', ''))[1]
                 if sell_status == '신규주문' else ''),
             'buy_cost': int(display_buy_cost),
             'buy_ship_fee': int(display_buy_ship),
@@ -460,6 +463,13 @@ def compute_dataset(db_path, fees_path):
             'margin_chk': margin_chk,
             'is_included': is_included,
             'ad_chk': ad_chk,
+            'order_chk': str(r[idx_['order_chk']] or 'N') if 'order_chk' in idx_ else 'N',
+            # 오너클랜 자동발주(ORDER 버튼)가 배송정보를 자동으로 채우는 데
+            # 쓴다 - 화면 표에는 안 보이지만 API 응답엔 실려있어야 한다.
+            'recipient': str(r[idx_['recipient']] or '') if 'recipient' in idx_ else '',
+            'ship_address': str(r[idx_['ship_address']] or '') if 'ship_address' in idx_ else '',
+            'recipient_phone': str(r[idx_['recipient_phone']] or '') if 'recipient_phone' in idx_ else '',
+            'zipcode': str(r[idx_['zipcode']] or '') if 'zipcode' in idx_ else '',
             'is_toss': is_toss,
             'is_bundled': is_bundled,
             'is_cancelled': is_cancelled,

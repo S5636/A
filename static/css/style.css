@@ -253,6 +253,12 @@ table.summary-table.compact th, table.summary-table.compact td { padding: 6px 14
 .btn:hover { filter: brightness(1.08); }
 .btn.secondary { background: var(--surface-3); border: 1px solid var(--border-strong); }
 .btn.danger { background: linear-gradient(135deg, var(--critical), #b23c3c); }
+/* 실제 결제까지 이어지는 버튼이라(사용자 지시: "버튼색은 좀 특별하게")
+   DPJ/OC/STOCK의 무채색 secondary 버튼과 확실히 구분되는 금색 계열로 */
+.btn.order-btn {
+  background: linear-gradient(135deg, #f5a623, #d4820a);
+  box-shadow: 0 0 0 1px rgba(245, 166, 35, .35), 0 2px 8px rgba(245, 166, 35, .3);
+}
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
 .upload-log { margin-top: 14px; font-size: 12.5px; }
