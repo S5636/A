@@ -384,6 +384,37 @@ def _click(win, title, control_type=None, log=None):
     ctrl.click_input()
 
 
+def _dismiss_sync_toast(win, log=None, descendants=None):
+    """다팔자 자체 자동동기화가 끝나면 화면 하단에 '자동동기화 상태 갱신:
+    판매중지 N건, 판매재개 N건, 삭제 N건 대상이 업데이트되었습니다.' 토스트가
+    뜬다. 시간이 지나면 저절로 사라지길 기다리는 걸로는 부족하고(사용자가 실제
+    화면에서 확인: 계속 떠 있어서 다른 버튼 클릭이 안 먹힘) 토스트 오른쪽의
+    닫기(X) 버튼을 직접 눌러서 꺼줘야 다음 단계로 진행할 수 있다."""
+    marker = _find_smallest_text_match(win, '자동동기화 상태 갱신', None, descendants=descendants)
+    if marker is None:
+        return False
+    if log is not None:
+        log("'자동동기화 상태 갱신' 토스트가 떠 있습니다 - 닫기(X) 버튼을 직접 눌러서 치웁니다...")
+    close_ctrl = None
+    for name in ('✕', '×', 'X', '닫기', 'Close', 'close'):
+        close_ctrl = _find_near(marker, name, None)
+        if close_ctrl is not None:
+            break
+    if close_ctrl is not None:
+        try:
+            close_ctrl.click_input()
+            if log is not None:
+                log('토스트 닫기(X) 버튼 클릭 완료.')
+            return True
+        except Exception as e:
+            if log is not None:
+                log(f'토스트 닫기(X) 버튼 클릭 실패: {type(e).__name__}: {e}')
+            return False
+    if log is not None:
+        log('토스트는 보이는데 닫기(X) 버튼을 못 찾았습니다 - 일단 그대로 두고 진행합니다.')
+    return False
+
+
 def _dismiss_invalid_filename_dialog(log=None):
     """저장창의 파일 목록에서 이미 선택돼 있는 항목을 실수로 한 번 더 클릭하면
     윈도우 탐색기가 그걸 '이름 바꾸기' 시작 신호로 받아들여서, 그 상태에서
@@ -501,6 +532,10 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                 L(f'  - {elapsed}초 경과, 하위 요소 {cnt}개 확인됨')
                 last_wait_log = elapsed
             if cnt > 20:
+                # 요소가 늘어나서 화면이 그려지긴 했어도, 그게 자동동기화
+                # 토스트 자체일 수 있다 - 있으면 바로 닫아서 뒤 단계가
+                # 막히지 않게 한다.
+                _dismiss_sync_toast(win, L, descendants=initial_descendants)
                 L(f'  - {elapsed}초 경과, 하위 요소 {cnt}개로 늘어남 - 준비 완료.')
                 break
         visible_now = _dump_controls(win, descendants=initial_descendants)
@@ -533,6 +568,11 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
         _click(win, '조회', 'Button', L)
         time.sleep(2)
 
+        # '주문수집' 버튼을 누르기 직전에 자동동기화 토스트가 새로 떠 있을 수
+        # 있다 - 떠 있는 채로 누르면 클릭이 씹히거나 엉뚱한 곳이 눌릴 수 있어
+        # 미리 한 번 더 닫아준다.
+        _dismiss_sync_toast(win, L)
+
         L("'주문수집 및 동기화' 버튼 클릭...")
         _click(win, '주문수집 및 동기화', 'Button', L)
 
@@ -563,6 +603,12 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
                 descendants = win.descendants()
             except Exception:
                 descendants = None
+
+            # 수집을 기다리는 도중에도 다팔자 자체 자동동기화가 새로 돌면서
+            # 토스트가 뜰 수 있다 - 그때그때 바로 닫아준다.
+            if _dismiss_sync_toast(win, L, descendants=descendants):
+                time.sleep(1)
+                continue
 
             # 특정 마켓(네이버 등) 계정이 허용량을 소진했을 때만 뜨는 확인
             # 팝업 - "지금 진행하면 나머지 계정은 정상 처리되고 위 계정만
