@@ -14,10 +14,11 @@
 
   // [key, label(줄바꿈은 \n), align('l'=left/'r'=right/'c'=center-checkbox), default width(%)]
   const COLS = [
-    ['bundle_no', '합배송\n코드', 'l', 4.7], ['order_id', '원장\n주문코드', 'l', 5.8], ['source', '공급사', 'l', 3.3],
+    ['bundle_no', '합배송\n코드', 'l', 4.7], ['order_id', '원장\n주문코드', 'l', 5.8],
     ['market', '마켓', 'l', 3.3], ['sell_status', '주문\n상태', 'l', 3.6], ['buy_status', '매입\n상태', 'l', 4.3],
     ['order_date', '주문\n일시', 'l', 6.5], ['prod_id', '상품ID', 'l', 4.3], ['prod_name', '상품명', 'l', 9.4],
-    ['qty', '수량', 'r', 2.5], ['order_amt', '주문\n금액', 'r', 4.3], ['ship_fee', '배송비', 'r', 3.3],
+    ['qty', '수량', 'r', 2.5], ['order_amt', '주문\n금액', 'r', 4.3], ['discount_amt', '할인액', 'r', 3.3],
+    ['settle_amt_dpj', '실정산가', 'r', 3.6], ['ship_fee', '배송비', 'r', 3.3],
     ['add_ship_fee', '추가\n배송비', 'r', 3.6], ['fee_rate_display', '수수료율', 'r', 4.0], ['fee_amt', '마켓\n수수료', 'r', 4.0],
     ['settle_amt', '정산\n예정액', 'r', 4.3], ['vendor_prod_id', '판매사\n상품코드', 'l', 4.7],
     ['stock_status', '재고\n상태', 'c', 3.0], ['buy_cost', '매입가', 'r', 3.6],
@@ -325,8 +326,13 @@
   function cellValue(row, key) {
     switch (key) {
       case 'order_amt': case 'ship_fee': case 'add_ship_fee': case 'fee_amt': case 'settle_amt':
-      case 'buy_cost': case 'buy_ship_fee': case 'buy_total':
+      case 'buy_cost': case 'buy_ship_fee': case 'buy_total': case 'discount_amt':
         return num(row[key]);
+      case 'settle_amt_dpj':
+        // 다팔자가 아닌 소스(TOSS 파일 직접 업로드 등)는 이 값이 아예 없을 수
+        // 있다 - 0원으로 보이면 실제로 0원 정산된 것처럼 오해할 수 있어서,
+        // 값이 없을 땐 0이 아니라 '-'로 구분해서 보여준다.
+        return row.settle_amt_dpj ? num(row.settle_amt_dpj) : '-';
       case 'margin_amt':
         return row.is_included ? num(row.margin_amt) : `<span class="pill excluded">${row.margin_label}</span>`;
       case 'margin_rate':

@@ -85,7 +85,9 @@ def init_db():
         add_ship_fee TEXT, fee_rate TEXT, market_fee TEXT, settle_amt TEXT, vendor_prod_id TEXT,
         buy_cost TEXT, buy_ship_fee TEXT, buy_total TEXT, final_margin TEXT, margin_rate TEXT,
         margin_chk TEXT DEFAULT 'AUTO', bundle_no TEXT DEFAULT '', ad_chk TEXT DEFAULT 'N',
-        option_name TEXT DEFAULT '', recipient TEXT DEFAULT '', ship_address TEXT DEFAULT '')""")
+        option_name TEXT DEFAULT '', recipient TEXT DEFAULT '', ship_address TEXT DEFAULT '',
+        discount_amt TEXT DEFAULT '0', settle_amt_dpj TEXT DEFAULT '', recipient_phone TEXT DEFAULT '',
+        zipcode TEXT DEFAULT '', raw_json TEXT DEFAULT '')""")
     # 이미 만들어져 있던(예전 버전) merged_orders에는 option_name 컬럼이
     # 없으므로, CREATE TABLE IF NOT EXISTS로는 안 생긴다 - 있는지 확인해서
     # 없으면 추가한다 (재고상태를 상품코드 단위가 아니라 실제 주문된 옵션
@@ -101,6 +103,20 @@ def init_db():
             cur.execute("ALTER TABLE merged_orders ADD COLUMN recipient TEXT DEFAULT ''")
         if 'ship_address' not in cols_now:
             cur.execute("ALTER TABLE merged_orders ADD COLUMN ship_address TEXT DEFAULT ''")
+        # 쿠폰 할인 여부를 금액 임계값으로 추측하던 걸 버리고 다팔자가 주는
+        # 실제 할인액/정산가를 그대로 쓰기 위한 컬럼, 그리고 오너클랜 자동발주
+        # 배송정보 입력에 쓸 연락처/우편번호, 나중에 필요해질 원본 데이터
+        # 전체(raw_json) - 전부 사용자 지시로 추가.
+        if 'discount_amt' not in cols_now:
+            cur.execute("ALTER TABLE merged_orders ADD COLUMN discount_amt TEXT DEFAULT '0'")
+        if 'settle_amt_dpj' not in cols_now:
+            cur.execute("ALTER TABLE merged_orders ADD COLUMN settle_amt_dpj TEXT DEFAULT ''")
+        if 'recipient_phone' not in cols_now:
+            cur.execute("ALTER TABLE merged_orders ADD COLUMN recipient_phone TEXT DEFAULT ''")
+        if 'zipcode' not in cols_now:
+            cur.execute("ALTER TABLE merged_orders ADD COLUMN zipcode TEXT DEFAULT ''")
+        if 'raw_json' not in cols_now:
+            cur.execute("ALTER TABLE merged_orders ADD COLUMN raw_json TEXT DEFAULT ''")
     except Exception:
         pass
     cur.execute("""CREATE TABLE IF NOT EXISTS purchase_ledger (

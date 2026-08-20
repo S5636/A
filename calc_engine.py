@@ -111,16 +111,19 @@ def _get_market_fees(market_name, source_name, fees_config):
 
 def compute_fee(order_amt, ship_fee, add_ship_fee, market_name, source_name, prod_name, fees_config, ad_chk):
     """단일 진실 공급원: 판매수수료 계산 공식 (스펙 5.3)"""
-    f1, f2, f3, f4, threshold, extra = _get_market_fees(market_name, source_name, fees_config)
+    # 예전엔 "주문금액이 얼마 이상이면 쿠폰 할인분 몇 %를 수수료에 추가"로
+    # 추측했는데(threshold/extra), 쿠폰을 안 쓴 주문까지 똑같이 걸려서
+    # 부정확했다(사용자 지적). 다팔자가 건별 실제 할인액을 주므로, order_amt
+    # 자체를 이미 "주문금액 - 할인금액"(실결제액)으로 넘겨받아 쓰고, 여기서는
+    # 더 이상 금액 추측을 하지 않는다 - threshold/extra는 읽기만 하고 적용하지
+    # 않는다(옛 fees_config에 값이 남아있어도 무시됨).
+    f1, f2, f3, f4, _threshold, _extra = _get_market_fees(market_name, source_name, fees_config)
     base_f1 = f1
 
     if "쿠팡" in market_name or "쿠팡" in source_name:
         matched_rate = fetch_coupang_fee_rate(prod_name)
         if matched_rate is not None:
             f1 = matched_rate
-
-    if threshold > 0 and order_amt >= threshold:
-        f1 += extra
 
     if ad_chk == 'Y':
         f1 = max(0.0, f1 - base_f1)
@@ -367,7 +370,13 @@ def compute_dataset(db_path, fees_path):
         market_name = str(r[idx_['market']] or '')
         source_name = str(r[idx_['source']] or '')
         prod_name = str(r[idx_['prod_name']] or '').strip()
-        order_amt = int(safe_float(r[idx_['order_amt']]))
+        # order_amt는 다팔자 원본 "주문 금액"(할인 전 총액)이 아니라
+        # "주문 금액 - 할인 금액"(고객이 실제로 결제한 금액)을 써야 한다 -
+        # 쿠폰 할인 쓴 주문은 원본 그대로 쓰면 실제 결제액보다 부풀려져
+        # 화면 수치가 다팔자 화면과 안 맞았다(사용자가 실제 파일로 확인).
+        discount_amt = int(safe_float(r[idx_['discount_amt']])) if 'discount_amt' in idx_ else 0
+        order_amt = int(safe_float(r[idx_['order_amt']])) - discount_amt
+        settle_amt_dpj = str(r[idx_['settle_amt_dpj']] or '') if 'settle_amt_dpj' in idx_ else ''
         ship_fee = int(safe_float(r[idx_['ship_fee']]))
         if ship_fee > 500000:
             ship_fee = 0
@@ -424,6 +433,8 @@ def compute_dataset(db_path, fees_path):
             'prod_name': prod_name,
             'qty': str(r[idx_['qty']] or ''),
             'order_amt': order_amt,
+            'discount_amt': discount_amt,
+            'settle_amt_dpj': settle_amt_dpj,
             'ship_fee': ship_fee,
             'add_ship_fee': add_ship_fee,
             'total_sales': total_sales,

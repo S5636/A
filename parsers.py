@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """엑셀/CSV 업로드 파싱 (스펙 5.1) + HL 수기 매입처 텍스트 파싱 (부록 C)"""
+import json
 import re
 import sqlite3
 import pandas as pd
@@ -37,6 +38,19 @@ def _decode_status(val):
     if v.lower() in ('nan', 'none', ''):
         return '신규주문'
     return STATUS_CODE_MAP.get(v, v)
+
+
+def _raw_json_column(df):
+    """지금 당장 쓰는 컬럼으로 안 뽑아내는 값들도(택배사/운송장번호/CS메모 등)
+    나중에 필요해질 수 있으니, 업로드 원본 행 전체를 손대지 않고 그대로
+    JSON으로 같이 저장해둔다(사용자 지시: "가공하지 말고 다 db에 쌓아라") -
+    당장 화면에 안 보여도 이 컬럼에서 언제든 꺼내 쓸 수 있다."""
+    def _clean(v):
+        if pd.isna(v):
+            return ''
+        return v
+    return [json.dumps({k: _clean(v) for k, v in row.items()}, ensure_ascii=False, default=str)
+            for _, row in df.iterrows()]
 
 
 def _get_col(df, name_list):
@@ -85,6 +99,16 @@ def detect_and_normalize(df):
         # 주문과 묶어서 매입가를 나눠 받을 수 있게 하는 근거가 된다.
         new_df['recipient'] = _get_col(df, ['수령인', '받는사람'])
         new_df['ship_address'] = _get_col(df, ['배송지', '주소'])
+        # 쿠폰 할인 여부를 "주문금액이 얼마 이상이면 몇 % 추가수수료"로 추측하던
+        # 방식이 실제로 쿠폰 안 쓴 주문까지 걸려서 부정확했다(사용자 지적) -
+        # 다팔자 원본에 건별 실제 할인액이 그대로 있으니 그걸 직접 쓴다.
+        # 정산가는 다팔자가 자체 계산한 값으로, 우리 계산과 비교/검증용으로만
+        # 같이 저장해둔다.
+        new_df['discount_amt'] = _get_col(df, ['할인금액'])
+        new_df['settle_amt_dpj'] = _get_col(df, ['정산가'])
+        new_df['recipient_phone'] = _get_col(df, ['수령인연락처'])
+        new_df['zipcode'] = _get_col(df, ['우편번호'])
+        new_df['raw_json'] = _raw_json_column(df)
         new_df['source'] = '다팔자'
         return new_df.fillna(''), '다팔자'
 
@@ -104,6 +128,11 @@ def detect_and_normalize(df):
         new_df['option_name'] = _get_col(df, ['옵션', '옵션정보', '주문옵션', '상품옵션', '옵션명', '마켓상품옵션명'])
         new_df['recipient'] = _get_col(df, ['수령인', '받는사람', '수취인'])
         new_df['ship_address'] = _get_col(df, ['배송지', '주소', '수령인주소'])
+        new_df['discount_amt'] = _get_col(df, ['할인금액'])
+        new_df['settle_amt_dpj'] = _get_col(df, ['정산가'])
+        new_df['recipient_phone'] = _get_col(df, ['수령인연락처', '수취인연락처'])
+        new_df['zipcode'] = _get_col(df, ['우편번호'])
+        new_df['raw_json'] = _raw_json_column(df)
         new_df['source'] = 'TOSS'
         new_df['market'] = 'TOSS'
         new_df = new_df[~new_df['order_id'].astype(str).str.replace(' ', '').str.contains('수정불가|수정가능', na=False)]
@@ -232,24 +261,39 @@ def process_upload(db_path, fp, filename):
             n_status_blank += 1
         recipient = str(row.get('recipient', '')).strip()
         ship_address = str(row.get('ship_address', '')).strip()
+        # 할인액은 실제 계산에 쓰이니 숫자로 깨끗하게 정리해서 저장한다
+        # (빈칸/쿠폰 미사용 건은 0원). 정산가/연락처/우편번호는 참고·표시용
+        # 원본 값이라 nan/none만 빈 문자열로 걸러서 그대로 둔다.
+        discount_amt = str(int(safe_float(row.get('discount_amt', 0))))
+
+        def _clean_ref(v):
+            s = str(v if v is not None else '').strip()
+            return '' if s.lower() in ('nan', 'none', '-') else s
+
+        settle_amt_dpj = _clean_ref(row.get('settle_amt_dpj', ''))
+        recipient_phone = _clean_ref(row.get('recipient_phone', ''))
+        zipcode = _clean_ref(row.get('zipcode', ''))
+        raw_json = str(row.get('raw_json', '') or '')
         if order_id in existing:
             cur.execute("""UPDATE merged_orders SET source=?, market=?, sell_status=?, order_date=?,
                 prod_id=?, prod_name=?, qty=?, order_amt=?, ship_fee=?, vendor_prod_id=?,
-                bundle_no=?, add_ship_fee=?, option_name=?, recipient=?, ship_address=? WHERE order_id=?""", (
+                bundle_no=?, add_ship_fee=?, option_name=?, recipient=?, ship_address=?,
+                discount_amt=?, settle_amt_dpj=?, recipient_phone=?, zipcode=?, raw_json=? WHERE order_id=?""", (
                 str(row['source']), str(row['market']), str(row['sell_status']), str(row['order_date']),
                 str(row['prod_id']), str(row['prod_name']), str(row['qty']), str(row['order_amt']),
                 str(row['ship_fee']), str(row['vendor_prod_id']), bundle_no, str(row.get('add_ship_fee', '0')),
-                option_name, recipient, ship_address, order_id))
+                option_name, recipient, ship_address,
+                discount_amt, settle_amt_dpj, recipient_phone, zipcode, raw_json, order_id))
             c_up += 1
         else:
             cur.execute("""INSERT INTO merged_orders (order_id, source, market, sell_status, order_date,
                 prod_id, prod_name, qty, order_amt, ship_fee, vendor_prod_id, margin_chk, bundle_no, add_ship_fee,
-                option_name, recipient, ship_address)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AUTO', ?, ?, ?, ?, ?)""", (
+                option_name, recipient, ship_address, discount_amt, settle_amt_dpj, recipient_phone, zipcode, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AUTO', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
                 order_id, str(row['source']), str(row['market']), str(row['sell_status']), str(row['order_date']),
                 str(row['prod_id']), str(row['prod_name']), str(row['qty']), str(row['order_amt']),
                 str(row['ship_fee']), str(row['vendor_prod_id']), bundle_no, str(row.get('add_ship_fee', '0')),
-                option_name, recipient, ship_address))
+                option_name, recipient, ship_address, discount_amt, settle_amt_dpj, recipient_phone, zipcode, raw_json))
             existing.add(order_id)
             c_in += 1
     conn.commit()
