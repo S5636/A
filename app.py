@@ -353,6 +353,15 @@ def api_dapalza_collect():
             dapalza_auto.bring_marginboard_to_front()
         except Exception:
             pass
+        # 방금 수집으로 '신규주문' 건이 새로 생겼으면(사용자 요청), 프론트에서
+        # 이어서 STOCK(재고확인) 자동화를 바로 이어 실행할 수 있게 알려준다 -
+        # check_stock 자체가 대상으로 삼는 조건(sell_status=='신규주문')과
+        # 똑같은 기준으로 판단해야 "신규주문 없는데도 돌린다"는 불일치가 안 생긴다.
+        try:
+            rows = ce.compute_dataset(DB_PATH, FEES_PATH)
+            result['has_new_orders'] = any(r.get('sell_status') == '신규주문' for r in rows)
+        except Exception:
+            result['has_new_orders'] = False
     return jsonify(result)
 
 

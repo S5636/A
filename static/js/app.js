@@ -605,6 +605,10 @@
         toast(`다팔자 자동 수집 및 반영이 완료되었습니다.${extra}`, 'ok');
         state.loadedTabs.delete('summary');
         loadDashOrders();
+        // 신규주문이 있으면(사용자 요청) STOCK(재고확인)을 이어서 자동으로 실행한다.
+        if (data.has_new_orders) {
+          runCheckStock(true);
+        }
       } else if (data.ok && data.upload && data.upload.error) {
         renderCollectLog('collect-log', data);
         toast(`파일은 저장했지만 반영 중 오류: ${data.upload.error}`, 'err');
@@ -673,12 +677,14 @@
     btn.textContent = 'OC';
   });
 
-  document.getElementById('btn-check-stock').addEventListener('click', async () => {
+  async function runCheckStock(auto) {
     const btn = document.getElementById('btn-check-stock');
     const log = document.getElementById('collect-log');
     btn.disabled = true;
     btn.textContent = '⏳';
-    log.innerHTML = '<div class="hint">신규주문 건들의 재고상태를 오너클랜에서 백그라운드로 확인하는 중... (건수에 따라 시간이 걸릴 수 있어요)</div>';
+    log.innerHTML = auto
+      ? '<div class="hint">방금 수집으로 신규주문이 생겨서, 재고상태를 자동으로 이어서 확인하는 중... (건수에 따라 시간이 걸릴 수 있어요)</div>'
+      : '<div class="hint">신규주문 건들의 재고상태를 오너클랜에서 백그라운드로 확인하는 중... (건수에 따라 시간이 걸릴 수 있어요)</div>';
     try {
       const data = await api('/api/ownerclan/check_stock', { method: 'POST' });
       log.innerHTML = '';
@@ -704,7 +710,9 @@
     }
     btn.disabled = false;
     btn.textContent = 'STOCK';
-  });
+  }
+
+  document.getElementById('btn-check-stock').addEventListener('click', () => runCheckStock(false));
 
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');
