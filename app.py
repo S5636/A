@@ -363,6 +363,21 @@ def api_dapalza_collect():
     except Exception as e:
         upload_res = {'error': _friendly_error(e)}
     result['upload'] = upload_res
+    # 할인액/정산가/연락처/우편번호가 화면에서 계속 0/빈값으로 보이는 게
+    # 우리 파싱 문제인지, 다팔자 자동수집이 받아온 이번 파일에 애초에 그
+    # 컬럼이 없는 건지 바로 구분하려고, 파일 안에 그 컬럼이 실제로
+    # 있었는지를 항상 로그로 남긴다(성공/실패와 무관하게).
+    cols_found = upload_res.get('raw_columns_found')
+    if cols_found is not None:
+        missing = [k for k, v in cols_found.items() if not v]
+        result.setdefault('log', [])
+        if missing:
+            result['log'].append(
+                f"진단정보 - 이번에 자동수집한 파일에 다음 컬럼이 없습니다: {', '.join(missing)} "
+                f"(할인액/실정산가/연락처/우편번호가 0 또는 빈값으로 보이는 원인일 수 있음)."
+            )
+        else:
+            result['log'].append("진단정보 - 할인금액/정산가/수령인연락처/우편번호 컬럼 전부 이번 파일에서 확인됨.")
     # 예전 프로그램(PyQt5)은 업로드가 끝나면 파일을 지우는 구조였는데, 이번
     # 자동화는 그걸 안 해서 정산_업로드_대기 폴더에 같은 이름(다팔자.xlsx)의
     # 파일이 계속 남아있었다 - 그게 다음 저장 시도 때 윈도우 저장창에 '이미

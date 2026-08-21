@@ -298,9 +298,20 @@ def process_upload(db_path, fp, filename):
             c_in += 1
     conn.commit()
     conn.close()
+    # 할인액/정산가/연락처/우편번호가 계속 빈 값으로 나오는 게 우리 파싱
+    # 문제인지, 아니면 이번에 실제로 받은 파일에 그 컬럼 자체가 없는건지
+    # 바로 구분할 수 있게, 정규화된 헤더 기준으로 컬럼 존재 여부를 같이
+    # 돌려준다(temp_df는 _normalize_header로 공백만 제거된 원본 헤더).
+    raw_columns_found = {
+        '할인금액': '할인금액' in temp_df.columns,
+        '정산가': '정산가' in temp_df.columns,
+        '수령인연락처': '수령인연락처' in temp_df.columns,
+        '우편번호': '우편번호' in temp_df.columns,
+    }
     return {'type': source_type, 'inserted': c_in, 'updated': c_up,
             'option_filled': n_option_filled, 'bundle_filled': n_bundle_filled,
-            'status_blank': n_status_blank, 'total_rows': c_in + c_up}
+            'status_blank': n_status_blank, 'total_rows': c_in + c_up,
+            'raw_columns_found': raw_columns_found}
 
 
 # ---------------------------------------------------------------------------

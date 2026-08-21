@@ -615,12 +615,23 @@
         // 실제로 몇 건이나 채워졌는지는 로그 대신 완료 토스트에 짧게
         // 같이 보여준다(다팔자 파일의 옵션 컬럼을 제대로 찾고 있는지
         // 매번 확인할 수 있게).
-        log.innerHTML = '';
         const u = data.upload;
+        const missingCols = u.raw_columns_found
+          ? Object.entries(u.raw_columns_found).filter(([, found]) => !found).map(([name]) => name)
+          : [];
+        if (missingCols.length) {
+          // 할인액/실정산가/연락처/우편번호가 계속 빈 값으로 보이는 게
+          // 파싱 문제인지 이번 파일에 그 컬럼 자체가 없는 건지 바로
+          // 알 수 있게, 컬럼이 없을 땐 로그를 지우지 않고 보여준다.
+          renderCollectLog('collect-log', data);
+        } else {
+          log.innerHTML = '';
+        }
         const extra = (typeof u.total_rows === 'number')
           ? ` (옵션 ${u.option_filled || 0}/${u.total_rows}건, 합배송코드 ${u.bundle_filled || 0}/${u.total_rows}건, 주문상태 빈값 ${u.status_blank || 0}건)`
           : '';
-        toast(`다팔자 자동 수집 및 반영이 완료되었습니다.${extra}`, 'ok');
+        const colWarn = missingCols.length ? ` ※ 이번 파일에 없는 컬럼: ${missingCols.join(', ')}` : '';
+        toast(`다팔자 자동 수집 및 반영이 완료되었습니다.${extra}${colWarn}`, missingCols.length ? 'err' : 'ok');
         state.loadedTabs.delete('summary');
         loadDashOrders();
         // 신규주문이 있으면(사용자 요청) STOCK(재고확인)을 이어서 자동으로 실행한다.
@@ -705,19 +716,27 @@
       : '<div class="hint">신규주문 건들의 재고상태를 오너클랜에서 백그라운드로 확인하는 중... (건수에 따라 시간이 걸릴 수 있어요)</div>';
     try {
       const data = await api('/api/ownerclan/check_stock', { method: 'POST' });
-      log.innerHTML = '';
       if (data.ok) {
         const results = data.results || [];
-        let ok = 0, soldout = 0, fail = 0;
+        let ok = 0, soldout = 0, fail = 0, priceMiss = 0;
         results.forEach((r) => {
           if (r.status === '정상') ok++;
           else if (r.status === '품절') soldout++;
           else fail++;
+          if ((r.status === '정상' || r.status === '품절') && !r.price) priceMiss++;
         });
+        // 매입예상가를 계속 못 가져오는 게 우리 코드 문제인지 화면 구조가
+        // 다른 건지 바로 확인할 수 있게, 가격을 하나라도 못 읽었으면
+        // 로그를 지우지 않고 그대로 보여준다(실패 이유가 로그에 남아있음).
+        if (priceMiss > 0) {
+          renderCollectLog('collect-log', data);
+        } else {
+          log.innerHTML = '';
+        }
         const detail = results.length
-          ? ` - 정상 ${ok}건, 품절 ${soldout}건${fail ? `, 확인실패 ${fail}건` : ''}`
+          ? ` - 정상 ${ok}건, 품절 ${soldout}건${fail ? `, 확인실패 ${fail}건` : ''}${priceMiss ? `, 매입예상가 확인 실패 ${priceMiss}건` : ''}`
           : '';
-        toast(`재고상태 확인 완료 (${data.checked || 0}건)${detail}.`, 'ok');
+        toast(`재고상태 확인 완료 (${data.checked || 0}건)${detail}.`, priceMiss ? 'err' : 'ok');
         loadDashOrders();
       } else {
         const reason = (data.log && data.log.length) ? ` - ${data.log[data.log.length - 1]}` : '';
