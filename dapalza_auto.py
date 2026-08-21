@@ -13,6 +13,7 @@ import ctypes
 import os
 import platform
 import re
+import threading
 import time
 
 
@@ -437,7 +438,7 @@ def _dismiss_invalid_filename_dialog(log=None):
     return False
 
 
-def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.xlsx', wait_after_collect=10):
+def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동수집.xlsx', wait_after_collect=10):
     log = []
 
     def L(msg):
@@ -934,3 +935,32 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
     except Exception as e:
         L(f'자동화 중 오류 발생 - {type(e).__name__}: {e}')
         return {'ok': False, 'log': log}
+
+
+def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.xlsx', wait_after_collect=10):
+    """pywinauto(UIA)는 내부적으로 COM을 쓰는데, 지금까지 이 자동화는 Flask가
+    요청을 처리하는 그 스레드에서 직접 돌았다 - 오너클랜(Playwright) 쪽은
+    이미 예전에 "요청마다 스레드가 다를 수 있어서 세션이 깨진다"는 문제를
+    겪고 전용 백그라운드 스레드로 옮겨서 고쳤는데(이 파일 위쪽 주석 참고),
+    다팔자 쪽은 그 조치가 안 돼 있었다.
+
+    다팔자는 화면이 멀쩡한데(사용자 확인: "다팔자는 바뀐게 없는데") 창을
+    찾은 뒤 접근성 트리가 몇 분을 기다려도 창 테두리 수준(11개)에서 전혀
+    안 늘어나는 증상이 반복됐다 - 서버(마진보드)를 오래 켜둔 채로 이
+    버튼을 수십~수백 번 누르는 동안, 매번 같은 스레드에서 pywinauto의
+    COM 상태가 계속 재사용되다가 조금씩 오염돼서 이런 증상으로 이어졌을
+    가능성이 있다. 매번 완전히 새 스레드를 만들어서 그 안에서만 돌리면,
+    COM이 그 스레드에서 항상 처음부터 새로 초기화되어 이전 실행의 상태가
+    절대 넘어오지 않는다."""
+    result_box = {}
+
+    def _run():
+        try:
+            result_box['result'] = _collect_and_upload_impl(save_folder, save_filename, wait_after_collect)
+        except Exception as e:
+            result_box['result'] = {'ok': False, 'log': [f'자동화 스레드 실행 중 오류: {type(e).__name__}: {e}']}
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join()
+    return result_box.get('result') or {'ok': False, 'log': ['자동화 스레드가 결과를 남기지 못했습니다.']}
