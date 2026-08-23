@@ -474,6 +474,24 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
         L('이 기능은 윈도우 PC에서만 동작합니다 (다팔자가 윈도우 프로그램이라서요).')
         return {'ok': False, 'log': log}
 
+    # 지금까지 손댔던 대기시간/재포커스/스레드분리/사전정리 전부 효과가
+    # 없었다(사용자가 실시간 로그로 여러 번 재현: 접근성 트리가 정확히
+    # 11개, 즉 순수 윈도우 테두리 수준에서 단 한 번도 안 늘어남) - 이건
+    # "느려서" 못 여는 게 아니라, 다팔자(Electron/Chromium)가 접근성 트리
+    # 생성 자체를 아예 켜지 않은 상태로 보인다. 크로미움 기반 앱은 성능
+    # 때문에 기본적으로 접근성 지원을 꺼두고, 윈도우가 "화면읽기 프로그램이
+    # 켜져있다"고 알려줄 때만 켠다 - 이걸 시스템 전체에 알리는 표준 방법이
+    # SystemParametersInfo(SPI_SETSCREENREADER)다. 이미 켜져 있다면 아무
+    # 효과 없이 안전하게 넘어간다. 세션이 끝나면(로그아웃/재부팅) 자동으로
+    # 원래대로 돌아가는 설정이라 영구 변경은 아니다.
+    try:
+        SPI_SETSCREENREADER = 0x0047
+        SPIF_SENDCHANGE = 0x02
+        ok = ctypes.windll.user32.SystemParametersInfoW(SPI_SETSCREENREADER, 1, None, SPIF_SENDCHANGE)
+        L(f'윈도우에 화면읽기 프로그램이 켜져있다고 알려서 다팔자(크로미움)의 접근성 지원을 활성화 시도했습니다 (결과: {bool(ok)}).')
+    except Exception as e:
+        L(f'접근성 지원 활성화 시도 실패(무시하고 계속 진행): {type(e).__name__}: {e}')
+
     try:
         from pywinauto import Desktop
     except ImportError:
