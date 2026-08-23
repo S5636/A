@@ -46,6 +46,28 @@ _task_queue = queue.Queue()
 _worker_started = False
 _worker_start_lock = threading.Lock()
 
+# STOCK(재고확인)이 신규주문 건수가 많으면 몇 분씩 걸릴 수 있는데, DPJ와
+# 똑같이 요청이 다 끝나야만 로그를 통째로 돌려주는 구조라 그동안 화면이
+# 안 바뀌어서 "멈췄다"는 오해로 이어졌다(DPJ에서 실제로 겪은 문제와 동일) -
+# 진행 중 로그를 실시간으로 조회할 수 있게 같은 방식으로 버퍼를 둔다.
+_oc_progress_lock = threading.Lock()
+_oc_progress_log = []
+
+
+def get_progress():
+    with _oc_progress_lock:
+        return list(_oc_progress_log)
+
+
+def _reset_oc_progress():
+    with _oc_progress_lock:
+        _oc_progress_log.clear()
+
+
+def _push_oc_progress(msg):
+    with _oc_progress_lock:
+        _oc_progress_log.append(msg)
+
 
 def _worker_loop():
     while True:
@@ -678,10 +700,12 @@ def check_stock(order_url, items):
     """(판매사상품코드, 주문된 옵션) 조합 목록을 받아 각각 오너클랜에서
     재고상태를 확인해서 [{'vendor_prod_id':.., 'option_name':.., 'status':
     '정상'|'품절'|'확인실패'}, ...] 리스트로 돌려준다."""
+    _reset_oc_progress()
     log = []
 
     def L(msg):
         log.append(msg)
+        _push_oc_progress(msg)
 
     if platform.system() != 'Windows':
         L('이 기능은 윈도우 PC에서만 동작합니다.')

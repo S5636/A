@@ -726,6 +726,14 @@
     log.innerHTML = auto
       ? '<div class="hint">방금 수집으로 신규주문이 생겨서, 재고상태를 자동으로 이어서 확인하는 중... (건수에 따라 시간이 걸릴 수 있어요)</div>'
       : '<div class="hint">신규주문 건들의 재고상태를 오너클랜에서 백그라운드로 확인하는 중... (건수에 따라 시간이 걸릴 수 있어요)</div>';
+    // DPJ와 같은 이유로 - 건수가 많으면 몇 분씩 걸릴 수 있는데 그동안 화면이
+    // 안 바뀌면 "멈췄다"는 오해로 이어진다. 진행 중 로그를 실시간으로 보여준다.
+    const progressTimer = setInterval(async () => {
+      try {
+        const p = await api('/api/ownerclan/progress');
+        if (p.log && p.log.length) renderCollectLog('collect-log', p);
+      } catch (_) { /* 진행상황 조회 실패는 무시 - 본 요청 결과가 우선 */ }
+    }, 1500);
     try {
       const data = await api('/api/ownerclan/check_stock', { method: 'POST' });
       if (data.ok) {
@@ -756,6 +764,8 @@
       }
     } catch (e) {
       toast('재고상태 확인 요청이 실패했습니다.', 'err');
+    } finally {
+      clearInterval(progressTimer);
     }
     btn.disabled = false;
     btn.textContent = 'STOCK';

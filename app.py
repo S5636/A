@@ -455,6 +455,13 @@ def api_ownerclan_collect():
     return jsonify(result)
 
 
+@app.route('/api/ownerclan/progress')
+def api_ownerclan_progress():
+    # STOCK도 DPJ와 같은 이유로(요청이 끝나야만 로그를 통째로 돌려주는
+    # 구조라 진행 중엔 화면이 안 바뀜) 실시간 진행상황 조회가 필요하다.
+    return jsonify({'log': ownerclan_auto.get_progress()})
+
+
 @app.route('/api/ownerclan/check_stock', methods=['POST'])
 def api_ownerclan_check_stock():
     settings = load_settings()

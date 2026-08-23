@@ -417,7 +417,7 @@ def compute_dataset(db_path, fees_path):
             margin_amt = int(total_sales - fee_amt - display_buy_cost - display_buy_ship)
             margin_rate = round((margin_amt / total_sales * 100.0), 1) if total_sales > 0 else 0.0
         else:
-            margin_label = "반품(제외)" if is_returned else ("취소(제외)" if is_cancelled_other else "미매입(제외)")
+            margin_label = "반품" if is_returned else ("취소" if is_cancelled_other else "미매입")
 
         is_toss = 'TOSS' in market_name or 'TOSS' in source_name
 
