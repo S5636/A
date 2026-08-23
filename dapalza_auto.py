@@ -659,16 +659,47 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
                     ok_ctrl = _find_smallest_text_match(win, '확인', L, descendants=descendants)
                 if ok_ctrl is None:
                     ok_ctrl = _find_control(win, '확인', 'Button')
+                clicked = False
                 if ok_ctrl is not None:
+                    # click_input()은 화면 좌표를 실제로 클릭하는 방식이라, 그
+                    # 좌표를 다른 요소(예: 이 카드 위에 겹쳐진 X 닫기 아이콘,
+                    # 또는 살짝 밀린 좌표)가 가로채면 조용히 실패할 수 있다.
+                    # invoke()는 좌표 없이 그 컨트롤 자체에 "눌러라"라고 직접
+                    # 명령하는 방식(UIA InvokePattern)이라 훨씬 안정적이다 -
+                    # 먼저 시도하고, 그 컨트롤이 이 방식을 지원 안 하면(예외)
+                    # 예전 방식(click_input)으로 대체한다.
                     try:
-                        ok_ctrl.click_input()
-                        L("'확인' 버튼 클릭 완료.")
+                        ok_ctrl.invoke()
+                        clicked = True
+                        L("'확인' 버튼 invoke()로 클릭 완료.")
+                    except Exception:
+                        try:
+                            ok_ctrl.click_input()
+                            clicked = True
+                            L("'확인' 버튼 클릭 완료.")
+                        except Exception as e:
+                            L(f"'확인' 버튼 클릭 실패(invoke/click_input 둘 다): {type(e).__name__}: {e}")
+                if clicked:
+                    confirmed = True
+                    break
+                # 버튼을 못 찾았거나 두 클릭 방식 다 실패했을 때 - 이런 완료
+                # 확인창은 보통 Enter 키에 기본 버튼(확인)이 매핑돼 있는
+                # 경우가 많아서, 마지막으로 Enter 전송을 시도해본다. 위험이
+                # 낮은 동작이라(이 시점엔 확인창 말고 다른 걸 조작할 상황이
+                # 아님) 안전하게 시도할 수 있다.
+                L("확인 버튼을 못 찾았거나 클릭에 실패했습니다 - Enter 키로 대체 시도합니다...")
+                try:
+                    win.type_keys('{ENTER}')
+                    time.sleep(1)
+                    still_there = _find_smallest_text_match(win, '완료하였습니다', None) is not None
+                    if still_there:
+                        L('Enter 키를 보냈지만 완료 메시지가 아직 남아있습니다 - 계속 재시도합니다.')
+                    else:
+                        L('Enter 키로 완료 팝업이 닫힌 것으로 보입니다.')
                         confirmed = True
                         break
-                    except Exception as e:
-                        L(f"'확인' 버튼 클릭 실패: {type(e).__name__}: {e}")
-                else:
-                    L("완료 메시지는 보이는데 '확인' 버튼을 못 찾았습니다 - 계속 재시도합니다.")
+                except Exception as e:
+                    L(f'Enter 키 전송 실패: {type(e).__name__}: {e}')
 
             # 혹시 별도 팝업 창으로 뜨는 구버전/다른 상황도 대비해서 함께 확인한다.
             try:
