@@ -24,6 +24,10 @@ import time
 # 언제든 지금까지 쌓인 로그를 즉시 돌려줄 수 있다 - 화면이 1~2초마다 이걸
 # 폴링해서 실제로 어디까지 진행됐는지 실시간으로 보여줄 수 있게 됨.
 _progress_lock = threading.Lock()
+# DPJ 자동화가 동시에 두 번 겹쳐 돌면 같은 다팔자 창을 두 스레드가 동시에
+# 조작하게 돼서 서로 다른 단계를 눌러대며 꼬인다 - 한 번에 하나만 돌게
+# 막는 잠금.
+_run_lock = threading.Lock()
 _progress_log = []
 
 
@@ -1049,17 +1053,35 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
     COM 상태가 계속 재사용되다가 조금씩 오염돼서 이런 증상으로 이어졌을
     가능성이 있다. 매번 완전히 새 스레드를 만들어서 그 안에서만 돌리면,
     COM이 그 스레드에서 항상 처음부터 새로 초기화되어 이전 실행의 상태가
-    절대 넘어오지 않는다."""
-    _reset_progress()
-    result_box = {}
+    절대 넘어오지 않는다.
 
-    def _run():
-        try:
-            result_box['result'] = _collect_and_upload_impl(save_folder, save_filename, wait_after_collect)
-        except Exception as e:
-            result_box['result'] = {'ok': False, 'log': [f'자동화 스레드 실행 중 오류: {type(e).__name__}: {e}']}
+    서버를 threaded=True로 바꾼 뒤로(진행상황 실시간 조회를 위해 필요했음)
+    생긴 새 위험도 하나 막는다: 예전엔 서버가 요청을 하나씩만 처리해서
+    DPJ를 연달아 눌러도 두 번째는 첫 번째가 끝날 때까지 자동으로 대기
+    했는데, 지금은 진짜로 동시에 여러 요청이 들어올 수 있다 - 그러면
+    자동화 두 개가 동시에 같은 다팔자 창을 붙잡고 서로 다른 단계를
+    누르려고 하면서 뒤죽박죽 꼬이는 사고로 이어진다(실제로 사용자가
+    "계속 같은 구간에서 멈춘다"고 재현 - 로그를 보면 실제로는 한 번은
+    끝까지 성공했는데 그 뒤로도 로그가 계속 늘어나고 있었음, 두 번째
+    실행이 겹쳐 돈 것으로 보임). 한 번에 하나만 실행되게 잠가서, 이미
+    돌고 있을 때 또 요청이 오면 충돌 없이 바로 거절한다."""
+    if not _run_lock.acquire(blocking=False):
+        msg = '이미 다른 다팔자 자동화가 진행 중입니다 - 그 작업이 끝난 뒤에 다시 눌러주세요 (여러 번 연달아 누르면 서로 충돌해서 꼬일 수 있어 동시 실행을 막았습니다).'
+        _push_progress(msg)
+        return {'ok': False, 'log': [msg]}
+    try:
+        _reset_progress()
+        result_box = {}
 
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    t.join()
-    return result_box.get('result') or {'ok': False, 'log': ['자동화 스레드가 결과를 남기지 못했습니다.']}
+        def _run():
+            try:
+                result_box['result'] = _collect_and_upload_impl(save_folder, save_filename, wait_after_collect)
+            except Exception as e:
+                result_box['result'] = {'ok': False, 'log': [f'자동화 스레드 실행 중 오류: {type(e).__name__}: {e}']}
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join()
+        return result_box.get('result') or {'ok': False, 'log': ['자동화 스레드가 결과를 남기지 못했습니다.']}
+    finally:
+        _run_lock.release()
