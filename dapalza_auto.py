@@ -16,6 +16,31 @@ import re
 import threading
 import time
 
+# DPJ 버튼을 누르면 결과가 다 끝날 때까지(길면 몇 분) 보드 화면에 아무
+# 변화가 없어서 "멈췄다"는 오해를 계속 샀다 - 지금까지는 로그를 요청 하나가
+# 끝나야만(성공/실패 최종 응답 한 번에) 통째로 돌려주는 구조라, 진행 중에는
+# 화면이 업데이트될 방법이 없었다. 진행 중에도 이 리스트를 실시간으로
+# 채워두면, 별도의 조회용 엔드포인트(app.py의 /api/dapalza/progress)가
+# 언제든 지금까지 쌓인 로그를 즉시 돌려줄 수 있다 - 화면이 1~2초마다 이걸
+# 폴링해서 실제로 어디까지 진행됐는지 실시간으로 보여줄 수 있게 됨.
+_progress_lock = threading.Lock()
+_progress_log = []
+
+
+def get_progress():
+    with _progress_lock:
+        return list(_progress_log)
+
+
+def _reset_progress():
+    with _progress_lock:
+        _progress_log.clear()
+
+
+def _push_progress(msg):
+    with _progress_lock:
+        _progress_log.append(msg)
+
 
 def _find_hwnds_by_class(class_name, exclude_handles=None):
     """UI Automation의 Desktop(backend='uia').windows()가 특정 창(윈도우 표준
@@ -443,6 +468,7 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
 
     def L(msg):
         log.append(msg)
+        _push_progress(msg)
 
     if platform.system() != 'Windows':
         L('이 기능은 윈도우 PC에서만 동작합니다 (다팔자가 윈도우 프로그램이라서요).')
@@ -983,6 +1009,7 @@ def collect_and_upload(save_folder=None, save_filename='다팔자_자동수집.x
     가능성이 있다. 매번 완전히 새 스레드를 만들어서 그 안에서만 돌리면,
     COM이 그 스레드에서 항상 처음부터 새로 초기화되어 이전 실행의 상태가
     절대 넘어오지 않는다."""
+    _reset_progress()
     result_box = {}
 
     def _run():

@@ -340,6 +340,15 @@ def api_upload():
     return jsonify({'results': results})
 
 
+@app.route('/api/dapalza/progress')
+def api_dapalza_progress():
+    # DPJ 버튼을 누르면 몇 분씩 걸릴 수 있는데, 지금까지는 요청이 끝나야만
+    # 로그를 통째로 돌려주는 구조라 그동안 화면이 하나도 안 바뀌어서 "멈췄다"는
+    # 오해를 계속 샀다(사용자 반복 확인) - 진행 중인 로그를 언제든 즉시 조회할
+    # 수 있게 해서, 화면이 이걸 주기적으로 물어봐서 실시간으로 보여줄 수 있다.
+    return jsonify({'log': dapalza_auto.get_progress()})
+
+
 @app.route('/api/dapalza/collect', methods=['POST'])
 def api_dapalza_collect():
     # 오너클랜 창이 로그인 등으로 화면에 떠서 다팔자 창을 가리고 있으면,

@@ -84,7 +84,14 @@ def main():
     threading.Thread(target=open_browser_later, daemon=True).start()
 
     import app  # requirements 설치가 끝난 뒤에 import (미리 하면 설치 전에 실패함)
-    app.app.run(host="127.0.0.1", port=5000, debug=False)
+    # threaded=True가 꼭 필요하다 - DPJ 자동화 요청 하나가 몇 분씩 걸릴 수
+    # 있는데, 기본값(단일 스레드)이면 그동안 서버가 다른 어떤 요청도(진행
+    # 상황 조회는 물론 평범한 페이지 새로고침까지) 전혀 처리 못 해서 화면이
+    # 완전히 멈춘 것처럼 보였다. pywinauto/COM을 다루는 실제 자동화 작업은
+    # 어차피 항상 별도로 새로 만든 전용 스레드에서만 돌아가게 이미 분리해뒀기
+    # 때문에(dapalza_auto.collect_and_upload 참고), Flask 쪽 스레드 개수가
+    # 늘어나도 그 COM 안전성에는 영향이 없다.
+    app.app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
     return True
 
 

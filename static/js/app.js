@@ -607,6 +607,16 @@
     btn.disabled = true;
     btn.textContent = '⏳';
     log.innerHTML = '<div class="hint">다팔자 자동화를 시작합니다... (다팔자 창을 건드리지 마세요)</div>';
+    // DPJ는 몇 분씩 걸릴 수 있는데, 예전엔 다 끝나야만 로그가 한 번에
+    // 통째로 보여서 그동안 화면이 그대로라 "멈췄다"는 오해를 계속 샀다 -
+    // 진행 중에도 1.5초마다 지금까지 쌓인 로그를 물어봐서 실시간으로
+    // 보여준다(요청이 끝나면 아래 finally에서 멈춘다).
+    const progressTimer = setInterval(async () => {
+      try {
+        const p = await api('/api/dapalza/progress');
+        if (p.log && p.log.length) renderCollectLog('collect-log', p);
+      } catch (_) { /* 진행상황 조회 실패는 무시 - 본 요청 결과가 우선 */ }
+    }, 1500);
     try {
       const data = await api('/api/dapalza/collect', { method: 'POST' });
       if (data.ok && data.upload && !data.upload.error) {
@@ -648,6 +658,8 @@
     } catch (e) {
       log.innerHTML = `<div class="upload-log-item err"><span>${e.message}</span></div>`;
       toast('자동 수집 요청이 실패했습니다.', 'err');
+    } finally {
+      clearInterval(progressTimer);
     }
     btn.disabled = false;
     btn.textContent = 'DPJ';
