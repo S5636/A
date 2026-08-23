@@ -302,11 +302,16 @@ def process_upload(db_path, fp, filename):
     # 문제인지, 아니면 이번에 실제로 받은 파일에 그 컬럼 자체가 없는건지
     # 바로 구분할 수 있게, 정규화된 헤더 기준으로 컬럼 존재 여부를 같이
     # 돌려준다(temp_df는 _normalize_header로 공백만 제거된 원본 헤더).
+    # STOCK(재고확인) 버튼이 "실행은 되는데 아무 결과도 안 나온다"는
+    # 증상의 실제 원인이 판매사상품코드(vendor_prod_id) 컬럼 자체가 이번
+    # 파일에 없어서 확인 대상이 0건이 되는 것일 수 있어(신규주문 필터링에
+    # 필수 컬럼), 이것도 같은 진단정보에 포함해 바로 구분할 수 있게 한다.
     raw_columns_found = {
         '할인금액': '할인금액' in temp_df.columns,
         '정산가': '정산가' in temp_df.columns,
         '수령인연락처': '수령인연락처' in temp_df.columns,
         '우편번호': '우편번호' in temp_df.columns,
+        '판매사상품번호/업체상품코드': any(c in temp_df.columns for c in ('판매사상품번호', '업체상품코드')),
     }
     return {'type': source_type, 'inserted': c_in, 'updated': c_up,
             'option_filled': n_option_filled, 'bundle_filled': n_bundle_filled,

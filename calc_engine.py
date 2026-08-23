@@ -388,7 +388,15 @@ def compute_dataset(db_path, fees_path):
         ad_chk = str(r[idx_['ad_chk']] or 'N') if 'ad_chk' in idx_ else 'N'
         fee_amt, disp_f1, disp_f2 = compute_fee(order_amt, ship_fee, add_ship_fee, market_name, source_name,
                                                  prod_name, fees_config, ad_chk)
-        settle_amt = int(total_sales - fee_amt)
+        # 실제 다팔자 실정산가와 비교해본 결과(사용자 요청으로 옥션/지마켓
+        # 3건 직접 대조): order_amt를 이미 "주문금액-할인금액"(실결제액)으로
+        # 한 번 반영했는데도, 실정산가는 그보다 할인금액만큼 한 번 더 낮았다
+        # - 판매자부담 쿠폰은 실결제액이 줄어드는 것과 별개로, 마켓이 그
+        # 쿠폰 비용을 판매자 정산에서 추가로 차감하는 방식으로 보인다(할인
+        # 안 빼면 오차 40%대, 한 번 더 빼면 3~6%대로 크게 줄어듦 - 완전히
+        # 정확히 맞진 않지만 훨씬 근접함). 정산예정액/마진 계산에도 할인액을
+        # 추가로 한 번 더 반영한다.
+        settle_amt = int(total_sales - fee_amt - discount_amt)
 
         margin_chk = str(r[idx_['margin_chk']] or 'AUTO') if 'margin_chk' in idx_ else 'AUTO'
         status_combined = m['buy_status'] + sell_status
@@ -414,7 +422,8 @@ def compute_dataset(db_path, fees_path):
         margin_rate = None
         margin_label = None
         if is_included:
-            margin_amt = int(total_sales - fee_amt - display_buy_cost - display_buy_ship)
+            # settle_amt와 동일하게 할인액(쿠폰 이중차감분)을 마진 계산에도 반영
+            margin_amt = int(total_sales - fee_amt - discount_amt - display_buy_cost - display_buy_ship)
             margin_rate = round((margin_amt / total_sales * 100.0), 1) if total_sales > 0 else 0.0
         else:
             margin_label = "반품" if is_returned else ("취소" if is_cancelled_other else "미매입")

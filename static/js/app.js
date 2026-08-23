@@ -748,15 +748,19 @@
         // 매입예상가를 계속 못 가져오는 게 우리 코드 문제인지 화면 구조가
         // 다른 건지 바로 확인할 수 있게, 가격을 하나라도 못 읽었으면
         // 로그를 지우지 않고 그대로 보여준다(실패 이유가 로그에 남아있음).
-        if (priceMiss > 0) {
+        // 확인한 건수가 아예 0건일 때도(예: 확인 대상 상품코드가 없어서
+        // 조용히 "완료"로 끝나버리는 경우) 로그를 지워버리면 왜 0건인지
+        // 이유(로그에 남는 "확인할 판매사상품코드가 없습니다" 등)를 사용자가
+        // 못 보고 "STOCK이 아예 안 돈다"고 오해하게 된다 - 0건일 때도 로그를 남긴다.
+        if (priceMiss > 0 || results.length === 0) {
           renderCollectLog('collect-log', data);
         } else {
           log.innerHTML = '';
         }
         const detail = results.length
           ? ` - 정상 ${ok}건, 품절 ${soldout}건${fail ? `, 확인실패 ${fail}건` : ''}${priceMiss ? `, 매입예상가 확인 실패 ${priceMiss}건` : ''}`
-          : '';
-        toast(`재고상태 확인 완료 (${data.checked || 0}건)${detail}.`, priceMiss ? 'err' : 'ok');
+          : ' - 확인할 대상이 없었습니다(아래 로그 확인).';
+        toast(`재고상태 확인 완료 (${data.checked || 0}건)${detail}.`, (priceMiss || results.length === 0) ? 'err' : 'ok');
         loadDashOrders();
       } else {
         const reason = (data.log && data.log.length) ? ` - ${data.log[data.log.length - 1]}` : '';
