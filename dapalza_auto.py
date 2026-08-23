@@ -684,10 +684,15 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
                 descendants = None
 
             # 수집을 기다리는 도중에도 다팔자 자체 자동동기화가 새로 돌면서
-            # 토스트가 뜰 수 있다 - 그때그때 바로 닫아준다.
+            # 토스트가 뜰 수 있다 - 그때그때 바로 닫아준다. 예전엔 여기서
+            # continue로 이번 주기를 건너뛰었는데, 이 상점은 자동동기화가
+            # 거의 끊임없이 도는 경우가 있어서(실제 로그로 확인: 같은
+            # 대기 주기 안에서 토스트 닫기 메시지가 계속 반복됨) 그때마다
+            # continue로 건너뛰면 "수집 완료" 팝업이 동시에 떠 있어도
+            # 아래 done_marker 확인까지 절대 못 내려가는 사고로 이어졌다.
+            # 토스트를 닫았어도 같은 주기에 완료 팝업 확인까지 계속 진행한다.
             if _dismiss_sync_toast(win, L, descendants=descendants):
                 time.sleep(1)
-                continue
 
             # 특정 마켓(네이버 등) 계정이 허용량을 소진했을 때만 뜨는 확인
             # 팝업 - "지금 진행하면 나머지 계정은 정상 처리되고 위 계정만
