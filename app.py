@@ -404,13 +404,15 @@ def api_dapalza_collect():
             dapalza_auto.bring_marginboard_to_front()
         except Exception:
             pass
-        # 방금 수집으로 '신규주문' 건이 새로 생겼으면(사용자 요청), 프론트에서
+        # 방금 수집으로 재고상태 칸이 비어있는 건이 새로 생겼으면, 프론트에서
         # 이어서 STOCK(재고확인) 자동화를 바로 이어 실행할 수 있게 알려준다 -
-        # check_stock 자체가 대상으로 삼는 조건(sell_status=='신규주문')과
-        # 똑같은 기준으로 판단해야 "신규주문 없는데도 돌린다"는 불일치가 안 생긴다.
+        # check_stock 자체가 대상으로 삼는 조건(취소/반품이 아니고 아직 칸이
+        # 비어있음)과 똑같은 기준으로 판단해야 "확인할 게 없는데도 돌린다"는
+        # 불일치가 안 생긴다.
         try:
             rows = ce.compute_dataset(DB_PATH, FEES_PATH)
-            result['has_new_orders'] = any(r.get('sell_status') == '신규주문' for r in rows)
+            result['has_new_orders'] = any(
+                r.get('vendor_prod_id') and not r.get('is_cancelled') and not r.get('stock_status') for r in rows)
         except Exception:
             result['has_new_orders'] = False
     return jsonify(result)
@@ -466,13 +468,17 @@ def api_ownerclan_progress():
 def api_ownerclan_check_stock():
     settings = load_settings()
     rows = ce.compute_dataset(DB_PATH, FEES_PATH)
-    # '신규주문' 건들의 (판매사상품코드, 실제 주문된 옵션) 조합을 확인 대상으로
-    # 삼는다 (사용자 요청: 이미 확정/배송된 건은 재고 확인이 필요 없음).
-    # 예전엔 상품코드만 보고 '옵션 중 아무거나 하나라도 살아있으면 정상'으로
-    # 판정해서, 정작 주문된 그 옵션이 품절이어도 정상으로 잘못 나오는 문제가
-    # 있었다 - 반드시 주문에 찍힌 옵션 그대로 매칭해야 한다.
+    # 예전엔 '신규주문' 상태인 건만 확인 대상으로 삼았는데, 그러면 신규주문일
+    # 때 확인을 못 받고 배송준비/배송중으로 넘어간 건은 재고상태/매입예상가
+    # 칸이 영원히 공란으로 남았다(사용자 지적). 이제는 상태와 무관하게
+    # "재고상태 칸이 아직 비어있는" (판매사상품코드, 옵션) 조합이면 전부
+    # 확인 대상에 넣는다 - 한 번 채워지면(stock_status가 채워짐) 다음부턴
+    # 다시 확인하지 않는다. 다만 취소/반품 건은 재고를 확인할 이유가 없으니
+    # 그대로 제외한다. 예전처럼 상품코드만 보고 '옵션 중 아무거나 하나라도
+    # 살아있으면 정상'으로 판정하면 실제 주문된 옵션이 품절이어도 정상으로
+    # 잘못 나오는 문제가 있었으니, 여기서도 반드시 주문에 찍힌 옵션 그대로 매칭한다.
     items = sorted({(r['vendor_prod_id'], r.get('option_name') or '') for r in rows
-                     if r.get('sell_status') == '신규주문' and r.get('vendor_prod_id')})
+                     if r.get('vendor_prod_id') and not r.get('is_cancelled') and not r.get('stock_status')})
     result = ownerclan_auto.check_stock(settings.get('ownerclan_url', ''), items)
     if result.get('ok') and result.get('results'):
         conn = sqlite3.connect(DB_PATH)

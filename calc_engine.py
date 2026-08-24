@@ -452,17 +452,18 @@ def compute_dataset(db_path, fees_path):
             'settle_amt': settle_amt,
             'vendor_prod_id': m['vendor_prod_id'],
             'option_name': str(r[idx_['option_name']] or '') if 'option_name' in idx_ else '',
-            # 재고상태는 상품+옵션 단위로 캐시돼있어서, 같은 상품을 산 취소된
-            # 주문 건도 캐시 키가 같으면 화면에 그대로 보였다 - 취소건까지
-            # 품절/정상이 찍혀 보여서 헷갈린다는 지적이 있었다. STOCK 확인
-            # 대상 자체가 '신규주문' 건으로 한정돼있으니(app.py), 표시도
-            # 똑같이 신규주문 건에만 보이게 맞춘다.
-            'stock_status': (stock_map.get(
-                (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ('', ''))[0]
-                if sell_status == '신규주문' else ''),
-            'est_buy_price': (stock_map.get(
-                (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ('', ''))[1]
-                if sell_status == '신규주문' else ''),
+            # 예전엔 '신규주문' 상태일 때만 화면에 보여줬는데, 그러다보니
+            # 신규주문일 때 STOCK 확인을 못 받은 건이 배송준비/배송중으로
+            # 넘어가는 순간 그 칸이 영원히 공란으로 남는 문제가 있었다(사용자
+            # 지적: "칸이 비어있으면 무조건 확인하고 그값을 저장한다") -
+            # 이제 상태와 무관하게, 캐시(stock_map)에 값이 있으면 그대로
+            # 보여준다. 확인 대상 선정(app.py의 check_stock)도 '신규주문'
+            # 대신 '아직 이 칸이 비어있는지'로 바꿔서, 취소/반품이 아닌 이상
+            # 상태가 뭐든 값이 채워질 때까지 계속 확인 대상에 포함되게 했다.
+            'stock_status': stock_map.get(
+                (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ('', ''))[0],
+            'est_buy_price': stock_map.get(
+                (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ('', ''))[1],
             'buy_cost': int(display_buy_cost),
             'buy_ship_fee': int(display_buy_ship),
             'buy_total': int(display_buy_cost + display_buy_ship),
@@ -471,6 +472,7 @@ def compute_dataset(db_path, fees_path):
             'margin_label': margin_label,
             'margin_chk': margin_chk,
             'is_included': is_included,
+            'is_cancelled': is_cancelled,
             'ad_chk': ad_chk,
             'order_chk': str(r[idx_['order_chk']] or 'N') if 'order_chk' in idx_ else 'N',
             # 오너클랜 자동발주(ORDER 버튼)가 배송정보를 자동으로 채우는 데
