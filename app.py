@@ -24,6 +24,11 @@ DB_PATH = os.path.join(BASE_DIR, 'shop_data.db')
 FEES_PATH = os.path.join(BASE_DIR, 'fees_config.json')
 SETTINGS_PATH = os.path.join(BASE_DIR, 'settings.json')
 SETTLEMENT_UPLOAD_DIR = r'C:\Users\SEONG\Desktop\이유상점_정산\정산_업로드_대기'
+# STOCK(재고확인) 대상에서 제외할, 이미 다 끝난 주문상태(사용자 지적: "배송완료
+# 구매확정 반품 취소는 할필요가 없는데") - 취소/반품 계열은 calc_engine의
+# is_cancelled가 걸러주지만, 정상적으로 다 끝난 배송완료/구매확정/교환완료는
+# is_cancelled가 아니라서 따로 걸러야 한다.
+FINISHED_SELL_STATUSES = {'배송완료', '구매확정', '교환완료'}
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
@@ -412,7 +417,8 @@ def api_dapalza_collect():
         try:
             rows = ce.compute_dataset(DB_PATH, FEES_PATH)
             result['has_new_orders'] = any(
-                r.get('vendor_prod_id') and not r.get('is_cancelled') and not r.get('stock_status') for r in rows)
+                r.get('vendor_prod_id') and not r.get('is_cancelled') and not r.get('stock_status')
+                and r.get('sell_status') not in FINISHED_SELL_STATUSES for r in rows)
         except Exception:
             result['has_new_orders'] = False
     return jsonify(result)
@@ -474,11 +480,16 @@ def api_ownerclan_check_stock():
     # "재고상태 칸이 아직 비어있는" (판매사상품코드, 옵션) 조합이면 전부
     # 확인 대상에 넣는다 - 한 번 채워지면(stock_status가 채워짐) 다음부턴
     # 다시 확인하지 않는다. 다만 취소/반품 건은 재고를 확인할 이유가 없으니
-    # 그대로 제외한다. 예전처럼 상품코드만 보고 '옵션 중 아무거나 하나라도
+    # 그대로 제외하고, 배송완료/구매확정처럼 이미 다 끝난 주문도 마찬가지로
+    # 제외한다(사용자 지적: "배송완료 구매확정 반품 취소는 할필요가 없는데" -
+    # is_cancelled는 취소/반품 계열만 걸러내고 이미 완료된 정상 배송 건은
+    # 안 걸러내서, 이 조건을 처음 넣었을 때 전체 주문을 다 확인해버리는
+    # 사고로 이어졌다). 예전처럼 상품코드만 보고 '옵션 중 아무거나 하나라도
     # 살아있으면 정상'으로 판정하면 실제 주문된 옵션이 품절이어도 정상으로
     # 잘못 나오는 문제가 있었으니, 여기서도 반드시 주문에 찍힌 옵션 그대로 매칭한다.
     items = sorted({(r['vendor_prod_id'], r.get('option_name') or '') for r in rows
-                     if r.get('vendor_prod_id') and not r.get('is_cancelled') and not r.get('stock_status')})
+                     if r.get('vendor_prod_id') and not r.get('is_cancelled') and not r.get('stock_status')
+                     and r.get('sell_status') not in FINISHED_SELL_STATUSES})
     result = ownerclan_auto.check_stock(settings.get('ownerclan_url', ''), items)
     if result.get('ok') and result.get('results'):
         conn = sqlite3.connect(DB_PATH)
