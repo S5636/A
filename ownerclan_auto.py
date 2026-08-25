@@ -545,7 +545,7 @@ def _check_one_stock(page, order_url, code, option, L):
         page.goto(url, wait_until='domcontentloaded', timeout=30000)
     except Exception as e:
         L(f"[{code}] 검색 페이지 이동 실패: {type(e).__name__}: {e}")
-        return '확인실패', None
+        return '확인실패', None, False
 
     # 이동이 '성공'으로 처리돼도 실제로는 엉뚱한 페이지(예: 브라우저가 이전
     # 비정상종료 복원 알림 때문에 원래 열려있던 다른 페이지에 머물러 있는 등)에
@@ -559,7 +559,7 @@ def _check_one_stock(page, order_url, code, option, L):
         current_url = ''
     if 'search.php' not in current_url or 'topSearchKeyword' not in current_url:
         L(f"[{code}] 검색 페이지로 이동한 것 같지 않습니다(현재 주소: {current_url}) - 브라우저가 다른 페이지에 머물러 있을 수 있어요.")
-        return '확인실패', None
+        return '확인실패', None, False
 
     # 검색결과 목록에서 이 상품코드로 가는 카드를 찾아 상세페이지로 들어간다.
     # 검색결과는 페이지 이동 직후 곧바로 다 그려져 있는 게 아니라 뒤이어
@@ -580,7 +580,7 @@ def _check_one_stock(page, order_url, code, option, L):
             L(f"[{code}] 검색결과 0건입니다 - 코드가 오너클랜에 없거나 판매중지된 상품일 수 있습니다.")
         else:
             L(f"[{code}] 15초를 기다려도 검색결과 화면에서 이 코드가 안 보입니다 - 엉뚱한 페이지일 위험이 있어 여기서 멈춥니다.")
-        return '확인실패', None
+        return '확인실패', None, False
 
     try:
         code_link.click(timeout=10000)
@@ -596,7 +596,7 @@ def _check_one_stock(page, order_url, code, option, L):
             code_link.evaluate('el => el.click()')
         except Exception as e2:
             L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e2).__name__}: {e2}")
-            return '확인실패', None
+            return '확인실패', None, False
 
     # 검색결과 페이지에서 겪었던 것과 같은 문제(.count()는 안 기다림)가
     # 상세페이지에서도 똑같이 날 수 있다 - '바로구매' 글자 하나만 기다리는
@@ -627,7 +627,7 @@ def _check_one_stock(page, order_url, code, option, L):
         option_count = option_lis.count()
     except Exception as e:
         L(f"[{code}] 옵션 목록 확인 실패: {type(e).__name__}: {e}")
-        return '확인실패', None
+        return '확인실패', None, False
 
     base_price = _extract_base_price(page, L, code)
 
@@ -638,23 +638,23 @@ def _check_one_stock(page, order_url, code, option, L):
     if option_count > 0:
         if not option:
             L(f"[{code}] 이 상품은 옵션이 {option_count}개 있는데 주문에 기록된 옵션 정보가 없어서 정확히 판정할 수 없습니다.")
-            return '확인실패', None
+            return '확인실패', None, False
         li, matched_name = _find_matching_option_li(option_lis, option_count, option, code, L)
         if li is None:
             # 찾는 옵션이 목록에 없음 -> 품절로 본다.
             L(f"[{code}] 주문 옵션 '{option}'을 오너클랜 옵션 목록에서 못 찾았습니다 - 품절로 처리합니다.")
-            return '품절', None
+            return '품절', None, False
         try:
             soldout = li.get_attribute('option-soldout')
         except Exception as e:
             L(f"[{code}] 옵션 품절여부 확인 실패: {type(e).__name__}: {e}")
-            return '확인실패', None
+            return '확인실패', None, False
         addon = _extract_option_addon(li, L, code)
         price = (base_price + addon) if base_price is not None else None
         if addon and price is not None:
             L(f"[{code}] 옵션 '{matched_name}'에 추가금 {addon}원 확인 - 매입예상가 {price}원(기본 {base_price}원 + 추가금 {addon}원).")
         L(f"[{code}] 주문 옵션 '{option}' → 오너클랜 옵션 '{matched_name}' 매칭, {'구매 가능' if soldout == '0' else '품절'}.")
-        return ('정상' if soldout == '0' else '품절'), price
+        return ('정상' if soldout == '0' else '품절'), price, False
 
     # 옵션 목록 자체가 없는 단일 상품. 페이지 전체에서 '품절'을 느슨하게
     # (exact=False) 찾으면 리뷰/추천상품/안내문구 등 상품 자체와 무관한
@@ -667,10 +667,30 @@ def _check_one_stock(page, order_url, code, option, L):
         has_soldout = page.get_by_text('품절', exact=True).count() > 0
     except Exception as e:
         L(f"[{code}] 상품 페이지 상태 확인 실패: {type(e).__name__}: {e}")
-        return '확인실패', None
+        return '확인실패', None, False
 
-    L(f"[{code}] 옵션 없는 단일상품 - '품절' 배지 {'있음' if has_soldout else '없음'}.")
-    return ('품절' if has_soldout else '정상'), base_price
+    # 옵션이 있는 상품인데도 li.option[option-soldout] 셀렉터가 0개로
+    # 잘못 잡혀서 전부 이 '단일상품' 경로로 빠지고 있다는 지적(사용자: "옵션
+    # 없는 단일상품이 아닌데 전부 그렇게 뜨네")이 있었다 - 실제 옵션 구조가
+    # 우리가 아는 것과 다른 페이지가 있는지 셀렉터를 바꿔 짐작하는 대신,
+    # 이 상품의 주문에 옵션 문자열이 찍혀있는데도 옵션 목록이 0개로 잡혔다면
+    # 그 자체가 강한 증거이니 눈에 띄게 경고로 남기고, 다른 후보 셀렉터
+    # 개수도 같이 남겨서 다음에 실제 구조를 정확히 알 수 있게 한다.
+    if option:
+        try:
+            alt_counts = {
+                'li.option(속성무관)': page.locator('li.option').count(),
+                '[option-soldout] 속성 아무 태그': page.locator('[option-soldout]').count(),
+                'select option': page.locator('select option').count(),
+                "'옵션' 글자 포함 요소": page.get_by_text('옵션', exact=False).count(),
+            }
+        except Exception:
+            alt_counts = {}
+        L(f"[{code}] ⚠ 주문엔 옵션 '{option}'이 찍혀있는데 옵션 목록이 0개로 잡혀서 단일상품으로 처리됩니다 - "
+          f"이 상품은 실제로 옵션이 있을 가능성이 높습니다(재고상태를 못 믿을 수 있음). 진단: {alt_counts}")
+
+    L(f"[{code}] 옵션 없는 단일상품(또는 옵션 목록 인식 실패) - '품절' 배지 {'있음' if has_soldout else '없음'}.")
+    return ('품절' if has_soldout else '정상'), base_price, bool(option)
 
 
 def _check_stock_impl(order_url, items, L):
@@ -690,8 +710,9 @@ def _check_stock_impl(order_url, items, L):
             continue
         label = f"{code}/{option}" if option else code
         L(f"[{label}] 오너클랜에서 재고상태 확인 중...")
-        status, price = _check_one_stock(page, order_url, code, option, L)
-        results.append({'vendor_prod_id': code, 'option_name': option, 'status': status, 'price': price})
+        status, price, uncertain = _check_one_stock(page, order_url, code, option, L)
+        results.append({'vendor_prod_id': code, 'option_name': option, 'status': status, 'price': price,
+                         'option_uncertain': uncertain})
         L(f"[{label}] → {status}" + (f" (매입예상가 {price}원)" if price is not None else ""))
     return results
 
