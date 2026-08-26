@@ -775,6 +775,55 @@ def check_stock(order_url, items):
 # readonly라 자바스크립트로 값만 직접 넣는다(팝업 검색 자동화 대신).
 # ---------------------------------------------------------------------------
 
+def _split_ship_address(ship_address):
+    """'배송지'를 기본주소/상세주소로 나눈다.
+    실제 업로드 데이터 72건을 전수 확인한 결과 오너클랜/다팔자 주소는
+    "도로명주소 (법정동[, 건물명])" 형식이 대부분이었다. 괄호 안에 콤마로
+    건물명이 붙어있으면 그 건물명이 실질적인 상세주소 역할을 한다(사용자
+    지적 - 실제 예: "...아리역로16번길 1 (증포동, 이천고등학교)" -> 상세주소
+    "이천고등학교"). 괄호 뒤에 남는 글자가 있는 경우(예: "...74-4 (율하동)
+    4116")도 상세주소로 취급한다. 중첩 괄호가 있는 주소(예: "...금호대명
+    (서울대명2차)아파트)")를 잘못 자르지 않도록 depth를 추적해서 최상위
+    괄호쌍만 기준으로 삼는다."""
+    depth = 0
+    stack = []
+    groups = []
+    for i, ch in enumerate(ship_address):
+        if ch == '(':
+            if depth == 0:
+                stack.append(i)
+            depth += 1
+        elif ch == ')':
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and stack:
+                    groups.append((stack.pop(), i))
+    if not groups:
+        return ship_address, ''
+    open_i, close_i = groups[-1]
+    content = ship_address[open_i + 1:close_i]
+    trailing = ship_address[close_i + 1:].strip()
+    cdepth = 0
+    last_comma = -1
+    for j, ch in enumerate(content):
+        if ch == '(':
+            cdepth += 1
+        elif ch == ')':
+            cdepth -= 1
+        elif ch == ',' and cdepth == 0:
+            last_comma = j
+    if last_comma != -1:
+        detail = content[last_comma + 1:].strip()
+        remaining = content[:last_comma].strip()
+        base = (ship_address[:open_i] + (f'({remaining})' if remaining else '')).strip()
+        if trailing:
+            detail = f'{detail} {trailing}'.strip() if detail else trailing
+        return base, detail
+    if trailing:
+        return ship_address[:close_i + 1].strip(), trailing
+    return ship_address, ''
+
+
 def _place_one_order(page, order_url, item, L):
     """item: {'vendor_prod_id','option_name','qty','order_id','recipient',
     'recipient_phone','zipcode','ship_address','prod_name','delivery_note','cs_override'}"""
@@ -796,27 +845,10 @@ def _place_one_order(page, order_url, item, L):
         # 나중에 헷갈리지 않게).
         L(f"[{order_id}] CS메모에서 발견한 상품코드 '{cs_override}'로 주문합니다(판매사상품코드 매칭 대신 우선 적용).")
 
-    # 괄호 기준 분리, 그 다음 줄바꿈 기준 분리 둘 다 추측이었는데 실제
-    # 업로드 파일을 직접 열어서 '배송지' 컬럼 72건을 전부 확인해본 결과
-    # 줄바꿈이 있는 행이 하나도 없었다(사용자가 엑셀에서 봤다는 '줄바꿈'은
-    # 셀 너비 때문에 화면에 자동 줄바꿈으로 보인 것뿐, 실제 문자열엔 개행
-    # 문자가 없었다). 대신 사용자 지적대로 "괄호 뒤쪽이 상세주소"인 케이스가
-    # 실제로 존재한다(예: "...74-4 (율하동) 4116" -> 상세주소 "4116").
-    # 단, 마지막 ')' 를 기준으로 잘라야 한다 - 첫 ')' 기준으로 하면
-    # "...금호대명(서울대명2차)아파트)" 같은 중첩 괄호 주소를 잘못 나눠서
-    # "아파트)"를 상세주소로 오인하는 오류가 생긴다(72건 중 실제로 1건
-    # 발생 확인, rfind로 마지막 ')' 를 찾아서 해결). 괄호 뒤에 남는 글자가
-    # 없으면(대부분의 경우) 통째로 기본주소에 넣고 상세주소는 비워둔다.
-    close_idx = ship_address.rfind(')')
-    if close_idx != -1 and close_idx < len(ship_address) - 1:
-        trailing = ship_address[close_idx + 1:].strip()
-        if trailing:
-            addr_base = ship_address[:close_idx + 1].strip()
-            addr_detail = trailing
-        else:
-            addr_base, addr_detail = ship_address, ''
-    else:
-        addr_base, addr_detail = ship_address, ''
+    # 배송지 분리는 _split_ship_address() 참고 - "도로명주소 (법정동, 건물명)"
+    # 형식일 때 건물명을 상세주소로 뽑아낸다(실제 업로드 데이터 72건 전수
+    # 확인 후 확정한 규칙, 사용자 지적: "괄호 뒤쪽에 이천고등학교 있지않냐").
+    addr_base, addr_detail = _split_ship_address(ship_address)
     try:
         qty = max(1, int(float(item.get('qty') or 1)))
     except Exception:
