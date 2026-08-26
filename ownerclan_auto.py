@@ -740,7 +740,7 @@ def check_stock(order_url, items):
 
 def _place_one_order(page, order_url, item, L):
     """item: {'vendor_prod_id','option_name','qty','order_id','recipient',
-    'recipient_phone','zipcode','ship_address'}"""
+    'recipient_phone','zipcode','ship_address','prod_name'}"""
     code = str(item.get('vendor_prod_id') or '').strip()
     option = str(item.get('option_name') or '').strip()
     order_id = str(item.get('order_id') or '').strip()
@@ -748,6 +748,20 @@ def _place_one_order(page, order_url, item, L):
     recipient_phone = str(item.get('recipient_phone') or '').strip()
     zipcode = str(item.get('zipcode') or '').strip()
     ship_address = str(item.get('ship_address') or '').strip()
+    prod_name = str(item.get('prod_name') or '').strip()
+
+    # 배송지 문자열에 "경기도 이천시 아리역로16번길 1 (증포동,이천고등학교)"
+    # 처럼 괄호로 상세정보가 붙는 형식이 실제로 확인됐다(사용자 지적: "괄호
+    # 앞까지가 기본주소고 뒤가 상세주소잖아") - 괄호 앞은 기본주소, 괄호 안은
+    # 상세주소로 나눠서 넣는다. 괄호가 없으면 나눌 근거가 없으니 통째로
+    # 기본주소에 넣고 상세주소는 비워둔다.
+    addr_base, addr_detail = ship_address, ''
+    paren_idx = ship_address.find('(')
+    if paren_idx > 0:
+        addr_base = ship_address[:paren_idx].strip()
+        addr_detail = ship_address[paren_idx:].strip()
+        if addr_detail.startswith('(') and addr_detail.endswith(')'):
+            addr_detail = addr_detail[1:-1].strip()
     try:
         qty = max(1, int(float(item.get('qty') or 1)))
     except Exception:
@@ -848,7 +862,11 @@ def _place_one_order(page, order_url, item, L):
     try:
         page.get_by_text('신규배송지', exact=True).first.click(timeout=8000)
     except Exception as e:
-        L(f"[{order_id}/{code}] 주소 '신규배송지' 선택 실패({type(e).__name__}) - 배송지가 다른 값으로 남아있을 수 있습니다. 결제 전 직접 확인해주세요.")
+        try:
+            page.get_by_text('신규배송지', exact=True).first.evaluate('el => el.click()')
+        except Exception as e2:
+            L(f"[{order_id}/{code}] 주소 '신규배송지' 선택 실패({type(e2).__name__}) - 우편번호/주소는 아래서 직접 값을 넣으니 "
+              f"큰 영향은 없지만, 결제 전 라디오 버튼이 '신규배송지'로 선택돼있는지 확인해주세요.")
 
     # 이름/연락처는 실제 개발자도구로 확인한 name 속성으로 직접 채운다
     # (placeholder가 아니라 name="receiver_name"/"receiver_tel21").
@@ -873,19 +891,23 @@ def _place_one_order(page, order_url, item, L):
     except Exception as e:
         L(f"[{order_id}/{code}] 우편번호 입력 실패({type(e).__name__}) - 결제 전 '{zipcode}'로 직접 입력해주세요.")
     try:
-        page.locator('#raddr1').evaluate('(el, v) => { el.value = v; }', ship_address)
+        page.locator('#raddr1').evaluate('(el, v) => { el.value = v; }', addr_base)
     except Exception as e:
-        L(f"[{order_id}/{code}] 기본주소 입력 실패({type(e).__name__}) - 결제 전 '{ship_address}'로 직접 입력해주세요.")
-
-    # 상세주소(#raddr2)도 비어있으면 안 된다는 지적(사용자) - 우리 주문
-    # 데이터엔 기본주소/상세주소가 나뉘어 저장돼있지 않고 배송지가 통째로
-    # 한 문자열(ship_address)이라, 정확히 나눠 넣을 방법이 없다. 비워두는
-    # 대신 같은 주소를 상세주소 칸에도 그대로 채워서 최소한 빈칸으로
-    # 남지는 않게 한다 - 중복으로 보이더라도 정보 누락보다는 낫다.
+        L(f"[{order_id}/{code}] 기본주소 입력 실패({type(e).__name__}) - 결제 전 '{addr_base}'로 직접 입력해주세요.")
     try:
-        page.locator('input[name="raddr2"]').fill(ship_address)
+        page.locator('input[name="raddr2"]').fill(addr_detail or ship_address)
     except Exception as e:
         L(f"[{order_id}/{code}] 상세주소 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
+
+    # 배송시 요청사항(textarea[name="order_prmsg[]"]) - 오너클랜 화면이
+    # 자체적으로 "상품명 : X" 형식을 기본으로 채워주는 걸 캡쳐로 확인했는데,
+    # 항상 자동으로 채워진다는 보장이 없어서(사용자 지적: "배송요청사항은
+    # 왜 안넣냐") 우리 쪽에서도 상품명을 직접 채운다.
+    if prod_name:
+        try:
+            page.locator('textarea[name="order_prmsg[]"]').first.fill(f'상품명 : {prod_name}')
+        except Exception as e:
+            L(f"[{order_id}/{code}] 배송요청사항 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
 
     # 결제수단: 카드
     try:
@@ -895,11 +917,19 @@ def _place_one_order(page, order_url, item, L):
 
     # '결제하기' - 여기까지만 자동이다. 이 버튼을 누르면 카드결제창이
     # 뜨는데, 카드번호 입력과 최종 결제 확정은 절대 자동으로 하지 않고
-    # 반드시 사람이 직접 한다.
+    # 반드시 사람이 직접 한다. 바로 위에서 여러 칸을 자바스크립트로 값만
+    # 바꿔치기했는데(우편번호/기본주소), 화면이 그 변화를 반영할 시간을
+    # 못 주고 곧바로 클릭하면 버튼이 아직 유효성 검사를 못 마친 상태일 수
+    # 있어 잠깐 대기한 뒤, 다른 버튼들처럼 클릭 실패시 자바스크립트 클릭도
+    # 시도한다.
+    time.sleep(1)
     try:
         page.get_by_text('결제하기', exact=True).first.click(timeout=10000)
     except Exception as e:
-        return {'ok': False, 'reason': f"'결제하기' 버튼 클릭 실패({type(e).__name__}) - 주문서 화면에서 직접 확인해주세요."}
+        try:
+            page.get_by_text('결제하기', exact=True).first.evaluate('el => el.click()')
+        except Exception as e2:
+            return {'ok': False, 'reason': f"'결제하기' 버튼 클릭 실패({type(e2).__name__}) - 주문서 화면에서 직접 확인해주세요."}
 
     L(f"[{order_id}/{code}] '결제하기' 클릭 완료 - 카드결제창이 뜨면 직접 카드정보를 입력하고 결제를 완료해주세요.")
     return {'ok': True, 'reason': "주문서 작성 및 '결제하기' 클릭까지 완료(카드결제는 직접 진행 필요)."}

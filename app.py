@@ -473,6 +473,15 @@ def api_ownerclan_progress():
 @app.route('/api/ownerclan/check_stock', methods=['POST'])
 def api_ownerclan_check_stock():
     settings = load_settings()
+    # '확인실패'를 저장 안 하게 막은 수정(위 INSERT 루프)은 이 실행 이후부터만
+    # 효과가 있다 - 그전에 이미 stock_check 테이블에 저장돼버린 확인실패
+    # 건들은 여전히 "재고상태 칸이 채워짐"으로 남아서 계속 재시도가 안 됐다
+    # (사용자 지적: "아직도 확인실패잖아"). 매번 실행 시작할 때 이미 저장된
+    # 확인실패 건들을 지워서, 그 즉시 다시 확인 대상에 포함되게 한다.
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM stock_check WHERE status='확인실패'")
+    conn.commit()
+    conn.close()
     rows = ce.compute_dataset(DB_PATH, FEES_PATH)
     # 예전엔 '신규주문' 상태인 건만 확인 대상으로 삼았는데, 그러면 신규주문일
     # 때 확인을 못 받고 배송준비/배송중으로 넘어간 건은 재고상태/매입예상가
@@ -530,6 +539,7 @@ def api_ownerclan_place_orders():
         'recipient_phone': r.get('recipient_phone', ''),
         'zipcode': r.get('zipcode', ''),
         'ship_address': r.get('ship_address', ''),
+        'prod_name': r.get('prod_name', ''),
     } for r in checked]
     result = ownerclan_auto.place_orders(settings.get('ownerclan_url', ''), items)
     # 시도한 건은 성공/실패와 무관하게 체크를 해제한다 - 재시도하려면 다시
