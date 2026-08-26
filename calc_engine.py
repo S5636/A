@@ -72,6 +72,19 @@ def safe_float(value):
         return 0.0
 
 
+def _est_buy_price_display(unit_price_str, qty_raw, ship_fee):
+    """STOCK이 읽어온 매입예상가(옵션 1개당 판매가)를 그 행의 수량만큼
+    곱하고, 같은 상품의 과거 실제 매입 배송비 추정치를 더해서 화면에 보여줄
+    행 단위 총액으로 만든다. 단가를 아예 못 읽었으면(옵션 인식 실패 등)
+    빈 문자열을 그대로 돌려줘서 '-'로 표시되게 한다."""
+    unit_price_str = str(unit_price_str or '').strip()
+    if not unit_price_str:
+        return ''
+    unit_price = safe_float(unit_price_str)
+    qty = safe_float(qty_raw) or 1
+    return str(int(unit_price * qty + ship_fee))
+
+
 def fetch_coupang_fee_rate(prod_name):
     matched = [(rate, kw) for kw, rate in COUPANG_FEE_DB if kw in prod_name]
     if matched:
@@ -242,6 +255,26 @@ def compute_dataset(db_path, fees_path):
         stock_map = {(row[0], row[1] or ''): (row[2], row[3] or '') for row in cur.fetchall()}
     except sqlite3.OperationalError:
         pass  # 아직 stock_check 테이블이 없는 예전 DB일 수 있음
+    # STOCK이 읽어오는 매입예상가는 상품 옵션 1개당 판매가일 뿐이라, 그대로
+    # 보여주면 정산예정액/실정산가 같은 다른 열(전부 그 행의 총액)과 자릿수가
+    # 안 맞아서 실제보다 훨씬 작아 보인다(사용자 지적: "수량 곱하고 배송비
+    # 더했니?"). 배송비는 오너클랜 상품페이지에서 따로 읽어오지 않으므로,
+    # 같은 판매사상품코드로 실제 매입했던 가장 최근 발주내역(ownerclan_raw)의
+    # 배송비를 추정치로 재사용한다 - 실제 매입 이력이 없으면 0으로 둔다.
+    vendor_ship_fee = {}
+    try:
+        cur.execute("SELECT 상품코드, 배송비, 배송상태 FROM ownerclan_raw ORDER BY rowid ASC")
+        for prod_code, ship, status in cur.fetchall():
+            prod_code = str(prod_code or '').strip()
+            if not prod_code:
+                continue
+            if any(kw in str(status or '') for kw in ['취소', '반품', '환불']):
+                continue
+            ship_val = safe_float(ship)
+            if ship_val:
+                vendor_ship_fee[prod_code] = ship_val
+    except sqlite3.OperationalError:
+        pass
     conn.close()
 
     # group_id(합배송 판정/매입가 중복배정 방지 기준)는 오직 오너클랜
@@ -462,8 +495,10 @@ def compute_dataset(db_path, fees_path):
             # 상태가 뭐든 값이 채워질 때까지 계속 확인 대상에 포함되게 했다.
             'stock_status': stock_map.get(
                 (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ('', ''))[0],
-            'est_buy_price': stock_map.get(
-                (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ('', ''))[1],
+            'est_buy_price': _est_buy_price_display(
+                stock_map.get((m['vendor_prod_id'],
+                               str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ('', ''))[1],
+                r[idx_['qty']], vendor_ship_fee.get(m['vendor_prod_id'], 0)),
             'buy_cost': int(display_buy_cost),
             'buy_ship_fee': int(display_buy_ship),
             'buy_total': int(display_buy_cost + display_buy_ship),
