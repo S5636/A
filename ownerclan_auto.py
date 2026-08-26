@@ -732,10 +732,10 @@ def check_stock(order_url, items):
 # ORDER 버튼 - 체크된 주문만 오너클랜에서 옵션선택→배송정보 입력→결제수단
 # (카드) 선택→'결제하기' 클릭까지 자동으로 하고, 그 다음(실제 카드번호 입력·
 # 최종 결제 확정)은 절대 자동으로 하지 않는다 - 카드정보는 코드/DB 어디에도
-# 남기지 않는다는 원칙(사용자 지시). 첫 버전이라 재고확인 자동화처럼 여러
-# 라운드의 실제 화면 검증 없이 만들었다 - 특히 수령인 '이름' 입력칸은 화면에
-# placeholder 등 확실한 표식이 없어서 자동으로 못 채운다(아래에서 로그로
-# 알림, 결제 전 직접 확인 필요).
+# 남기지 않는다는 원칙(사용자 지시). 배송정보 입력칸들의 실제 구조(name/id
+# 속성, readonly 여부 등)는 사용자가 개발자도구로 직접 확인해준 결과를
+# 기반으로 한다(2026-08-26) - 이름/연락처는 name 속성으로 채우고, 우편번호는
+# readonly라 자바스크립트로 값만 직접 넣는다(팝업 검색 자동화 대신).
 # ---------------------------------------------------------------------------
 
 def _place_one_order(page, order_url, item, L):
@@ -842,31 +842,41 @@ def _place_one_order(page, order_url, item, L):
     except Exception as e:
         L(f"[{order_id}/{code}] 원장주문코드 입력 실패({type(e).__name__}) - 결제 전 직접 입력해주세요.")
 
-    # 배송정보 - "직접입력"으로 바꿔야 우리가 원하는 주소를 쓸 수 있다
-    # (기본주소/신규배송지는 계정에 저장된 다른 주소를 쓰는 옵션이라
-    # 지금 배송지와 다를 수 있다).
+    # 배송정보 - 사용자가 직접 화면을 확인해서 알려준 구조(2026-08-26):
+    # "기본주소/신규배송지/직접입력" 셋 중 "신규배송지"를 선택해야 우편번호
+    # 검색 버튼(우편번호 검색)이 정상 동작한다 - "직접입력"은 틀린 선택이었다.
     try:
-        page.get_by_text('직접입력', exact=True).first.click(timeout=5000)
+        page.get_by_text('신규배송지', exact=True).first.click(timeout=8000)
     except Exception as e:
-        L(f"[{order_id}/{code}] 주소 '직접입력' 선택 실패({type(e).__name__}) - 배송지가 다른 값으로 남아있을 수 있습니다. 결제 전 직접 확인해주세요.")
+        L(f"[{order_id}/{code}] 주소 '신규배송지' 선택 실패({type(e).__name__}) - 배송지가 다른 값으로 남아있을 수 있습니다. 결제 전 직접 확인해주세요.")
 
+    # 이름/연락처는 실제 개발자도구로 확인한 name 속성으로 직접 채운다
+    # (placeholder가 아니라 name="receiver_name"/"receiver_tel21").
     try:
-        page.get_by_placeholder('000-0000-0000형식').first.fill(recipient_phone)
+        page.locator('input[name="receiver_name"]').fill(recipient)
+    except Exception as e:
+        L(f"[{order_id}/{code}] 수령인 '이름' 입력 실패({type(e).__name__}) - 결제 전 '{recipient}'로 직접 입력해주세요.")
+    try:
+        page.locator('input[name="receiver_tel21"]').fill(recipient_phone)
     except Exception as e:
         L(f"[{order_id}/{code}] 연락처 입력 실패({type(e).__name__}) - 결제 전 직접 입력해주세요.")
-    try:
-        page.get_by_placeholder('우편번호').fill(zipcode)
-    except Exception as e:
-        L(f"[{order_id}/{code}] 우편번호 입력 실패({type(e).__name__}) - 결제 전 직접 입력해주세요.")
-    try:
-        page.get_by_placeholder('기본주소').fill(ship_address)
-    except Exception as e:
-        L(f"[{order_id}/{code}] 주소 입력 실패({type(e).__name__}) - 결제 전 직접 입력해주세요.")
 
-    # 수령인 '이름' 칸은 화면에 placeholder 등 확실한 표식이 없어서(실제
-    # 화면 검증 전이라) 자동으로 못 채운다 - 반드시 결제 전에 직접 확인해야
-    # 한다는 걸 로그로 분명히 남긴다.
-    L(f"[{order_id}/{code}] 수령인 '이름' 칸은 자동으로 못 채웁니다 - 결제 전에 '{recipient}'로 직접 입력/확인해주세요.")
+    # 우편번호(#rpost)는 readonly고 클릭하면 카카오 우편번호 검색 팝업이
+    # 뜨는 구조로 확인됐다(onclick="this.blur();get_post()") - 팝업에서
+    # 직접 검색해 고르는 과정을 자동화하는 대신, 우리가 이미 알고 있는
+    # 우편번호/주소 값을 자바스크립트로 그 칸에 곧장 넣는다(팝업을 실제로
+    # 열고 검색결과를 클릭하는 것보다 훨씬 안정적). 기본주소 칸은 같은
+    # 폼의 명명 규칙(rpost, raddr2)으로 미루어 raddr1일 가능성이 높지만
+    # 직접 확인은 못 해서, 실패하면 로그로 분명히 남긴다.
+    try:
+        page.locator('#rpost').evaluate('(el, v) => { el.value = v; }', zipcode)
+    except Exception as e:
+        L(f"[{order_id}/{code}] 우편번호 입력 실패({type(e).__name__}) - 결제 전 '{zipcode}'로 직접 입력해주세요.")
+    try:
+        page.locator('#raddr1').evaluate('(el, v) => { el.value = v; }', ship_address)
+    except Exception as e:
+        L(f"[{order_id}/{code}] 기본주소 입력 실패({type(e).__name__}, id=raddr1 추정이 틀렸을 수 있음) - "
+          f"결제 전 '{ship_address}'로 직접 입력해주세요.")
 
     # 결제수단: 카드
     try:
@@ -883,8 +893,6 @@ def _place_one_order(page, order_url, item, L):
         return {'ok': False, 'reason': f"'결제하기' 버튼 클릭 실패({type(e).__name__}) - 주문서 화면에서 직접 확인해주세요."}
 
     L(f"[{order_id}/{code}] '결제하기' 클릭 완료 - 카드결제창이 뜨면 직접 카드정보를 입력하고 결제를 완료해주세요.")
-    # page: 상세페이지가 새 탭으로 열렸을 수 있어서, 결제 완료 대기(_wait_for_payment_finish)를
-    # 호출부가 반드시 이 실제 탭을 기준으로 하도록 같이 돌려준다.
     return {'ok': True, 'reason': "주문서 작성 및 '결제하기' 클릭까지 완료(카드결제는 직접 진행 필요)."}
 
 
