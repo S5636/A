@@ -901,10 +901,18 @@ def _place_one_order(page, order_url, item, L):
         page.locator('#raddr1').evaluate('(el, v) => { el.value = v; }', addr_base)
     except Exception as e:
         L(f"[{order_id}/{code}] 기본주소 입력 실패({type(e).__name__}) - 결제 전 '{addr_base}'로 직접 입력해주세요.")
-    try:
-        page.locator('input[name="raddr2"]').fill(addr_detail or ship_address)
-    except Exception as e:
-        L(f"[{order_id}/{code}] 상세주소 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
+    # 줄바꿈이 없어서 addr_detail이 비어있을 때 기본주소 전체를 여기 또
+    # 채워넣던 게 실제로는 기본주소/상세주소 두 칸에 똑같은 긴 주소가
+    # 중복으로 찍혀서 이상해 보이는 결과였다(사용자 지적: "상세주소
+    # 병신되네") - 나눌 근거가 없으면 그냥 빈 채로 둔다.
+    if addr_detail:
+        try:
+            page.locator('input[name="raddr2"]').fill(addr_detail)
+        except Exception as e:
+            L(f"[{order_id}/{code}] 상세주소 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
+    else:
+        L(f"[{order_id}/{code}] 배송지에 줄바꿈으로 나뉜 상세주소가 없어서 상세주소 칸은 비워뒀습니다 - "
+          f"필요하면 결제 전 직접 확인해주세요.")
 
     # 배송시 요청사항(textarea[name="order_prmsg[]"]) - 상품명을 넣던 건
     # 잘못이었다(사용자 지적: "배송요청사항에 왜 상품명을 넣냐 배송요청을
