@@ -496,6 +496,14 @@ def api_ownerclan_check_stock():
         cur = conn.cursor()
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         for entry in result['results']:
+            # '확인실패'(페이지 이동 실패, 타임아웃 등 일시적 오류)까지 '정상'/
+            # '품절'과 똑같이 저장해버리면, 다음부터는 "재고상태 칸이 비어있음"
+            # 필터에 안 걸려서 영원히 재시도 대상에서 빠져버렸다(사용자 지적:
+            # "확인실패 뜨는 건 왜 안 하냐"). 확인실패는 진짜 재고 판정이
+            # 아니니 저장하지 않고 칸을 계속 비워둬서, 다음 STOCK 실행 때
+            # 다시 확인 대상에 포함되게 한다.
+            if entry.get('status') == '확인실패':
+                continue
             price = entry.get('price')
             cur.execute("""INSERT OR REPLACE INTO stock_check (vendor_prod_id, option_name, status, checked_at, est_buy_price)
                 VALUES (?, ?, ?, ?, ?)""", (entry['vendor_prod_id'], entry['option_name'], entry['status'], now,

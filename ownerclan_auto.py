@@ -865,9 +865,9 @@ def _place_one_order(page, order_url, item, L):
     # 뜨는 구조로 확인됐다(onclick="this.blur();get_post()") - 팝업에서
     # 직접 검색해 고르는 과정을 자동화하는 대신, 우리가 이미 알고 있는
     # 우편번호/주소 값을 자바스크립트로 그 칸에 곧장 넣는다(팝업을 실제로
-    # 열고 검색결과를 클릭하는 것보다 훨씬 안정적). 기본주소 칸은 같은
-    # 폼의 명명 규칙(rpost, raddr2)으로 미루어 raddr1일 가능성이 높지만
-    # 직접 확인은 못 해서, 실패하면 로그로 분명히 남긴다.
+    # 열고 검색결과를 클릭하는 것보다 훨씬 안정적). 기본주소(#raddr1)는
+    # 같은 폼의 명명 규칙(rpost, raddr2)으로 짐작했던 건데 실제로 맞는
+    # 것으로 확인됐다(사용자 캡처).
     try:
         page.locator('#rpost').evaluate('(el, v) => { el.value = v; }', zipcode)
     except Exception as e:
@@ -875,8 +875,17 @@ def _place_one_order(page, order_url, item, L):
     try:
         page.locator('#raddr1').evaluate('(el, v) => { el.value = v; }', ship_address)
     except Exception as e:
-        L(f"[{order_id}/{code}] 기본주소 입력 실패({type(e).__name__}, id=raddr1 추정이 틀렸을 수 있음) - "
-          f"결제 전 '{ship_address}'로 직접 입력해주세요.")
+        L(f"[{order_id}/{code}] 기본주소 입력 실패({type(e).__name__}) - 결제 전 '{ship_address}'로 직접 입력해주세요.")
+
+    # 상세주소(#raddr2)도 비어있으면 안 된다는 지적(사용자) - 우리 주문
+    # 데이터엔 기본주소/상세주소가 나뉘어 저장돼있지 않고 배송지가 통째로
+    # 한 문자열(ship_address)이라, 정확히 나눠 넣을 방법이 없다. 비워두는
+    # 대신 같은 주소를 상세주소 칸에도 그대로 채워서 최소한 빈칸으로
+    # 남지는 않게 한다 - 중복으로 보이더라도 정보 누락보다는 낫다.
+    try:
+        page.locator('input[name="raddr2"]').fill(ship_address)
+    except Exception as e:
+        L(f"[{order_id}/{code}] 상세주소 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
 
     # 결제수단: 카드
     try:
