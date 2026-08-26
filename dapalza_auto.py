@@ -469,7 +469,7 @@ def _dismiss_invalid_filename_dialog(log=None):
 
 def _download_via_excel_panel(win, button_text, target_path, log, L):
     """다팔자 메인 창에서 이미 열려있는 '엑셀' 다운로드 패널 안의 button_text
-    버튼(예: '전체 다운로드' 또는 '오너클랜 다운로드')을 클릭하고, 뜨는 윈도우
+    버튼(예: '전체 다운로드' 또는 '오너클랜 주문')을 클릭하고, 뜨는 윈도우
     표준 파일 저장 대화상자에 target_path를 직접 입력해서 저장한다. 저장
     확인과 다팔자의 완료 팝업 정리까지 마치면 True, 실패하면 False를
     돌려준다(원인은 log/L에 이미 남는다). '전체 다운로드'와 '오너클랜
@@ -517,6 +517,14 @@ def _download_via_excel_panel(win, button_text, target_path, log, L):
                 _click(dl_win, button_text, 'Button', L)
             except Exception as e:
                 L(f"별도 창도 없었습니다: {type(e).__name__}: {e} - 그래도 다음 단계로 진행합니다.")
+                # 버튼 글자를 또 잘못 짚었을 가능성에 대비해서, 실패했을 때
+                # 지금 패널 안에 실제로 뭐가 보이는지 로그로 남긴다 - 다음에도
+                # 못 찾으면 추측 대신 이 로그로 정확한 글자를 바로 알 수 있게.
+                try:
+                    visible_texts = _dump_controls(win, limit=40)
+                    L(f"진단정보 - '{button_text}' 버튼을 못 찾았습니다. 지금 창에 보이는 글자들: {visible_texts}")
+                except Exception:
+                    pass
         time.sleep(2)
 
         L('파일 저장 대화상자를 찾는 중...')
@@ -1060,20 +1068,20 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
         # 오너클랜 배송지 상세정보(동/호 등)를 보강하려면 같은 방식으로 '오너클랜
         # 다운로드'도 받는다 - '전체 다운로드' 파일의 '배송지' 컬럼엔 동/호 같은
         # 상세주소가 자주 빠져있는데(실제 데이터 비교로 확인됨, 사용자 지적)
-        # '오너클랜 다운로드' 파일의 '받는사람 주소' 컬럼엔 포함돼 있다. 이건
+        # '오너클랜 주문' 파일의 '받는사람 주소' 컬럼엔 포함돼 있다. 이건
         # 보조 정보라 실패해도 '전체' 업로드 결과 자체는 그대로 살린다.
         try:
             oc_base, oc_ext = os.path.splitext(save_filename)
             oc_target_path = os.path.join(target_dir, f'{oc_base}_오너클랜{oc_ext}')
-            L("이어서 '엑셀' 버튼을 다시 눌러 '오너클랜 다운로드'(상세주소 보강용)를 받는 중...")
+            L("이어서 '엑셀' 버튼을 다시 눌러 '오너클랜 주문'(상세주소 보강용)를 받는 중...")
             _click(win, '엑셀', 'Button', L)
             time.sleep(1)
-            if _download_via_excel_panel(win, '오너클랜 다운로드', oc_target_path, log, L):
+            if _download_via_excel_panel(win, '오너클랜 주문', oc_target_path, log, L):
                 result['file_path_oc'] = oc_target_path
             else:
-                L("오너클랜 다운로드 파일은 못 받았습니다 - 상세주소 보강 없이 진행합니다.")
+                L("오너클랜 주문 파일은 못 받았습니다 - 상세주소 보강 없이 진행합니다.")
         except Exception as e:
-            L(f"오너클랜 다운로드 시도 중 오류(무시, '전체' 파일은 이미 받았음): {type(e).__name__}: {e}")
+            L(f"오너클랜 주문 시도 중 오류(무시, '전체' 파일은 이미 받았음): {type(e).__name__}: {e}")
 
         return result
     except Exception as e:

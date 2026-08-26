@@ -612,26 +612,54 @@ def api_ownerclan_place_orders():
         cur.execute(f"SELECT order_id, raw_json FROM merged_orders WHERE order_id IN ({qmarks})", order_ids)
         raw_json_map = {row[0]: row[1] for row in cur.fetchall()}
         conn.close()
-    items = []
+    # 같은 상품+같은 받는사람+같은 배송지로 여러 건이 체크됐으면(=묶음배송으로
+    # 한 박스에 같이 갈 건들) 오너클랜에 따로따로 주문하지 않고 수량을 합쳐서
+    # 한 번만 주문한다(사용자 지적: "묶음배송이면 한번에 주문해야지 따로따로
+    # 하고 앉아있냐" - 배송비도 한 번만 나가고 카드결제도 한 번만 하면 됨).
+    # 판매측 bundle_no(합배송코드)는 신뢰할 수 없어서 그룹 판정에 쓰지 않는다는
+    # 원칙(calc_engine.py 주석 참고)이 있으므로, 여기서도 bundle_no는 안 쓰고
+    # 실제 배송 단위를 그대로 결정하는 (상품코드, 옵션, 받는사람, 우편번호,
+    # 배송지) 조합으로 직접 묶는다.
+    groups = {}
+    group_order = []
     for r in checked:
         raw = raw_json_map.get(r.get('order_id', ''))
         cs_override = _extract_cs_override_code(raw)
-        items.append({
-            # CS메모에 W로 시작하는 오너클랜 상품코드가 있으면 그걸
-            # 우선한다(사용자 요청) - 담당자가 실제 매칭 상품이 다르다고
-            # 수기로 남겨둔 경우를 위한 것.
-            'vendor_prod_id': cs_override or r.get('vendor_prod_id', ''),
-            'option_name': r.get('option_name', ''),
-            'qty': r.get('qty', '1'),
-            'order_id': r.get('order_id', ''),
-            'recipient': r.get('recipient', ''),
-            'recipient_phone': r.get('recipient_phone', ''),
-            'zipcode': r.get('zipcode', ''),
-            'ship_address': r.get('ship_address', ''),
-            'prod_name': r.get('prod_name', ''),
-            'delivery_note': _extract_delivery_note(raw),
-            'cs_override': cs_override,
-        })
+        vendor_prod_id = cs_override or r.get('vendor_prod_id', '')
+        key = (vendor_prod_id, r.get('option_name', ''), r.get('recipient', ''),
+               r.get('zipcode', ''), r.get('ship_address', ''))
+        if key not in groups:
+            groups[key] = {
+                'vendor_prod_id': vendor_prod_id,
+                'option_name': r.get('option_name', ''),
+                'qty': 0,
+                'order_id': [],
+                'recipient': r.get('recipient', ''),
+                'recipient_phone': r.get('recipient_phone', ''),
+                'zipcode': r.get('zipcode', ''),
+                'ship_address': r.get('ship_address', ''),
+                'prod_name': r.get('prod_name', ''),
+                'delivery_note': _extract_delivery_note(raw),
+                'cs_override': cs_override,
+            }
+            group_order.append(key)
+        g = groups[key]
+        try:
+            g['qty'] += max(1, int(float(r.get('qty') or 1)))
+        except Exception:
+            g['qty'] += 1
+        g['order_id'].append(r.get('order_id', ''))
+        if not g['delivery_note']:
+            g['delivery_note'] = _extract_delivery_note(raw)
+
+    items = []
+    for key in group_order:
+        g = groups[key]
+        order_ids_in_group = [o for o in g['order_id'] if o]
+        g['qty'] = str(g['qty'])
+        g['order_id'] = ','.join(order_ids_in_group)
+        items.append(g)
+
     result = ownerclan_auto.place_orders(settings.get('ownerclan_url', ''), items)
     # 시도한 건은 성공/실패와 무관하게 체크를 해제한다 - 재시도하려면 다시
     # 체크해야 하게 만들어서, 뭘 이미 시도했는지 헷갈리지 않게 한다.
