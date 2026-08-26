@@ -472,6 +472,46 @@ def _detail_url_for_code(order_url, code):
     return f'{base}/V2/product/view.php?selfcode={quote(code)}'
 
 
+def _goto_detail_page(page, url, code, L):
+    """상세페이지로 이동한다. 성공하면 True, 실패하면 False.
+
+    실제 STOCK 실행 로그로 확인된 문제(2026-08-26): 어떤 상품코드는
+    selfcode 주소 자체가 오류 응답(ERR_HTTP_RESPONSE_CODE_FAILURE)을
+    내는데, 이게 실패하고 나면 크롬이 내부적으로 지연된 에러 페이지
+    이동(chrome-error://chromewebdata/)을 뒤늦게 일으켰다. 곧바로 다음
+    상품으로 넘어가면 그 지연된 이동이 다음 상품의 goto와 충돌해서
+    "Navigation ... interrupted by another navigation" 형태로 계속
+    연쇄 실패하는 게 로그로 확인됐다(한 건이 실패하면 그 뒤로 줄줄이
+    다 확인실패로 나옴). 실패했을 때 크롬이 완전히 정리될 시간을 주고
+    한 번 더 시도해서, 이 연쇄 실패를 끊는다."""
+    for attempt in range(2):
+        try:
+            page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            return True
+        except Exception as e:
+            err_text = str(e)
+            if attempt == 0:
+                # 첫 시도 실패 - 크롬이 정리될 시간을 주고 한 번만 더 해본다.
+                try:
+                    page.wait_for_load_state('load', timeout=3000)
+                except Exception:
+                    pass
+                time.sleep(1.5)
+                continue
+            if 'ERR_HTTP_RESPONSE_CODE_FAILURE' in err_text or 'ERR_NAME_NOT_RESOLVED' in err_text:
+                L(f"[{code}] 이 코드로 오너클랜 상품페이지를 찾을 수 없습니다(주소 자체가 오류 응답) - "
+                  f"판매사상품코드가 오너클랜 상품코드(selfcode) 형식이 아닐 수 있습니다.")
+            else:
+                L(f"[{code}] 상세페이지 이동 실패: {type(e).__name__}: {e}")
+            try:
+                page.wait_for_load_state('load', timeout=3000)
+            except Exception:
+                pass
+            time.sleep(1)
+            return False
+    return False
+
+
 def _normalize_option_text(s):
     return re.sub(r'\s+', '', str(s or '')).lower()
 
@@ -555,10 +595,7 @@ def _check_one_stock(page, order_url, code, option, L):
     보이는 판매가(+옵션 추가금)도 같이 읽어온다 - 실제 매입가와 정확히
     같다는 보장은 없는 추정치임을 호출부에 알린다."""
     url = _detail_url_for_code(order_url, code)
-    try:
-        page.goto(url, wait_until='domcontentloaded', timeout=30000)
-    except Exception as e:
-        L(f"[{code}] 상세페이지 이동 실패: {type(e).__name__}: {e}")
+    if not _goto_detail_page(page, url, code, L):
         return '확인실패', None, False
 
     try:
@@ -759,13 +796,15 @@ def _place_one_order(page, order_url, item, L):
         # 나중에 헷갈리지 않게).
         L(f"[{order_id}] CS메모에서 발견한 상품코드 '{cs_override}'로 주문합니다(판매사상품코드 매칭 대신 우선 적용).")
 
-    # 괄호 기준으로 나누던 이전 방식이 틀렸다(사용자가 실제 사례로 확인:
-    # "대구광역시 동구 율하동로23길 74-4 (율하동) 4116" - 여기선 "(율하동)"
-    # 까지가 기본주소이고 그 뒤 "4116"이 상세주소다. 괄호 자체는 그냥
-    # 법정동을 표기하는 기본주소의 일부였을 뿐이다. 사용자 지적대로 엑셀
-    # 원본 셀에 실제 줄바꿈으로 기본주소/상세주소가 나뉘어 있었던 것으로
-    # 보인다 - 첫 줄을 기본주소, 그 다음 줄(들)을 상세주소로 나눈다. 줄바꿈이
-    # 없으면 나눌 근거가 없으니 통째로 기본주소에 넣고 상세주소는 비워둔다.
+    # 괄호 기준 분리, 그 다음 줄바꿈 기준 분리 둘 다 추측이었는데 실제
+    # 업로드 파일을 직접 열어서 '배송지' 컬럼 72건을 전부 확인해본 결과
+    # 줄바꿈이 있는 행이 하나도 없었다(사용자가 엑셀에서 봤다는 '줄바꿈'은
+    # 셀 너비 때문에 화면에 자동 줄바꿈으로 보인 것뿐, 실제 문자열엔
+    # 개행 문자가 없었다). 즉 원본 데이터에 기본주소/상세주소가 애초에
+    # 나뉘어 있지 않다 - '배송지' 하나가 전체 주소다. 그래서 나눌 방법이
+    # 없고, 통째로 기본주소에 넣고 상세주소는 비워두는 게 맞다(억지로
+    # 나누려고 하면 계속 틀린 추측만 반복하게 된다). 혹시라도 진짜
+    # 줄바꿈이 든 파일이 나중에 나오면 대비해서 분리 로직 자체는 남겨둔다.
     lines = [ln.strip() for ln in ship_address.replace('\r\n', '\n').replace('\r', '\n').split('\n') if ln.strip()]
     addr_base = lines[0] if lines else ship_address
     addr_detail = ' '.join(lines[1:]) if len(lines) > 1 else ''
@@ -778,10 +817,8 @@ def _place_one_order(page, order_url, item, L):
         return {'ok': False, 'reason': '판매사상품코드가 없습니다.'}
 
     url = _detail_url_for_code(order_url, code)
-    try:
-        page.goto(url, wait_until='domcontentloaded', timeout=30000)
-    except Exception as e:
-        return {'ok': False, 'reason': f'상세페이지 이동 실패: {type(e).__name__}: {e}'}
+    if not _goto_detail_page(page, url, code, L):
+        return {'ok': False, 'reason': '상세페이지로 이동하지 못했습니다(자세한 이유는 위 로그 참고).'}
     try:
         page.wait_for_load_state('networkidle', timeout=15000)
     except Exception:
