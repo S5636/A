@@ -740,7 +740,7 @@ def check_stock(order_url, items):
 
 def _place_one_order(page, order_url, item, L):
     """item: {'vendor_prod_id','option_name','qty','order_id','recipient',
-    'recipient_phone','zipcode','ship_address','prod_name'}"""
+    'recipient_phone','zipcode','ship_address','prod_name','delivery_note'}"""
     code = str(item.get('vendor_prod_id') or '').strip()
     option = str(item.get('option_name') or '').strip()
     order_id = str(item.get('order_id') or '').strip()
@@ -749,6 +749,7 @@ def _place_one_order(page, order_url, item, L):
     zipcode = str(item.get('zipcode') or '').strip()
     ship_address = str(item.get('ship_address') or '').strip()
     prod_name = str(item.get('prod_name') or '').strip()
+    delivery_note = str(item.get('delivery_note') or '').strip()
 
     # 배송지 문자열에 "경기도 이천시 아리역로16번길 1 (증포동,이천고등학교)"
     # 처럼 괄호로 상세정보가 붙는 형식이 실제로 확인됐다(사용자 지적: "괄호
@@ -899,15 +900,20 @@ def _place_one_order(page, order_url, item, L):
     except Exception as e:
         L(f"[{order_id}/{code}] 상세주소 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
 
-    # 배송시 요청사항(textarea[name="order_prmsg[]"]) - 오너클랜 화면이
-    # 자체적으로 "상품명 : X" 형식을 기본으로 채워주는 걸 캡쳐로 확인했는데,
-    # 항상 자동으로 채워진다는 보장이 없어서(사용자 지적: "배송요청사항은
-    # 왜 안넣냐") 우리 쪽에서도 상품명을 직접 채운다.
-    if prod_name:
+    # 배송시 요청사항(textarea[name="order_prmsg[]"]) - 상품명을 넣던 건
+    # 잘못이었다(사용자 지적: "배송요청사항에 왜 상품명을 넣냐 배송요청을
+    # 넣어야지") - 이 칸엔 주문자가 실제로 남긴 배송 요청사항이 들어가야
+    # 한다. 다팔자/TOSS 표준 컬럼엔 이 값이 따로 없어서, 업로드 시점에
+    # 저장해둔 원본 행 전체(raw_json)에서 흔한 컬럼명 후보로 찾은 값
+    # (app.py의 _extract_delivery_note)을 넣는다 - 못 찾으면 빈 채로
+    # 둔다(엉뚱하게 상품명 같은걸 대신 채우지 않는다).
+    if delivery_note:
         try:
-            page.locator('textarea[name="order_prmsg[]"]').first.fill(f'상품명 : {prod_name}')
+            page.locator('textarea[name="order_prmsg[]"]').first.fill(delivery_note)
         except Exception as e:
             L(f"[{order_id}/{code}] 배송요청사항 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
+    else:
+        L(f"[{order_id}/{code}] 배송요청사항 원본 데이터를 못 찾아서 비워뒀습니다 - 필요하면 결제 전 직접 입력해주세요.")
 
     # 결제수단: 카드
     try:

@@ -523,6 +523,29 @@ def api_ownerclan_check_stock():
     return jsonify(result)
 
 
+DELIVERY_NOTE_KEYS = ['배송메시지', '배송시요청사항', '요청사항', '배송요청사항', '배송메모', '배송 메시지', '배송시요청', '요청 사항']
+
+
+def _extract_delivery_note(raw_json_text):
+    """주문자가 실제로 남긴 배송 요청사항(예: "부재시 문앞에 놔주세요")을
+    찾는다. 다팔자/TOSS 표준 컬럼엔 이 값이 안 들어있어서(사용자 지적:
+    "배송요청사항에 왜 상품명을 넣냐 배송요청을 넣어야지" - 상품명을 넣던
+    건 실제 요청사항 데이터가 없어서 대신 채운 임시방편이었다), 업로드
+    시점에 원본 행 전체를 그대로 저장해둔 raw_json에서 흔히 쓰이는
+    컬럼명 후보들로 찾아본다. 실제 컬럼명이 다르면 못 찾을 수 있다."""
+    if not raw_json_text:
+        return ''
+    try:
+        data = json.loads(raw_json_text)
+    except Exception:
+        return ''
+    for key in DELIVERY_NOTE_KEYS:
+        v = data.get(key)
+        if v is not None and str(v).strip() and str(v).strip().lower() not in ('nan', 'none', '-'):
+            return str(v).strip()
+    return ''
+
+
 @app.route('/api/ownerclan/place_orders', methods=['POST'])
 def api_ownerclan_place_orders():
     settings = load_settings()
@@ -530,6 +553,15 @@ def api_ownerclan_place_orders():
     # 표에서 '발주' 체크박스를 켠 건만 처리한다(사용자 지시: "신규건 다 할
     # 필요없어 내가 지정한것만").
     checked = [r for r in rows if r.get('order_chk') == 'Y']
+    order_ids = [r.get('order_id') for r in checked if r.get('order_id')]
+    raw_json_map = {}
+    if order_ids:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        qmarks = ','.join('?' * len(order_ids))
+        cur.execute(f"SELECT order_id, raw_json FROM merged_orders WHERE order_id IN ({qmarks})", order_ids)
+        raw_json_map = {row[0]: row[1] for row in cur.fetchall()}
+        conn.close()
     items = [{
         'vendor_prod_id': r.get('vendor_prod_id', ''),
         'option_name': r.get('option_name', ''),
@@ -540,6 +572,7 @@ def api_ownerclan_place_orders():
         'zipcode': r.get('zipcode', ''),
         'ship_address': r.get('ship_address', ''),
         'prod_name': r.get('prod_name', ''),
+        'delivery_note': _extract_delivery_note(raw_json_map.get(r.get('order_id', ''))),
     } for r in checked]
     result = ownerclan_auto.place_orders(settings.get('ownerclan_url', ''), items)
     # 시도한 건은 성공/실패와 무관하게 체크를 해제한다 - 재시도하려면 다시
