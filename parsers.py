@@ -400,3 +400,43 @@ def save_hl_matching(db_path, rows):
     conn.commit()
     conn.close()
     return updated, errors
+
+
+def _norm_zip(v):
+    s = re.sub(r'[^0-9]', '', str(v if v is not None else ''))
+    return s.zfill(5) if s else ''
+
+
+def _norm_phone(v):
+    return re.sub(r'[^0-9]', '', str(v if v is not None else ''))
+
+
+def merge_ownerclan_addresses(db_path, fp, filename):
+    """다팔자 '엑셀 → 오너클랜 다운로드' 파일로 merged_orders.ship_address를 보강한다.
+    '전체 다운로드' 파일의 '배송지' 컬럼엔 동/호 같은 상세주소가 빠져있는 경우가 많은데
+    (실제 데이터로 확인됨: 같은 주문인데 '전체' 파일엔 "...아파트)"까지만, '오너클랜' 파일엔
+    "...아파트) 706동 218호"까지 있었다 - 사용자 지적), 오너클랜 다운로드 파일의
+    '받는사람 주소' 컬럼엔 그게 포함돼 있다. 매칭키는 판매사상품코드+우편번호+수령인연락처
+    조합(둘 다 이 파일과 '전체' 파일에 동일한 포맷으로 존재 확인됨) - 서로 다른 주문을
+    잘못 매칭할 위험이 거의 없다."""
+    df = read_upload_file(fp, filename)
+    if '오너클랜 상품코드' not in df.columns or '받는사람 주소' not in df.columns:
+        return {'updated': 0, 'rows': len(df), 'skipped_reason': '오너클랜 다운로드 형식이 아닙니다(필요 컬럼 없음).'}
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    updated = 0
+    for _, row in df.iterrows():
+        vendor_prod_id = _clean_vendor_prod_id(row.get('오너클랜 상품코드', ''))
+        addr = str(row.get('받는사람 주소', '') or '').strip()
+        zipc = _norm_zip(row.get('우편번호', ''))
+        phone = _norm_phone(row.get('받는사람 전화번호', '') or row.get('받는사람 휴대폰', ''))
+        if not vendor_prod_id or not addr or not zipc:
+            continue
+        cur.execute("""UPDATE merged_orders SET ship_address=?
+            WHERE vendor_prod_id=? AND REPLACE(zipcode, '-', '')=?
+            AND REPLACE(REPLACE(recipient_phone, '-', ''), ' ', '')=? AND ship_address!=?""",
+            (addr, vendor_prod_id, zipc, phone, addr))
+        updated += cur.rowcount
+    conn.commit()
+    conn.close()
+    return {'updated': updated, 'rows': len(df)}

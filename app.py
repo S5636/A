@@ -393,6 +393,27 @@ def api_dapalza_collect():
             )
         else:
             result['log'].append("진단정보 - 할인금액/정산가/수령인연락처/우편번호 컬럼 전부 이번 파일에서 확인됨.")
+    # '전체 다운로드' 파일의 배송지엔 동/호 같은 상세주소가 자주 빠져있어서
+    # (실제 데이터 비교로 확인됨, 사용자 지적) '오너클랜 다운로드' 파일을
+    # 추가로 받아왔다면 그걸로 ship_address를 보강한다. 실패해도 '전체'
+    # 업로드 결과 자체엔 영향 없다.
+    oc_path = result.get('file_path_oc')
+    if oc_path:
+        try:
+            oc_buf = io.BytesIO(_read_with_retry(oc_path))
+            oc_res = parsers.merge_ownerclan_addresses(DB_PATH, oc_buf, os.path.basename(oc_path))
+            result.setdefault('log', []).append(
+                f"오너클랜 다운로드 파일로 상세주소 보강 완료: {oc_res.get('updated', 0)}건 갱신"
+                f"(파일 {oc_res.get('rows', 0)}행 중)."
+                if not oc_res.get('skipped_reason') else
+                f"오너클랜 다운로드 파일 상세주소 보강 건너뜀: {oc_res.get('skipped_reason')}"
+            )
+        except Exception as e:
+            result.setdefault('log', []).append(f"오너클랜 다운로드 파일로 상세주소 보강 실패(무시): {_friendly_error(e)}")
+        try:
+            os.remove(oc_path)
+        except Exception:
+            pass
     # 예전 프로그램(PyQt5)은 업로드가 끝나면 파일을 지우는 구조였는데, 이번
     # 자동화는 그걸 안 해서 정산_업로드_대기 폴더에 같은 이름(다팔자.xlsx)의
     # 파일이 계속 남아있었다 - 그게 다음 저장 시도 때 윈도우 저장창에 '이미

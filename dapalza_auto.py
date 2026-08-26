@@ -467,6 +467,260 @@ def _dismiss_invalid_filename_dialog(log=None):
     return False
 
 
+def _download_via_excel_panel(win, button_text, target_path, log, L):
+    """다팔자 메인 창에서 이미 열려있는 '엑셀' 다운로드 패널 안의 button_text
+    버튼(예: '전체 다운로드' 또는 '오너클랜 다운로드')을 클릭하고, 뜨는 윈도우
+    표준 파일 저장 대화상자에 target_path를 직접 입력해서 저장한다. 저장
+    확인과 다팔자의 완료 팝업 정리까지 마치면 True, 실패하면 False를
+    돌려준다(원인은 log/L에 이미 남는다). '전체 다운로드'와 '오너클랜
+    다운로드'(상세주소 보강용)가 완전히 같은 패턴이라 공용 함수로 뺐다."""
+    try:
+        # '수집 완료'와 마찬가지로 '엑셀 다운로드' 패널도 별도 창이 아니라
+        # 메인 창 안에 겹쳐 뜨는 내부 패널일 가능성이 높아서, 먼저 메인 창
+        # 안에서 '전체 다운로드'를 찾아보고, 그래도 없을 때만 별도 창을 확인한다.
+        L(f"'{button_text}' 버튼을 찾는 중...")
+        dl_ctrl = None
+        for i in range(30):
+            try:
+                descendants = win.descendants()
+            except Exception:
+                descendants = None
+            dl_ctrl = _find_smallest_text_match(win, button_text, None, descendants=descendants)
+            if dl_ctrl is not None:
+                break
+            time.sleep(1)
+        # '전체 다운로드'를 누르면 새 저장창(윈도우 표준 파일 저장 대화상자)이
+        # 뜬다 - 이 창을 나중에 제목으로 찾으려다가, 사용자가 이미 열어둔 다른
+        # 탐색기 창(제목에 '다운로드'가 들어간 경우 등)을 잘못 잡는 사고가 실제로
+        # 반복해서 발생했다. 그래서 제목으로 찾는 대신, 지금 이 순간까지 열려있던
+        # 모든 창의 핸들을 미리 저장해두고, 클릭 이후에 '새로 생긴 창'만 후보로
+        # 삼는다 - 기존에 열려있던 창은 애초에 후보에서 제외되니 훨씬 안전하다.
+        try:
+            pre_download_handles = set(w.handle for w in Desktop(backend='uia').windows())
+        except Exception:
+            pre_download_handles = set()
+        try:
+            pre_dialog_hwnds = set(_find_hwnds_by_class('#32770'))
+        except Exception:
+            pre_dialog_hwnds = set()
+
+        if dl_ctrl is not None:
+            L(f"메인 창 안에서 '{button_text}' 버튼 발견 - 클릭...")
+            dl_ctrl.click_input()
+        else:
+            # 지금까지 확인된 바로는 별도 창이 아니라 메인 창 안 패널이었지만,
+            # 혹시 모를 다른 상황(버전 차이 등)을 대비해 짧게만 별도 창도 확인한다.
+            L("메인 창 안에서 못 찾아서 혹시 모를 별도 '엑셀 다운로드' 창을 잠깐 확인합니다...")
+            try:
+                dl_win = Desktop(backend='uia').window(title='엑셀 다운로드')
+                dl_win.wait('visible', timeout=5)
+                _click(dl_win, button_text, 'Button', L)
+            except Exception as e:
+                L(f"별도 창도 없었습니다: {type(e).__name__}: {e} - 그래도 다음 단계로 진행합니다.")
+        time.sleep(2)
+
+        L('파일 저장 대화상자를 찾는 중...')
+        # 직전 시도에서 60초를 기다려도 Desktop(backend='uia').windows()가 이
+        # 저장창을 목록에서 아예 빠뜨리는 게 확인됐다 (사용자는 화면에서 그 창을
+        # 직접 보고 입력까지 하고 있었는데 로그는 '없다'고 나옴) - 이건 UI
+        # Automation 쪽 열거 방식 자체의 한계로 보인다. 그래서 훨씬 더 원초적인
+        # 방법을 최우선으로 쓴다: 윈도우 표준 파일 저장/열기 대화상자는 운영체제
+        # 버전에 상관없이 창 클래스명이 항상 '#32770'으로 고정돼 있다 - 이걸
+        # EnumWindows로 직접 찾으면 UIA 열거가 놓치는 경우도 잡을 수 있다.
+        # 그래도 안 되면 예전 방식(새로 생긴 창 / 정확한 제목)을 순서대로 더 써본다.
+        save_win = None
+        for i in range(60):
+            try:
+                new_dialogs = [h for h in _find_hwnds_by_class('#32770') if h not in pre_dialog_hwnds]
+            except Exception:
+                new_dialogs = []
+            if new_dialogs:
+                try:
+                    save_win = _wrap_hwnd_uia(new_dialogs[0])
+                    L(f"클래스명(#32770)으로 저장창 발견: '{save_win.window_text()}'.")
+                    break
+                except Exception as e:
+                    L(f'저장창을 UIA로 감싸는 데 실패: {type(e).__name__}: {e}')
+
+            try:
+                new_windows = [w for w in Desktop(backend='uia').windows()
+                                if w.handle not in pre_download_handles]
+            except Exception:
+                new_windows = []
+            if new_windows:
+                named = [w for w in new_windows
+                         if any(k in w.window_text() for k in ('다운로드', '저장', '엑셀'))]
+                save_win = named[0] if named else new_windows[0]
+                L(f"새로 나타난 창 발견: '{save_win.window_text()}' - 이걸 저장창으로 사용합니다.")
+                break
+
+            try:
+                titled = Desktop(backend='uia').window(title_re='(?i).*주문.*(엑셀|excel).*다운로드.*')
+                if titled.exists(timeout=0):
+                    save_win = titled
+                    L(f"정확한 제목으로 저장창 발견: '{save_win.window_text()}'.")
+                    break
+            except Exception:
+                pass
+
+            if i == 20:
+                try:
+                    all_titles = [w.window_text() for w in Desktop(backend='uia').windows() if w.window_text().strip()]
+                except Exception as e:
+                    all_titles = [f'(조회 실패: {e})']
+                L(f'아직 저장창을 못 찾았습니다 (20초 경과). 지금 열려있는 창 제목들: {all_titles}')
+            time.sleep(1)
+        if save_win is None:
+            L('60초 안에 저장창을 못 찾았습니다 - 엉뚱한 창을 잘못 잡느니 여기서 멈춥니다.')
+            raise RuntimeError('저장 대화상자를 찾지 못했습니다.')
+        # save_win이 WindowSpecification이면 .wait()가 있지만, EnumWindows나
+        # Desktop().windows()로 직접 찾은 경우는 UIAWrapper라서 .wait()가 없다
+        # (이미 찾은 시점에 존재/화면표시가 확인된 창이니 굳이 또 기다릴 필요도 없다).
+        try:
+            save_win.wait('visible', timeout=30)
+        except AttributeError:
+            pass
+
+        os.makedirs(os.path.dirname(target_path) or '.', exist_ok=True)
+
+        # 같은 이름의 파일이 이미 그 폴더에 남아있으면 나중에 이름 바꿀 때
+        # 걸리니 미리 지운다.
+        if os.path.exists(target_path):
+            try:
+                os.remove(target_path)
+                L(f'기존에 남아있던 같은 이름의 파일을 먼저 정리했습니다: {target_path}')
+            except Exception as e:
+                L(f'기존 파일 정리 실패(무시하고 진행): {type(e).__name__}: {e}')
+
+        # 예전엔 파일이름 칸을 직접 조작하다가 사고가 났었다 - 그 칸을
+        # 클릭해서 포커스를 주려다가 좌표가 낡아서 목록의 다른 파일을
+        # 잘못 클릭 -> 윈도우가 그걸 '이름 바꾸기' 시작으로 오인 -> 거기에
+        # 경로 문자열을 넣으니 오류가 났다. 그래서 한동안 그 칸을 아예 안
+        # 건드리고 기본 파일명으로 저장한 뒤 폴더에서 새 파일을 찾아
+        # 이름을 바꾸는 방식을 썼는데, 그러면 저장 대화상자가 그 순간 어느
+        # 폴더를 기본으로 띄우고 있었는지 우리가 전혀 통제를 못 해서, 다른
+        # 폴더(다운로드 등 짐작도 안 되는 곳)에 파일이 저장되는 사고로
+        # 이어졌다(사용자가 실제로 겪음 - 폴더를 계속 짐작해서 뒤지는 방식은
+        # 쓰레기 파일만 쌓이니 쓰지 말라는 지시).
+        #
+        # 그래서 이번엔 '클릭'도 'Ctrl+A 단축키'도 쓰지 않고, 파일이름 칸
+        # (Edit 컨트롤)을 automation_id로 직접 찾아 그 값을 코드로 덮어쓰는
+        # 방식으로 바꾼다. (실제로 겪은 사고: Ctrl+A가 타이밍 문제로 기존
+        # 텍스트를 지우지 못하고 리터럴 'a' 글자만 남아 경로 앞에 붙어버려
+        # "aC:\Users\..." 같은 깨진 이름이 되고 "파일 이름이 올바르지
+        # 않습니다" 오류가 났었다 - 그 칸을 못 찾을 때만 예전 방식으로
+        # 대체한다.)
+        L(f"저장창 파일이름 칸에 정해진 경로를 직접 입력합니다: {target_path}")
+        try:
+            save_win.set_focus()
+        except Exception:
+            pass
+        try:
+            _set_save_filename(save_win, target_path, L)
+            time.sleep(0.3)
+            save_win.type_keys('{ENTER}')
+            L('경로 입력 후 Enter로 저장 실행.')
+        except Exception as e:
+            L(f'경로 입력 실패({type(e).__name__}: {e}) - 저장 버튼을 직접 찾아 클릭 시도...')
+            _click(save_win, '저장', 'Button', L)
+        time.sleep(1)
+        _dismiss_invalid_filename_dialog(L)
+        try:
+            confirm = Desktop(backend='uia').window(title_re='.*(덮어쓰|같은 이름).*')
+            if confirm.exists(timeout=2):
+                L('같은 이름 파일 덮어쓰기 확인창에서 예 클릭...')
+                _click(confirm, '예', 'Button', L)
+        except Exception:
+            pass
+
+        # 경로를 직접 입력했으니 이제 target_path 그 자리에 정확히 저장됐는지만
+        # 확인하면 된다 - 폴더를 짐작해서 여기저기 뒤지는 방식은 더 이상 안 쓴다.
+        L(f'{target_path} 에 실제로 저장됐는지 확인하는 중...')
+        found = False
+        for _ in range(30):
+            if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                found = True
+                break
+            time.sleep(1)
+
+        if not found:
+            # 실제 로그로 확인된 사실: 이 시점엔 저장창(save_win)이 진짜로는
+            # 이미 닫혀서(=저장 자체는 이미 끝난 상태) descendants()가 0개인데,
+            # .exists()/.is_visible()는 그래도 True를 돌려주는 경우가 있었다 -
+            # 그래서 존재하지도 않는 창에 '저장' 버튼을 찾으려다 당연히
+            # 실패했다. exists 체크만 믿지 말고 descendants 개수를 직접 봐서,
+            # 정말 창이 남아있을 때만 클릭을 재시도한다.
+            L(f'아직 {target_path}가 안 보입니다 - 저장창이 실제로 남아있는지 확인 중...')
+            try:
+                try:
+                    still_there = save_win.exists(timeout=2)
+                except AttributeError:
+                    # EnumWindows로 직접 찾은 경우는 UIAWrapper라서 .exists()가
+                    # 없다 - is_visible()로 대신 확인한다.
+                    still_there = save_win.is_visible()
+                if still_there:
+                    try:
+                        still_there = len(save_win.descendants()) > 0
+                    except Exception:
+                        still_there = False
+                if still_there:
+                    L('저장창이 실제로 남아있습니다 - 경로를 다시 입력하고 저장 버튼을 직접 클릭해서 재시도합니다...')
+                    save_win.set_focus()
+                    _set_save_filename(save_win, target_path, L)
+                    time.sleep(0.3)
+                    _click(save_win, '저장', 'Button', L)
+                    time.sleep(1)
+                    _dismiss_invalid_filename_dialog(L)
+                    try:
+                        confirm = Desktop(backend='uia').window(title_re='.*(덮어쓰|같은 이름).*')
+                        if confirm.exists(timeout=2):
+                            _click(confirm, '예', 'Button', L)
+                    except Exception:
+                        pass
+                else:
+                    # 저장창은 이미 닫혀있다(=저장 자체는 끝났을 가능성이 큼) -
+                    # 클릭할 대상이 없으니 재시도 대신, 디스크 쓰기/백신 검사가
+                    # 늦어지는 경우를 대비해 조금 더 길게 다시 확인한다.
+                    L('저장창이 이미 닫혀있습니다(저장 자체는 끝난 것으로 보임) - 파일 쓰기가 늦어지는 걸 대비해 다시 확인합니다...')
+                for _ in range(20):
+                    if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                        found = True
+                        break
+                    time.sleep(1)
+            except Exception as e:
+                L(f'재시도 중 오류: {type(e).__name__}: {e}')
+
+        if not found:
+            L(f'저장된 파일을 끝내 못 찾았습니다: {target_path}가 안 만들어졌습니다 (자동화 중 다른 창을 조작하면 입력이 엉뚱한 곳으로 샐 수 있어요 - 자동화가 끝날 때까지 다른 창은 건드리지 말아주세요)')
+            return False
+
+        L(f'파일 저장 확인 완료: {target_path}')
+
+        # 다팔자 자체가 저장 완료 후 '전체 주문관리 엑셀이 저장되었습니다' 같은
+        # 확인 팝업을 추가로 띄운다. 이걸 안 닫아두면 다음번 '지금 수집' 실행이
+        # 이 팝업이 화면에 남아있는 상태로 시작하게 돼서 다음 자동화가 엉뚱하게
+        # 동작할 위험이 있다 - 여기서 확인/예 버튼을 찾아 눌러서 정리한다. 못
+        # 찾아도 실패로 처리하진 않는다 (파일 저장 자체는 이미 확인됐으므로).
+        try:
+            time.sleep(1)
+            descendants = win.descendants()
+            done_marker = _find_smallest_text_match(win, '저장되었습니다', None, descendants=descendants)
+            if done_marker is not None:
+                ok_ctrl = _find_near(done_marker, '예', L) or _find_near(done_marker, '확인', L)
+                if ok_ctrl is not None:
+                    ok_ctrl.click_input()
+                    L('저장 완료 팝업을 확인 눌러서 정리했습니다 (다음 실행에 영향 안 주도록).')
+                else:
+                    L('저장 완료 팝업은 보이는데 확인/예 버튼을 못 찾았습니다 - 수동으로 닫아주세요.')
+        except Exception as e:
+            L(f'저장 완료 팝업 정리 중 오류(파일 저장 자체는 이미 확인됐으니 무시해도 됨): {type(e).__name__}: {e}')
+
+        return True
+    except Exception as e:
+        L(f"'{button_text}' 다운로드 중 오류 발생 - {type(e).__name__}: {e}")
+        return False
+
+
 def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동수집.xlsx', wait_after_collect=10):
     log = []
 
@@ -787,6 +1041,10 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
             L(f'{poll_seconds}초 안에 수집 완료 확인 팝업을 못 찾았습니다 - 그냥 다음 단계로 진행합니다.')
         time.sleep(1)
 
+        target_dir = save_folder or os.path.join(os.path.expanduser('~'), 'Downloads')
+        os.makedirs(target_dir, exist_ok=True)
+        target_path = os.path.join(target_dir, save_filename)
+
         L("'엑셀' 버튼 클릭...")
         _click(win, '엑셀', 'Button', L)
         time.sleep(1)
@@ -794,246 +1052,30 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
         # '수집 완료'와 마찬가지로 '엑셀 다운로드' 패널도 별도 창이 아니라
         # 메인 창 안에 겹쳐 뜨는 내부 패널일 가능성이 높아서, 먼저 메인 창
         # 안에서 '전체 다운로드'를 찾아보고, 그래도 없을 때만 별도 창을 확인한다.
-        L("'전체 다운로드' 버튼을 찾는 중...")
-        dl_ctrl = None
-        for i in range(30):
-            try:
-                descendants = win.descendants()
-            except Exception:
-                descendants = None
-            dl_ctrl = _find_smallest_text_match(win, '전체 다운로드', None, descendants=descendants)
-            if dl_ctrl is not None:
-                break
-            time.sleep(1)
-        # '전체 다운로드'를 누르면 새 저장창(윈도우 표준 파일 저장 대화상자)이
-        # 뜬다 - 이 창을 나중에 제목으로 찾으려다가, 사용자가 이미 열어둔 다른
-        # 탐색기 창(제목에 '다운로드'가 들어간 경우 등)을 잘못 잡는 사고가 실제로
-        # 반복해서 발생했다. 그래서 제목으로 찾는 대신, 지금 이 순간까지 열려있던
-        # 모든 창의 핸들을 미리 저장해두고, 클릭 이후에 '새로 생긴 창'만 후보로
-        # 삼는다 - 기존에 열려있던 창은 애초에 후보에서 제외되니 훨씬 안전하다.
-        try:
-            pre_download_handles = set(w.handle for w in Desktop(backend='uia').windows())
-        except Exception:
-            pre_download_handles = set()
-        try:
-            pre_dialog_hwnds = set(_find_hwnds_by_class('#32770'))
-        except Exception:
-            pre_dialog_hwnds = set()
-
-        if dl_ctrl is not None:
-            L("메인 창 안에서 '전체 다운로드' 버튼 발견 - 클릭...")
-            dl_ctrl.click_input()
-        else:
-            # 지금까지 확인된 바로는 별도 창이 아니라 메인 창 안 패널이었지만,
-            # 혹시 모를 다른 상황(버전 차이 등)을 대비해 짧게만 별도 창도 확인한다.
-            L("메인 창 안에서 못 찾아서 혹시 모를 별도 '엑셀 다운로드' 창을 잠깐 확인합니다...")
-            try:
-                dl_win = Desktop(backend='uia').window(title='엑셀 다운로드')
-                dl_win.wait('visible', timeout=5)
-                _click(dl_win, '전체 다운로드', 'Button', L)
-            except Exception as e:
-                L(f"별도 창도 없었습니다: {type(e).__name__}: {e} - 그래도 다음 단계로 진행합니다.")
-        time.sleep(2)
-
-        L('파일 저장 대화상자를 찾는 중...')
-        # 직전 시도에서 60초를 기다려도 Desktop(backend='uia').windows()가 이
-        # 저장창을 목록에서 아예 빠뜨리는 게 확인됐다 (사용자는 화면에서 그 창을
-        # 직접 보고 입력까지 하고 있었는데 로그는 '없다'고 나옴) - 이건 UI
-        # Automation 쪽 열거 방식 자체의 한계로 보인다. 그래서 훨씬 더 원초적인
-        # 방법을 최우선으로 쓴다: 윈도우 표준 파일 저장/열기 대화상자는 운영체제
-        # 버전에 상관없이 창 클래스명이 항상 '#32770'으로 고정돼 있다 - 이걸
-        # EnumWindows로 직접 찾으면 UIA 열거가 놓치는 경우도 잡을 수 있다.
-        # 그래도 안 되면 예전 방식(새로 생긴 창 / 정확한 제목)을 순서대로 더 써본다.
-        save_win = None
-        for i in range(60):
-            try:
-                new_dialogs = [h for h in _find_hwnds_by_class('#32770') if h not in pre_dialog_hwnds]
-            except Exception:
-                new_dialogs = []
-            if new_dialogs:
-                try:
-                    save_win = _wrap_hwnd_uia(new_dialogs[0])
-                    L(f"클래스명(#32770)으로 저장창 발견: '{save_win.window_text()}'.")
-                    break
-                except Exception as e:
-                    L(f'저장창을 UIA로 감싸는 데 실패: {type(e).__name__}: {e}')
-
-            try:
-                new_windows = [w for w in Desktop(backend='uia').windows()
-                                if w.handle not in pre_download_handles]
-            except Exception:
-                new_windows = []
-            if new_windows:
-                named = [w for w in new_windows
-                         if any(k in w.window_text() for k in ('다운로드', '저장', '엑셀'))]
-                save_win = named[0] if named else new_windows[0]
-                L(f"새로 나타난 창 발견: '{save_win.window_text()}' - 이걸 저장창으로 사용합니다.")
-                break
-
-            try:
-                titled = Desktop(backend='uia').window(title_re='(?i).*주문.*(엑셀|excel).*다운로드.*')
-                if titled.exists(timeout=0):
-                    save_win = titled
-                    L(f"정확한 제목으로 저장창 발견: '{save_win.window_text()}'.")
-                    break
-            except Exception:
-                pass
-
-            if i == 20:
-                try:
-                    all_titles = [w.window_text() for w in Desktop(backend='uia').windows() if w.window_text().strip()]
-                except Exception as e:
-                    all_titles = [f'(조회 실패: {e})']
-                L(f'아직 저장창을 못 찾았습니다 (20초 경과). 지금 열려있는 창 제목들: {all_titles}')
-            time.sleep(1)
-        if save_win is None:
-            L('60초 안에 저장창을 못 찾았습니다 - 엉뚱한 창을 잘못 잡느니 여기서 멈춥니다.')
-            raise RuntimeError('저장 대화상자를 찾지 못했습니다.')
-        # save_win이 WindowSpecification이면 .wait()가 있지만, EnumWindows나
-        # Desktop().windows()로 직접 찾은 경우는 UIAWrapper라서 .wait()가 없다
-        # (이미 찾은 시점에 존재/화면표시가 확인된 창이니 굳이 또 기다릴 필요도 없다).
-        try:
-            save_win.wait('visible', timeout=30)
-        except AttributeError:
-            pass
-
-        target_dir = save_folder or os.path.join(os.path.expanduser('~'), 'Downloads')
-        os.makedirs(target_dir, exist_ok=True)
-        target_path = os.path.join(target_dir, save_filename)
-
-        # 같은 이름의 파일이 이미 그 폴더에 남아있으면 나중에 이름 바꿀 때
-        # 걸리니 미리 지운다.
-        if os.path.exists(target_path):
-            try:
-                os.remove(target_path)
-                L(f'기존에 남아있던 같은 이름의 파일을 먼저 정리했습니다: {target_path}')
-            except Exception as e:
-                L(f'기존 파일 정리 실패(무시하고 진행): {type(e).__name__}: {e}')
-
-        # 예전엔 파일이름 칸을 직접 조작하다가 사고가 났었다 - 그 칸을
-        # 클릭해서 포커스를 주려다가 좌표가 낡아서 목록의 다른 파일을
-        # 잘못 클릭 -> 윈도우가 그걸 '이름 바꾸기' 시작으로 오인 -> 거기에
-        # 경로 문자열을 넣으니 오류가 났다. 그래서 한동안 그 칸을 아예 안
-        # 건드리고 기본 파일명으로 저장한 뒤 폴더에서 새 파일을 찾아
-        # 이름을 바꾸는 방식을 썼는데, 그러면 저장 대화상자가 그 순간 어느
-        # 폴더를 기본으로 띄우고 있었는지 우리가 전혀 통제를 못 해서, 다른
-        # 폴더(다운로드 등 짐작도 안 되는 곳)에 파일이 저장되는 사고로
-        # 이어졌다(사용자가 실제로 겪음 - 폴더를 계속 짐작해서 뒤지는 방식은
-        # 쓰레기 파일만 쌓이니 쓰지 말라는 지시).
-        #
-        # 그래서 이번엔 '클릭'도 'Ctrl+A 단축키'도 쓰지 않고, 파일이름 칸
-        # (Edit 컨트롤)을 automation_id로 직접 찾아 그 값을 코드로 덮어쓰는
-        # 방식으로 바꾼다. (실제로 겪은 사고: Ctrl+A가 타이밍 문제로 기존
-        # 텍스트를 지우지 못하고 리터럴 'a' 글자만 남아 경로 앞에 붙어버려
-        # "aC:\Users\..." 같은 깨진 이름이 되고 "파일 이름이 올바르지
-        # 않습니다" 오류가 났었다 - 그 칸을 못 찾을 때만 예전 방식으로
-        # 대체한다.)
-        L(f"저장창 파일이름 칸에 정해진 경로를 직접 입력합니다: {target_path}")
-        try:
-            save_win.set_focus()
-        except Exception:
-            pass
-        try:
-            _set_save_filename(save_win, target_path, L)
-            time.sleep(0.3)
-            save_win.type_keys('{ENTER}')
-            L('경로 입력 후 Enter로 저장 실행.')
-        except Exception as e:
-            L(f'경로 입력 실패({type(e).__name__}: {e}) - 저장 버튼을 직접 찾아 클릭 시도...')
-            _click(save_win, '저장', 'Button', L)
-        time.sleep(1)
-        _dismiss_invalid_filename_dialog(L)
-        try:
-            confirm = Desktop(backend='uia').window(title_re='.*(덮어쓰|같은 이름).*')
-            if confirm.exists(timeout=2):
-                L('같은 이름 파일 덮어쓰기 확인창에서 예 클릭...')
-                _click(confirm, '예', 'Button', L)
-        except Exception:
-            pass
-
-        # 경로를 직접 입력했으니 이제 target_path 그 자리에 정확히 저장됐는지만
-        # 확인하면 된다 - 폴더를 짐작해서 여기저기 뒤지는 방식은 더 이상 안 쓴다.
-        L(f'{target_path} 에 실제로 저장됐는지 확인하는 중...')
-        found = False
-        for _ in range(30):
-            if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
-                found = True
-                break
-            time.sleep(1)
-
-        if not found:
-            # 실제 로그로 확인된 사실: 이 시점엔 저장창(save_win)이 진짜로는
-            # 이미 닫혀서(=저장 자체는 이미 끝난 상태) descendants()가 0개인데,
-            # .exists()/.is_visible()는 그래도 True를 돌려주는 경우가 있었다 -
-            # 그래서 존재하지도 않는 창에 '저장' 버튼을 찾으려다 당연히
-            # 실패했다. exists 체크만 믿지 말고 descendants 개수를 직접 봐서,
-            # 정말 창이 남아있을 때만 클릭을 재시도한다.
-            L(f'아직 {target_path}가 안 보입니다 - 저장창이 실제로 남아있는지 확인 중...')
-            try:
-                try:
-                    still_there = save_win.exists(timeout=2)
-                except AttributeError:
-                    # EnumWindows로 직접 찾은 경우는 UIAWrapper라서 .exists()가
-                    # 없다 - is_visible()로 대신 확인한다.
-                    still_there = save_win.is_visible()
-                if still_there:
-                    try:
-                        still_there = len(save_win.descendants()) > 0
-                    except Exception:
-                        still_there = False
-                if still_there:
-                    L('저장창이 실제로 남아있습니다 - 경로를 다시 입력하고 저장 버튼을 직접 클릭해서 재시도합니다...')
-                    save_win.set_focus()
-                    _set_save_filename(save_win, target_path, L)
-                    time.sleep(0.3)
-                    _click(save_win, '저장', 'Button', L)
-                    time.sleep(1)
-                    _dismiss_invalid_filename_dialog(L)
-                    try:
-                        confirm = Desktop(backend='uia').window(title_re='.*(덮어쓰|같은 이름).*')
-                        if confirm.exists(timeout=2):
-                            _click(confirm, '예', 'Button', L)
-                    except Exception:
-                        pass
-                else:
-                    # 저장창은 이미 닫혀있다(=저장 자체는 끝났을 가능성이 큼) -
-                    # 클릭할 대상이 없으니 재시도 대신, 디스크 쓰기/백신 검사가
-                    # 늦어지는 경우를 대비해 조금 더 길게 다시 확인한다.
-                    L('저장창이 이미 닫혀있습니다(저장 자체는 끝난 것으로 보임) - 파일 쓰기가 늦어지는 걸 대비해 다시 확인합니다...')
-                for _ in range(20):
-                    if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
-                        found = True
-                        break
-                    time.sleep(1)
-            except Exception as e:
-                L(f'재시도 중 오류: {type(e).__name__}: {e}')
-
-        if not found:
-            L(f'저장된 파일을 끝내 못 찾았습니다: {target_path}가 안 만들어졌습니다 (자동화 중 다른 창을 조작하면 입력이 엉뚱한 곳으로 샐 수 있어요 - 자동화가 끝날 때까지 다른 창은 건드리지 말아주세요)')
+        if not _download_via_excel_panel(win, '전체 다운로드', target_path, log, L):
             return {'ok': False, 'log': log}
 
-        L(f'파일 저장 확인 완료: {target_path}')
+        result = {'ok': True, 'log': log, 'file_path': target_path}
 
-        # 다팔자 자체가 저장 완료 후 '전체 주문관리 엑셀이 저장되었습니다' 같은
-        # 확인 팝업을 추가로 띄운다. 이걸 안 닫아두면 다음번 '지금 수집' 실행이
-        # 이 팝업이 화면에 남아있는 상태로 시작하게 돼서 다음 자동화가 엉뚱하게
-        # 동작할 위험이 있다 - 여기서 확인/예 버튼을 찾아 눌러서 정리한다. 못
-        # 찾아도 실패로 처리하진 않는다 (파일 저장 자체는 이미 확인됐으므로).
+        # 오너클랜 배송지 상세정보(동/호 등)를 보강하려면 같은 방식으로 '오너클랜
+        # 다운로드'도 받는다 - '전체 다운로드' 파일의 '배송지' 컬럼엔 동/호 같은
+        # 상세주소가 자주 빠져있는데(실제 데이터 비교로 확인됨, 사용자 지적)
+        # '오너클랜 다운로드' 파일의 '받는사람 주소' 컬럼엔 포함돼 있다. 이건
+        # 보조 정보라 실패해도 '전체' 업로드 결과 자체는 그대로 살린다.
         try:
+            oc_base, oc_ext = os.path.splitext(save_filename)
+            oc_target_path = os.path.join(target_dir, f'{oc_base}_오너클랜{oc_ext}')
+            L("이어서 '엑셀' 버튼을 다시 눌러 '오너클랜 다운로드'(상세주소 보강용)를 받는 중...")
+            _click(win, '엑셀', 'Button', L)
             time.sleep(1)
-            descendants = win.descendants()
-            done_marker = _find_smallest_text_match(win, '저장되었습니다', None, descendants=descendants)
-            if done_marker is not None:
-                ok_ctrl = _find_near(done_marker, '예', L) or _find_near(done_marker, '확인', L)
-                if ok_ctrl is not None:
-                    ok_ctrl.click_input()
-                    L('저장 완료 팝업을 확인 눌러서 정리했습니다 (다음 실행에 영향 안 주도록).')
-                else:
-                    L('저장 완료 팝업은 보이는데 확인/예 버튼을 못 찾았습니다 - 수동으로 닫아주세요.')
+            if _download_via_excel_panel(win, '오너클랜 다운로드', oc_target_path, log, L):
+                result['file_path_oc'] = oc_target_path
+            else:
+                L("오너클랜 다운로드 파일은 못 받았습니다 - 상세주소 보강 없이 진행합니다.")
         except Exception as e:
-            L(f'저장 완료 팝업 정리 중 오류(파일 저장 자체는 이미 확인됐으니 무시해도 됨): {type(e).__name__}: {e}')
+            L(f"오너클랜 다운로드 시도 중 오류(무시, '전체' 파일은 이미 받았음): {type(e).__name__}: {e}")
 
-        return {'ok': True, 'log': log, 'file_path': target_path}
+        return result
     except Exception as e:
         L(f'자동화 중 오류 발생 - {type(e).__name__}: {e}')
         return {'ok': False, 'log': log}
