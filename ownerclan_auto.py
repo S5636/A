@@ -799,15 +799,24 @@ def _place_one_order(page, order_url, item, L):
     # 괄호 기준 분리, 그 다음 줄바꿈 기준 분리 둘 다 추측이었는데 실제
     # 업로드 파일을 직접 열어서 '배송지' 컬럼 72건을 전부 확인해본 결과
     # 줄바꿈이 있는 행이 하나도 없었다(사용자가 엑셀에서 봤다는 '줄바꿈'은
-    # 셀 너비 때문에 화면에 자동 줄바꿈으로 보인 것뿐, 실제 문자열엔
-    # 개행 문자가 없었다). 즉 원본 데이터에 기본주소/상세주소가 애초에
-    # 나뉘어 있지 않다 - '배송지' 하나가 전체 주소다. 그래서 나눌 방법이
-    # 없고, 통째로 기본주소에 넣고 상세주소는 비워두는 게 맞다(억지로
-    # 나누려고 하면 계속 틀린 추측만 반복하게 된다). 혹시라도 진짜
-    # 줄바꿈이 든 파일이 나중에 나오면 대비해서 분리 로직 자체는 남겨둔다.
-    lines = [ln.strip() for ln in ship_address.replace('\r\n', '\n').replace('\r', '\n').split('\n') if ln.strip()]
-    addr_base = lines[0] if lines else ship_address
-    addr_detail = ' '.join(lines[1:]) if len(lines) > 1 else ''
+    # 셀 너비 때문에 화면에 자동 줄바꿈으로 보인 것뿐, 실제 문자열엔 개행
+    # 문자가 없었다). 대신 사용자 지적대로 "괄호 뒤쪽이 상세주소"인 케이스가
+    # 실제로 존재한다(예: "...74-4 (율하동) 4116" -> 상세주소 "4116").
+    # 단, 마지막 ')' 를 기준으로 잘라야 한다 - 첫 ')' 기준으로 하면
+    # "...금호대명(서울대명2차)아파트)" 같은 중첩 괄호 주소를 잘못 나눠서
+    # "아파트)"를 상세주소로 오인하는 오류가 생긴다(72건 중 실제로 1건
+    # 발생 확인, rfind로 마지막 ')' 를 찾아서 해결). 괄호 뒤에 남는 글자가
+    # 없으면(대부분의 경우) 통째로 기본주소에 넣고 상세주소는 비워둔다.
+    close_idx = ship_address.rfind(')')
+    if close_idx != -1 and close_idx < len(ship_address) - 1:
+        trailing = ship_address[close_idx + 1:].strip()
+        if trailing:
+            addr_base = ship_address[:close_idx + 1].strip()
+            addr_detail = trailing
+        else:
+            addr_base, addr_detail = ship_address, ''
+    else:
+        addr_base, addr_detail = ship_address, ''
     try:
         qty = max(1, int(float(item.get('qty') or 1)))
     except Exception:
@@ -948,7 +957,7 @@ def _place_one_order(page, order_url, item, L):
         except Exception as e:
             L(f"[{order_id}/{code}] 상세주소 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
     else:
-        L(f"[{order_id}/{code}] 배송지에 줄바꿈으로 나뉜 상세주소가 없어서 상세주소 칸은 비워뒀습니다 - "
+        L(f"[{order_id}/{code}] 배송지에 괄호 뒤로 나뉘는 상세주소가 없어서 상세주소 칸은 비워뒀습니다 - "
           f"필요하면 결제 전 직접 확인해주세요.")
 
     # 배송시 요청사항(textarea[name="order_prmsg[]"]) - 상품명을 넣던 건

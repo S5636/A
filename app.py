@@ -419,7 +419,8 @@ def api_dapalza_collect():
             rows = ce.compute_dataset(DB_PATH, FEES_PATH)
             result['has_new_orders'] = any(
                 r.get('vendor_prod_id') and not r.get('is_cancelled') and not r.get('stock_status')
-                and r.get('sell_status') not in FINISHED_SELL_STATUSES for r in rows)
+                and r.get('sell_status') not in FINISHED_SELL_STATUSES
+                and '[HL]' not in (r.get('buy_status') or '') for r in rows)
         except Exception:
             result['has_new_orders'] = False
     return jsonify(result)
@@ -497,9 +498,13 @@ def api_ownerclan_check_stock():
     # 사고로 이어졌다). 예전처럼 상품코드만 보고 '옵션 중 아무거나 하나라도
     # 살아있으면 정상'으로 판정하면 실제 주문된 옵션이 품절이어도 정상으로
     # 잘못 나오는 문제가 있었으니, 여기서도 반드시 주문에 찍힌 옵션 그대로 매칭한다.
+    # HL(수기매입처, CS메모 등으로 사람이 직접 매입 정보를 입력한 건)은 오너클랜
+    # 상품이 아닐 수 있으니 재고확인 대상에서 제외한다(사용자 지적: "HL은 STOCK
+    # 돌리지말") - has_new_orders 판단 기준과 반드시 동일해야 한다.
     items = sorted({(r['vendor_prod_id'], r.get('option_name') or '') for r in rows
                      if r.get('vendor_prod_id') and not r.get('is_cancelled') and not r.get('stock_status')
-                     and r.get('sell_status') not in FINISHED_SELL_STATUSES})
+                     and r.get('sell_status') not in FINISHED_SELL_STATUSES
+                     and '[HL]' not in (r.get('buy_status') or '')})
     result = ownerclan_auto.check_stock(settings.get('ownerclan_url', ''), items)
     if result.get('ok') and result.get('results'):
         conn = sqlite3.connect(DB_PATH)
