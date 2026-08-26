@@ -756,8 +756,11 @@
         // 옵션이 있는 상품인데 오너클랜 옵션 목록을 못 찾아서 '옵션 없는
         // 단일상품'으로 잘못 처리된 건이 있으면(사용자 지적: "옵션없는
         // 단일상품이 아닌데 전부 그렇게 뜨네"), 재고상태를 못 믿을 수 있다는
-        // 뜻이니 이것도 로그를 지우지 않고 보여준다.
-        if (priceMiss > 0 || results.length === 0 || optionUncertain > 0) {
+        // 뜻이니 이것도 로그를 지우지 않고 보여준다. '확인실패' 건이
+        // 하나라도 있으면(fail > 0) 왜 실패했는지 원인을 봐야 하는데 여태
+        // 이 조건이 빠져있어서, 6건 다 확인실패인데도 로그를 지워버려
+        // 이유를 전혀 볼 수 없었던 버그가 있었다(사용자 지적) - 추가한다.
+        if (priceMiss > 0 || results.length === 0 || optionUncertain > 0 || fail > 0) {
           renderCollectLog('collect-log', data);
         } else {
           log.innerHTML = '';
@@ -765,7 +768,7 @@
         const detail = results.length
           ? ` - 정상 ${ok}건, 품절 ${soldout}건${fail ? `, 확인실패 ${fail}건` : ''}${priceMiss ? `, 매입예상가 확인 실패 ${priceMiss}건` : ''}${optionUncertain ? `, 옵션 인식 실패(단일상품으로 오판 가능) ${optionUncertain}건` : ''}`
           : ' - 확인할 대상이 없었습니다(아래 로그 확인).';
-        toast(`재고상태 확인 완료 (${data.checked || 0}건)${detail}.`, (priceMiss || results.length === 0 || optionUncertain) ? 'err' : 'ok');
+        toast(`재고상태 확인 완료 (${data.checked || 0}건)${detail}.`, (priceMiss || results.length === 0 || optionUncertain || fail) ? 'err' : 'ok');
         loadDashOrders();
       } else {
         const reason = (data.log && data.log.length) ? ` - ${data.log[data.log.length - 1]}` : '';
