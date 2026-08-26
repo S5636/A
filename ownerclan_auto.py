@@ -137,7 +137,15 @@ def _mark_profile_clean_exit():
             return
         with open(pref_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
+        # exit_type만 'Normal'로 바꿔도 대부분은 막히는데, 그래도 '페이지를
+        # 복원하시겠습니까?' 팝업이 다시 뜨는 사례가 실제로 있었다(사용자
+        # 스크린샷으로 확인) - 크롬 버전에 따라 exited_cleanly 불리언도 같이
+        # 봐서 판단하는 걸로 보여 둘 다 같이 정상 종료로 표시해둔다. 이
+        # 팝업은 Playwright가 클릭할 수 없는 브라우저 네이티브 UI라서(JS
+        # dialog가 아님), 한 번 뜨면 자동화가 그 뒤 페이지를 제대로 못 읽고
+        # STOCK 판정/ORDER 클릭이 전부 엉뚱하게 실패하는 원인이 될 수 있다.
         data.setdefault('profile', {})['exit_type'] = 'Normal'
+        data['profile']['exited_cleanly'] = True
         with open(pref_path, 'w', encoding='utf-8') as f:
             json.dump(data, f)
     except Exception:
