@@ -467,6 +467,75 @@ def _search_url_for_code(order_url, code):
             f'&topSearchKeyword={quote(code)}&topSearchType=selfcode')
 
 
+def _enter_product_detail(page, code, L):
+    """검색결과 페이지(page.goto로 이미 이동해있고 URL도 검증된 상태)에서
+    이 상품코드로 가는 카드를 찾아 실제 상세페이지로 클릭해 들어간다.
+
+    사용자가 실제 자동화 브라우저 화면을 캡쳐해서 확인해준 결과, 지금까지
+    STOCK의 '옵션 목록 0개(단일상품으로 오판)'와 ORDER의 '바로구매 버튼
+    타임아웃'이 사실 같은 원인이었다 - 코드 텍스트만 보고 아무 요소나
+    클릭하면(그 글자가 진짜 링크가 아니라 옆에 붙은 코드 라벨/배지 텍스트일
+    수 있음) 클릭 자체는 예외 없이 '성공'하지만 실제로는 페이지가 전혀
+    안 넘어가고 검색결과 페이지에 그대로 머문다. 그 상태에서 옵션 목록을
+    찾으면 당연히 0개(검색결과 페이지엔 옵션 목록이 없음)이고, '바로구매'
+    버튼도 당연히 영원히 안 나타난다. 그래서 여기서는 ①실제 <a> 링크
+    요소를 우선 찾고, ②클릭 뒤에는 검색결과 페이지를 실제로 벗어났는지까지
+    확인한다 - 벗어나지 못했으면 뒤 로직을 계속 진행하지 않고 바로
+    실패로 보고한다(엉뚱한 페이지를 상세페이지인 것처럼 계속 진행하는
+    사고를 막기 위함)."""
+    try:
+        anchor = page.locator(f'a:has-text("{code}")').first
+        target = anchor if anchor.count() > 0 else page.get_by_text(code, exact=False).first
+    except Exception:
+        target = page.get_by_text(code, exact=False).first
+
+    try:
+        target.wait_for(state='attached', timeout=15000)
+    except Exception:
+        try:
+            body_text = page.locator('body').inner_text()
+        except Exception:
+            body_text = ''
+        m = re.search(r'총\s*([\d,]+)\s*개의\s*상품', body_text)
+        if m and m.group(1).replace(',', '') == '0':
+            L(f"[{code}] 검색결과 0건입니다 - 코드가 오너클랜에 없거나 판매중지된 상품일 수 있습니다.")
+        else:
+            L(f"[{code}] 15초를 기다려도 검색결과 화면에서 이 코드가 안 보입니다 - 엉뚱한 페이지일 위험이 있어 여기서 멈춥니다.")
+        return False
+
+    try:
+        target.click(timeout=10000)
+    except Exception as e:
+        # 요소가 화면에 보이고 안정적인데도 클릭이 시간초과 나는 경우가
+        # 있었다 - 다른 요소가 그 클릭 좌표를 위에서 가로채고 있을 때 흔한
+        # 증상이다. 직접 자바스크립트로 클릭 이벤트를 발생시켜서 우회한다.
+        L(f"[{code}] 화면 클릭이 시간초과 났습니다({type(e).__name__}) - 다른 요소가 가리고 있을 수 있어 직접 클릭 이벤트로 재시도합니다...")
+        try:
+            target.evaluate('el => el.click()')
+        except Exception as e2:
+            L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e2).__name__}: {e2}")
+            return False
+
+    try:
+        page.wait_for_load_state('networkidle', timeout=15000)
+    except Exception:
+        pass
+    try:
+        page.get_by_text('바로구매', exact=False).first.wait_for(state='attached', timeout=10000)
+    except Exception:
+        pass
+
+    try:
+        still_on_search = 'search.php' in page.url and 'topSearchKeyword' in page.url
+    except Exception:
+        still_on_search = True
+    if still_on_search:
+        L(f"[{code}] 클릭했는데도 검색결과 페이지 그대로입니다 - 상세페이지로 못 들어간 것 같습니다.")
+        return False
+
+    return True
+
+
 def _normalize_option_text(s):
     return re.sub(r'\s+', '', str(s or '')).lower()
 
@@ -569,58 +638,8 @@ def _check_one_stock(page, order_url, code, option, L):
         L(f"[{code}] 검색 페이지로 이동한 것 같지 않습니다(현재 주소: {current_url}) - 브라우저가 다른 페이지에 머물러 있을 수 있어요.")
         return '확인실패', None, False
 
-    # 검색결과 목록에서 이 상품코드로 가는 카드를 찾아 상세페이지로 들어간다.
-    # 검색결과는 페이지 이동 직후 곧바로 다 그려져 있는 게 아니라 뒤이어
-    # 비동기로 채워지는데, .count()는 그 순간 DOM 상태만 즉시 확인하고
-    # 기다려주지 않는다(Playwright의 흔한 함정) - 고정된 시간만 잠깐 잔 뒤에
-    # .count()로 확인하면, 아직 안 그려진 걸 '코드가 없다'고 오판하는 사고로
-    # 이어진다. wait_for로 실제 나타날 때까지(최대 15초) 제대로 기다린다.
-    try:
-        code_link = page.get_by_text(code, exact=False).first
-        code_link.wait_for(state='attached', timeout=15000)
-    except Exception:
-        try:
-            body_text = page.locator('body').inner_text()
-        except Exception:
-            body_text = ''
-        m = re.search(r'총\s*([\d,]+)\s*개의\s*상품', body_text)
-        if m and m.group(1).replace(',', '') == '0':
-            L(f"[{code}] 검색결과 0건입니다 - 코드가 오너클랜에 없거나 판매중지된 상품일 수 있습니다.")
-        else:
-            L(f"[{code}] 15초를 기다려도 검색결과 화면에서 이 코드가 안 보입니다 - 엉뚱한 페이지일 위험이 있어 여기서 멈춥니다.")
+    if not _enter_product_detail(page, code, L):
         return '확인실패', None, False
-
-    try:
-        code_link.click(timeout=10000)
-    except Exception as e:
-        # 요소가 화면에 보이고 안정적인데도(Playwright 자체 로그에 그렇게
-        # 나옴) 클릭이 계속 시간초과 나는 경우가 실제로 있었다 - 광고
-        # 배너 등 다른 요소가 그 클릭 좌표를 위에서 가로채고 있을 때
-        # 흔히 나는 증상이다. 화면을 보고 클릭하는 대신, 그 링크
-        # 엘리먼트에 직접 자바스크립트로 클릭 이벤트를 발생시켜서
-        # 가로채는 요소를 우회한다.
-        L(f"[{code}] 화면 클릭이 시간초과 났습니다({type(e).__name__}) - 다른 요소가 가리고 있을 수 있어 직접 클릭 이벤트로 재시도합니다...")
-        try:
-            code_link.evaluate('el => el.click()')
-        except Exception as e2:
-            L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e2).__name__}: {e2}")
-            return '확인실패', None, False
-
-    # 검색결과 페이지에서 겪었던 것과 같은 문제(.count()는 안 기다림)가
-    # 상세페이지에서도 똑같이 날 수 있다 - '바로구매' 글자 하나만 기다리는
-    # 걸로는 부족했다(실제로 옵션이 2개 있는 상품인데도 옵션 목록은 그
-    # 순간까지 아직 안 그려져서 '옵션 없는 단일상품'으로 오판한 사례가
-    # 있었다). '바로구매' 버튼은 물론 옵션 목록까지 만드는 페이지 내부
-    # AJAX 요청들이 다 끝날 때까지(네트워크가 조용해질 때까지) 기다리는
-    # 게 훨씬 안전하다.
-    try:
-        page.wait_for_load_state('networkidle', timeout=15000)
-    except Exception:
-        pass
-    try:
-        page.get_by_text('바로구매', exact=False).first.wait_for(state='attached', timeout=10000)
-    except Exception:
-        pass
 
     # 옵션(사이즈/색상 등)이 있는 상품은 '바로구매' 버튼이 옵션과 무관하게
     # 항상 떠 있어서, 텍스트로만 보면 특정 옵션이 품절이어도 못 잡는다.
@@ -807,22 +826,8 @@ def _place_one_order(page, order_url, item, L):
     if 'search.php' not in current_url or 'topSearchKeyword' not in current_url:
         return {'ok': False, 'reason': f'검색 페이지로 이동하지 못했습니다(현재 주소: {current_url}).'}
 
-    try:
-        code_link = page.get_by_text(code, exact=False).first
-        code_link.wait_for(state='attached', timeout=15000)
-    except Exception:
-        return {'ok': False, 'reason': '검색결과에서 이 상품코드를 찾지 못했습니다.'}
-    try:
-        code_link.click(timeout=10000)
-    except Exception:
-        try:
-            code_link.evaluate('el => el.click()')
-        except Exception as e2:
-            return {'ok': False, 'reason': f'상품 페이지로 들어가지 못했습니다: {type(e2).__name__}: {e2}'}
-    try:
-        page.wait_for_load_state('networkidle', timeout=15000)
-    except Exception:
-        pass
+    if not _enter_product_detail(page, code, L):
+        return {'ok': False, 'reason': '검색결과를 클릭했지만 상품 상세페이지로 들어가지 못했습니다 (STOCK과 같은 원인일 수 있음).'}
 
     try:
         option_lis = page.locator('li.option[option-soldout]')
