@@ -740,7 +740,7 @@ def check_stock(order_url, items):
 
 def _place_one_order(page, order_url, item, L):
     """item: {'vendor_prod_id','option_name','qty','order_id','recipient',
-    'recipient_phone','zipcode','ship_address','prod_name','delivery_note'}"""
+    'recipient_phone','zipcode','ship_address','prod_name','delivery_note','cs_override'}"""
     code = str(item.get('vendor_prod_id') or '').strip()
     option = str(item.get('option_name') or '').strip()
     order_id = str(item.get('order_id') or '').strip()
@@ -750,19 +750,25 @@ def _place_one_order(page, order_url, item, L):
     ship_address = str(item.get('ship_address') or '').strip()
     prod_name = str(item.get('prod_name') or '').strip()
     delivery_note = str(item.get('delivery_note') or '').strip()
+    cs_override = str(item.get('cs_override') or '').strip()
+    if cs_override:
+        # CS메모에 오너클랜 상품코드가 수기로 남겨져 있으면 그걸 우선한다
+        # (사용자 요청) - app.py에서 이미 vendor_prod_id를 이 값으로
+        # 바꿔치기해서 넘겨준다. 여기선 어떤 코드로 주문하는지 로그로
+        # 분명히 남긴다(원래 판매사상품코드 매칭과 다르게 주문됐다는 걸
+        # 나중에 헷갈리지 않게).
+        L(f"[{order_id}] CS메모에서 발견한 상품코드 '{cs_override}'로 주문합니다(판매사상품코드 매칭 대신 우선 적용).")
 
-    # 배송지 문자열에 "경기도 이천시 아리역로16번길 1 (증포동,이천고등학교)"
-    # 처럼 괄호로 상세정보가 붙는 형식이 실제로 확인됐다(사용자 지적: "괄호
-    # 앞까지가 기본주소고 뒤가 상세주소잖아") - 괄호 앞은 기본주소, 괄호 안은
-    # 상세주소로 나눠서 넣는다. 괄호가 없으면 나눌 근거가 없으니 통째로
-    # 기본주소에 넣고 상세주소는 비워둔다.
-    addr_base, addr_detail = ship_address, ''
-    paren_idx = ship_address.find('(')
-    if paren_idx > 0:
-        addr_base = ship_address[:paren_idx].strip()
-        addr_detail = ship_address[paren_idx:].strip()
-        if addr_detail.startswith('(') and addr_detail.endswith(')'):
-            addr_detail = addr_detail[1:-1].strip()
+    # 괄호 기준으로 나누던 이전 방식이 틀렸다(사용자가 실제 사례로 확인:
+    # "대구광역시 동구 율하동로23길 74-4 (율하동) 4116" - 여기선 "(율하동)"
+    # 까지가 기본주소이고 그 뒤 "4116"이 상세주소다. 괄호 자체는 그냥
+    # 법정동을 표기하는 기본주소의 일부였을 뿐이다. 사용자 지적대로 엑셀
+    # 원본 셀에 실제 줄바꿈으로 기본주소/상세주소가 나뉘어 있었던 것으로
+    # 보인다 - 첫 줄을 기본주소, 그 다음 줄(들)을 상세주소로 나눈다. 줄바꿈이
+    # 없으면 나눌 근거가 없으니 통째로 기본주소에 넣고 상세주소는 비워둔다.
+    lines = [ln.strip() for ln in ship_address.replace('\r\n', '\n').replace('\r', '\n').split('\n') if ln.strip()]
+    addr_base = lines[0] if lines else ship_address
+    addr_detail = ' '.join(lines[1:]) if len(lines) > 1 else ''
     try:
         qty = max(1, int(float(item.get('qty') or 1)))
     except Exception:

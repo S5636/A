@@ -6,6 +6,7 @@
 import io
 import os
 import json
+import re
 import sqlite3
 import time
 import traceback
@@ -546,6 +547,29 @@ def _extract_delivery_note(raw_json_text):
     return ''
 
 
+CS_MEMO_CODE_RE = re.compile(r'\bW[0-9A-Za-z]{4,}\b')
+
+
+def _extract_cs_override_code(raw_json_text):
+    """CS메모에 오너클랜 상품코드(W로 시작)가 적혀있으면 그 코드로 주문하게
+    한다(사용자 요청: "CS메모에 W로 시작하는 상품코드가 있을경우 오더할때
+    그 코드로 주문하게 해") - 담당자가 실제로 매칭되는 오너클랜 상품이
+    표준 매칭과 다르다는 걸 CS메모에 수기로 남겨둔 경우를 위한 것으로
+    보인다. raw_json(원본 행 전체)에서 'CS메모' 컬럼을 찾아 그 안에서
+    W로 시작하는 코드를 정규식으로 찾는다."""
+    if not raw_json_text:
+        return ''
+    try:
+        data = json.loads(raw_json_text)
+    except Exception:
+        return ''
+    memo = str(data.get('CS메모') or '').strip()
+    if not memo:
+        return ''
+    m = CS_MEMO_CODE_RE.search(memo)
+    return m.group(0) if m else ''
+
+
 @app.route('/api/ownerclan/place_orders', methods=['POST'])
 def api_ownerclan_place_orders():
     settings = load_settings()
@@ -562,18 +586,26 @@ def api_ownerclan_place_orders():
         cur.execute(f"SELECT order_id, raw_json FROM merged_orders WHERE order_id IN ({qmarks})", order_ids)
         raw_json_map = {row[0]: row[1] for row in cur.fetchall()}
         conn.close()
-    items = [{
-        'vendor_prod_id': r.get('vendor_prod_id', ''),
-        'option_name': r.get('option_name', ''),
-        'qty': r.get('qty', '1'),
-        'order_id': r.get('order_id', ''),
-        'recipient': r.get('recipient', ''),
-        'recipient_phone': r.get('recipient_phone', ''),
-        'zipcode': r.get('zipcode', ''),
-        'ship_address': r.get('ship_address', ''),
-        'prod_name': r.get('prod_name', ''),
-        'delivery_note': _extract_delivery_note(raw_json_map.get(r.get('order_id', ''))),
-    } for r in checked]
+    items = []
+    for r in checked:
+        raw = raw_json_map.get(r.get('order_id', ''))
+        cs_override = _extract_cs_override_code(raw)
+        items.append({
+            # CS메모에 W로 시작하는 오너클랜 상품코드가 있으면 그걸
+            # 우선한다(사용자 요청) - 담당자가 실제 매칭 상품이 다르다고
+            # 수기로 남겨둔 경우를 위한 것.
+            'vendor_prod_id': cs_override or r.get('vendor_prod_id', ''),
+            'option_name': r.get('option_name', ''),
+            'qty': r.get('qty', '1'),
+            'order_id': r.get('order_id', ''),
+            'recipient': r.get('recipient', ''),
+            'recipient_phone': r.get('recipient_phone', ''),
+            'zipcode': r.get('zipcode', ''),
+            'ship_address': r.get('ship_address', ''),
+            'prod_name': r.get('prod_name', ''),
+            'delivery_note': _extract_delivery_note(raw),
+            'cs_override': cs_override,
+        })
     result = ownerclan_auto.place_orders(settings.get('ownerclan_url', ''), items)
     # 시도한 건은 성공/실패와 무관하게 체크를 해제한다 - 재시도하려면 다시
     # 체크해야 하게 만들어서, 뭘 이미 시도했는지 헷갈리지 않게 한다.
