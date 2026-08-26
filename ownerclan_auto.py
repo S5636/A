@@ -454,110 +454,22 @@ def collect_and_upload(order_url, save_folder=None, save_filename='oc.xlsx'):
     return {'ok': True, 'log': log, 'file_path': target_path}
 
 
-def _search_url_for_code(order_url, code):
-    """검색창을 눌러서 찾는 대신, 사용자가 직접 검색해보고 확인해준 주소 형식을
-    그대로 써서 바로 그 결과 페이지로 이동한다 - topSearchType=selfcode가
-    '판매사 상품코드' 기준 검색이라 코드 하나당 결과가 정확히 좁혀진다."""
+def _detail_url_for_code(order_url, code):
+    """검색결과에서 상품 카드를 클릭해서 상세페이지로 들어가는 방식이 계속
+    실패했다(새 탭 감지도 0개, 클릭해도 검색결과 페이지 그대로) - 사용자가
+    개발자도구로 실제 카드의 HTML을 직접 확인해줘서(2026-08-26) 원인이
+    나왔다: 진짜 링크는 상품코드 글자가 아니라 상품명 글자에만 씌워져
+    있었고(<a target="_blank" href="/V2/product/view.php?selfcode=코드">
+    상품명</a>), 우리는 코드 글자를 클릭하고 있었으니 애초에 링크가
+    아닌 글자를 클릭한 것이었다. 근데 그 href 자체가 코드 하나로 바로
+    만들어지는 고정된 패턴이라, 검색→카드 클릭이라는 불안정한 단계를
+    거칠 필요 없이 이 주소로 곧장 이동하면 된다."""
     try:
         parts = urlsplit(order_url)
         base = f'{parts.scheme}://{parts.netloc}'
     except Exception:
         base = 'https://www.ownerclan.com'
-    return (f'{base}/V2/product/search.php?topSearchKeywordInfo='
-            f'&topSearchKeyword={quote(code)}&topSearchType=selfcode')
-
-
-def _enter_product_detail(page, code, L):
-    """검색결과 페이지(page.goto로 이미 이동해있고 URL도 검증된 상태)에서
-    이 상품코드로 가는 카드를 찾아 실제 상세페이지로 클릭해 들어간다.
-    성공하면 상세페이지를 보여주는 Page 객체를 돌려준다(같은 탭에서
-    이동했으면 그대로 page, 새 탭으로 열렸으면 그 새 탭) - 실패하면 None.
-
-    사용자가 실제 자동화 브라우저 화면을 캡쳐해서 확인해준 결과, 코드
-    텍스트가 있는 요소를 클릭해도(<a> 우선 탐색으로 바꾼 뒤에도) 여전히
-    검색결과 페이지 그대로 머무는 경우가 있었다 - 클릭 자체는 예외 없이
-    "성공"하는데 실제 URL은 안 바뀌는 상황. 오너클랜 검색결과 카드가
-    상세페이지를 새 탭(target=_blank)으로 여는 구조일 가능성이 높다고
-    보고, 클릭 전후로 브라우저에 새로 열린 탭이 있는지 직접 확인해서
-    있으면 그 새 탭을 기준으로 넘어간다. 그래도 실패하면(새 탭도 없고
-    URL도 그대로) 다음 진단을 위해 페이지의 링크 개수 등을 로그로
-    남긴다 - 여기서 계속 원격으로 셀렉터를 추측하는 대신 실제 구조를
-    확인할 수 있게."""
-    try:
-        anchor = page.locator(f'a:has-text("{code}")').first
-        target = anchor if anchor.count() > 0 else page.get_by_text(code, exact=False).first
-    except Exception:
-        target = page.get_by_text(code, exact=False).first
-
-    try:
-        target.wait_for(state='attached', timeout=15000)
-    except Exception:
-        try:
-            body_text = page.locator('body').inner_text()
-        except Exception:
-            body_text = ''
-        m = re.search(r'총\s*([\d,]+)\s*개의\s*상품', body_text)
-        if m and m.group(1).replace(',', '') == '0':
-            L(f"[{code}] 검색결과 0건입니다 - 코드가 오너클랜에 없거나 판매중지된 상품일 수 있습니다.")
-        else:
-            L(f"[{code}] 15초를 기다려도 검색결과 화면에서 이 코드가 안 보입니다 - 엉뚱한 페이지일 위험이 있어 여기서 멈춥니다.")
-        return None
-
-    pages_before = set(page.context.pages)
-    try:
-        target.click(timeout=10000)
-    except Exception as e:
-        # 요소가 화면에 보이고 안정적인데도 클릭이 시간초과 나는 경우가
-        # 있었다 - 다른 요소가 그 클릭 좌표를 위에서 가로채고 있을 때 흔한
-        # 증상이다. 직접 자바스크립트로 클릭 이벤트를 발생시켜서 우회한다.
-        L(f"[{code}] 화면 클릭이 시간초과 났습니다({type(e).__name__}) - 다른 요소가 가리고 있을 수 있어 직접 클릭 이벤트로 재시도합니다...")
-        try:
-            target.evaluate('el => el.click()')
-        except Exception as e2:
-            L(f"[{code}] 검색 결과에서 상품 페이지로 못 들어갔습니다: {type(e2).__name__}: {e2}")
-            return None
-
-    # 새 탭으로 열렸는지 확인하려고 잠깐 기다렸다가 컨텍스트의 탭 목록을
-    # 다시 본다 - 새로 생긴 탭이 있으면 그게 상세페이지일 가능성이 높다.
-    time.sleep(1)
-    new_pages = [p for p in page.context.pages if p not in pages_before]
-    active_page = page
-    if new_pages:
-        active_page = new_pages[-1]
-        L(f"[{code}] 상세페이지가 새 탭으로 열린 것 같습니다 - 새 탭 기준으로 계속 진행합니다.")
-        try:
-            active_page.bring_to_front()
-        except Exception:
-            pass
-
-    try:
-        active_page.wait_for_load_state('networkidle', timeout=15000)
-    except Exception:
-        pass
-    try:
-        active_page.get_by_text('바로구매', exact=False).first.wait_for(state='attached', timeout=10000)
-    except Exception:
-        pass
-
-    try:
-        still_on_search = 'search.php' in active_page.url and 'topSearchKeyword' in active_page.url
-    except Exception:
-        still_on_search = True
-    if still_on_search:
-        try:
-            link_count = page.locator('a').count()
-        except Exception:
-            link_count = -1
-        L(f"[{code}] 클릭했는데도 검색결과 페이지 그대로입니다 - 상세페이지로 못 들어간 것 같습니다 "
-          f"(새 탭 {len(new_pages)}개 감지, 검색결과 페이지의 링크(a태그) 총 {link_count}개).")
-        if active_page is not page:
-            try:
-                active_page.close()
-            except Exception:
-                pass
-        return None
-
-    return active_page
+    return f'{base}/V2/product/view.php?selfcode={quote(code)}'
 
 
 def _normalize_option_text(s):
@@ -634,38 +546,42 @@ def _extract_option_addon(li, L, code):
 
 
 def _check_one_stock(page, order_url, code, option, L):
-    """판매사상품코드로 오너클랜 검색결과 페이지에 직접 이동해서(검색창을 직접
-    누르지 않고) 재고상태를 확인한다. 상품에 옵션(색상/사이즈 등)이 있으면
-    '아무 옵션이나 하나 살아있으면 정상'이 아니라, 실제 주문에 찍힌 그 옵션
-    하나만 정확히 찾아서 그 옵션의 품절여부로 판정한다. 옵션 자체가 없는
-    단일상품은 '바로구매' 버튼 유무로 본다. 재고상태와 함께, 매입가를
-    가늠할 수 있도록 화면에 보이는 판매가(+옵션 추가금)도 같이 읽어온다 -
-    실제 매입가와 정확히 같다는 보장은 없는 추정치임을 호출부에 알린다."""
-    url = _search_url_for_code(order_url, code)
+    """판매사상품코드로 오너클랜 상품 상세페이지에 직접 이동해서(검색결과
+    카드를 클릭하는 불안정한 단계 없이) 재고상태를 확인한다. 상품에
+    옵션(색상/사이즈 등)이 있으면 '아무 옵션이나 하나 살아있으면 정상'이
+    아니라, 실제 주문에 찍힌 그 옵션 하나만 정확히 찾아서 그 옵션의
+    품절여부로 판정한다. 옵션 자체가 없는 단일상품은 '바로구매' 버튼
+    유무로 본다. 재고상태와 함께, 매입가를 가늠할 수 있도록 화면에
+    보이는 판매가(+옵션 추가금)도 같이 읽어온다 - 실제 매입가와 정확히
+    같다는 보장은 없는 추정치임을 호출부에 알린다."""
+    url = _detail_url_for_code(order_url, code)
     try:
         page.goto(url, wait_until='domcontentloaded', timeout=30000)
     except Exception as e:
-        L(f"[{code}] 검색 페이지 이동 실패: {type(e).__name__}: {e}")
+        L(f"[{code}] 상세페이지 이동 실패: {type(e).__name__}: {e}")
         return '확인실패', None, False
 
-    # 이동이 '성공'으로 처리돼도 실제로는 엉뚱한 페이지(예: 브라우저가 이전
-    # 비정상종료 복원 알림 때문에 원래 열려있던 다른 페이지에 머물러 있는 등)에
-    # 머물러 있을 수 있다 - 그 상태에서 아래 로직을 계속 진행하면 그 엉뚱한
-    # 페이지에서 아무 상품이나 클릭해 엉뚱한 재고상태를 결과로 내는 사고가
-    # 실제로 있었다. 주소가 우리가 요청한 검색 주소로 실제 바뀌었는지부터
-    # 확인하고, 아니면 여기서 확인실패로 멈춘다.
+    try:
+        page.wait_for_load_state('networkidle', timeout=15000)
+    except Exception:
+        pass
+    try:
+        page.get_by_text('바로구매', exact=False).first.wait_for(state='attached', timeout=10000)
+    except Exception:
+        pass
+
+    # view.php?selfcode=코드로 이동했는데 실제로는 다른 페이지(로그인
+    # 페이지, 품/단종 안내 등)로 리다이렉트됐을 수 있다 - 그 상태에서
+    # 계속 진행하면 엉뚱한 페이지에서 옵션/가격을 읽어 잘못된 결과를 내는
+    # 사고로 이어진다. 주소가 실제로 상세페이지 형태인지부터 확인한다.
     try:
         current_url = page.url
     except Exception:
         current_url = ''
-    if 'search.php' not in current_url or 'topSearchKeyword' not in current_url:
-        L(f"[{code}] 검색 페이지로 이동한 것 같지 않습니다(현재 주소: {current_url}) - 브라우저가 다른 페이지에 머물러 있을 수 있어요.")
+    if 'view.php' not in current_url:
+        L(f"[{code}] 상세페이지 주소로 이동을 시도했는데 실제로는 다른 페이지로 보입니다"
+          f"(현재 주소: {current_url}) - 상품이 없거나 판매중지됐을 수 있습니다.")
         return '확인실패', None, False
-
-    detail_page = _enter_product_detail(page, code, L)
-    if detail_page is None:
-        return '확인실패', None, False
-    page = detail_page  # 새 탭으로 열렸으면 그 뒤 로직은 전부 그 탭을 기준으로 진행
 
     # 옵션(사이즈/색상 등)이 있는 상품은 '바로구매' 버튼이 옵션과 무관하게
     # 항상 떠 있어서, 텍스트로만 보면 특정 옵션이 품절이어도 못 잡는다.
@@ -746,20 +662,6 @@ def _check_one_stock(page, order_url, code, option, L):
     return ('품절' if has_soldout else '정상'), base_price, bool(option)
 
 
-def _close_extra_tabs(base_page, L=None):
-    """상세페이지가 새 탭으로 열렸을 때(_enter_product_detail) 매 건마다
-    쌓이지 않게, 원래 검색용 탭(base_page) 말고 남아있는 탭은 전부 정리한다."""
-    try:
-        extra = [p for p in base_page.context.pages if p is not base_page]
-    except Exception:
-        return
-    for p in extra:
-        try:
-            p.close()
-        except Exception:
-            pass
-
-
 def _check_stock_impl(order_url, items, L):
     page = _get_or_launch_page(L, launch_if_missing=False)
     if page is None:
@@ -781,7 +683,6 @@ def _check_stock_impl(order_url, items, L):
         results.append({'vendor_prod_id': code, 'option_name': option, 'status': status, 'price': price,
                          'option_uncertain': uncertain})
         L(f"[{label}] → {status}" + (f" (매입예상가 {price}원)" if price is not None else ""))
-        _close_extra_tabs(page)
     return results
 
 
@@ -855,22 +756,25 @@ def _place_one_order(page, order_url, item, L):
     if not code:
         return {'ok': False, 'reason': '판매사상품코드가 없습니다.'}
 
-    url = _search_url_for_code(order_url, code)
+    url = _detail_url_for_code(order_url, code)
     try:
         page.goto(url, wait_until='domcontentloaded', timeout=30000)
     except Exception as e:
-        return {'ok': False, 'reason': f'검색 페이지 이동 실패: {type(e).__name__}: {e}'}
+        return {'ok': False, 'reason': f'상세페이지 이동 실패: {type(e).__name__}: {e}'}
+    try:
+        page.wait_for_load_state('networkidle', timeout=15000)
+    except Exception:
+        pass
+    try:
+        page.get_by_text('바로구매', exact=False).first.wait_for(state='attached', timeout=10000)
+    except Exception:
+        pass
     try:
         current_url = page.url
     except Exception:
         current_url = ''
-    if 'search.php' not in current_url or 'topSearchKeyword' not in current_url:
-        return {'ok': False, 'reason': f'검색 페이지로 이동하지 못했습니다(현재 주소: {current_url}).'}
-
-    detail_page = _enter_product_detail(page, code, L)
-    if detail_page is None:
-        return {'ok': False, 'reason': '검색결과를 클릭했지만 상품 상세페이지로 들어가지 못했습니다 (STOCK과 같은 원인일 수 있음).'}
-    page = detail_page  # 새 탭으로 열렸으면 그 뒤 로직(옵션선택~결제하기)은 전부 그 탭 기준
+    if 'view.php' not in current_url:
+        return {'ok': False, 'reason': f'상세페이지로 이동하지 못했습니다(현재 주소: {current_url}) - 상품이 없거나 판매중지됐을 수 있습니다.'}
 
     try:
         option_lis = page.locator('li.option[option-soldout]')
@@ -981,7 +885,7 @@ def _place_one_order(page, order_url, item, L):
     L(f"[{order_id}/{code}] '결제하기' 클릭 완료 - 카드결제창이 뜨면 직접 카드정보를 입력하고 결제를 완료해주세요.")
     # page: 상세페이지가 새 탭으로 열렸을 수 있어서, 결제 완료 대기(_wait_for_payment_finish)를
     # 호출부가 반드시 이 실제 탭을 기준으로 하도록 같이 돌려준다.
-    return {'ok': True, 'reason': "주문서 작성 및 '결제하기' 클릭까지 완료(카드결제는 직접 진행 필요).", 'page': page}
+    return {'ok': True, 'reason': "주문서 작성 및 '결제하기' 클릭까지 완료(카드결제는 직접 진행 필요)."}
 
 
 def _wait_for_payment_finish(page, L, max_wait=600):
@@ -1022,16 +926,11 @@ def _place_orders_impl(order_url, items, L):
         except Exception as e:
             r = {'ok': False, 'reason': f'자동화 중 오류: {_friendly_error(e)}'}
         r['order_id'] = order_id
-        # 상세페이지가 새 탭으로 열렸을 수 있어서(_enter_product_detail), 결제
-        # 완료 대기는 그 실제 탭(r.get('page'))을 기준으로 해야 한다 - 검색용
-        # 원래 탭(page)을 계속 보고 있으면 결제 진행 상황을 영원히 못 본다.
-        payment_page = r.pop('page', None) or page
         results.append(r)
         L(f"[{label}] → {'성공(결제하기 클릭까지)' if r['ok'] else '실패: ' + r['reason']}")
         if r['ok']:
             L(f"[{label}] 카드결제를 직접 완료(또는 취소)해주세요 - 완료되면 자동으로 다음 건으로 넘어갑니다(최대 10분 대기).")
-            _wait_for_payment_finish(payment_page, L)
-        _close_extra_tabs(page)
+            _wait_for_payment_finish(page, L)
     return results
 
 
