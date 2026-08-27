@@ -4,5 +4,6 @@ __pycache__/
 venv/
 *.log
 ownerclan_profile/
+ownerclan_profile_whale/
 .setup_done
 Margin_Board.zip

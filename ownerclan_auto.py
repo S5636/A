@@ -36,6 +36,11 @@ from urllib.parse import urlsplit, quote
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile')
+# 네이버 웨일로 열 때는 크롬용으로 이미 만들어진 프로필(ownerclan_profile)을
+# 그대로 재사용하지 않는다 - 둘 다 크로미움 기반이긴 하지만 버전이 다르면
+# 프로필 폴더의 내부 형식(Local State 등) 호환 문제로 깨질 위험이 있어서,
+# 웨일 전용 프로필을 따로 둔다(사용자 지시: "웨일브라우저로 할수는 없냐").
+WHALE_PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile_whale')
 
 _state = {'pw': None, 'context': None, 'page': None}
 
@@ -123,14 +128,14 @@ def _cleanup_on_exit():
         pass
 
 
-def _mark_profile_clean_exit():
+def _mark_profile_clean_exit(profile_dir):
     """이 프로필 폴더가 이전에 비정상 종료(예: 마진보드 프로그램을 새 버전으로
     다시 켜느라 이전 파이썬 프로세스가 정리 코드 없이 죽은 경우)된 걸로 남아있으면,
     다음에 크롬을 켤 때 '페이지를 복원하시겠습니까?' 알림이 뜨면서 창이 화면
     앞으로 강제로 나오는 걸 실제로 확인했다 - 그러면 백그라운드로 숨겨둔 의미가
     없어진다. 프로필의 종료 상태를 미리 '정상 종료'로 표시해두면 이 알림 자체가
     안 뜬다."""
-    pref_path = os.path.join(PROFILE_DIR, 'Default', 'Preferences')
+    pref_path = os.path.join(profile_dir, 'Default', 'Preferences')
     try:
         import json
         if not os.path.exists(pref_path):
@@ -152,25 +157,27 @@ def _mark_profile_clean_exit():
         pass
 
 
-def _kill_stray_browser_processes(L=None):
-    """이 프로그램 전용 프로필(PROFILE_DIR)로 떠 있는 크롬 프로세스가 있으면
+def _kill_stray_browser_processes(profile_dir, L=None):
+    """이 프로그램 전용 프로필(profile_dir)로 떠 있는 브라우저 프로세스가 있으면
     전부 종료한다. 마진보드를 새 버전으로 재시작할 때 이전 파이썬 프로세스가
-    브라우저를 정상적으로 안 닫고 죽으면, 그 크롬이 고아 프로세스로 남아서
+    브라우저를 정상적으로 안 닫고 죽으면, 그 브라우저가 고아 프로세스로 남아서
     다음 실행이 새로 띄우려 해도 그 낡은 프로세스에 그대로 붙어버리는 사고가
     반복됐다(비정상종료 복원 알림이 계속 뜨고, 방금 고친 코드가 전혀 반영 안
     된 낡은 창을 계속 쓰게 됨). --user-data-dir에 이 프로그램 전용 폴더
-    경로가 들어있는 chrome 프로세스만 정확히 골라서 종료하므로, 사용자가
-    평소 쓰는 크롬은 절대 안 건드린다."""
+    경로가 들어있는 프로세스만 정확히 골라서 종료하므로, 사용자가 평소 쓰는
+    브라우저(크롬/웨일)는 절대 안 건드린다. 이름 필터를 크롬/웨일 둘 다
+    허용하는 이유는 웨일도 크로미움 기반이라 실행 옵션으로 골라 쓸 수
+    있어서다(사용자 지시: "웨일브라우저로 할수는 없냐")."""
     try:
         import psutil
     except ImportError:
         return
-    target = os.path.normcase(os.path.abspath(PROFILE_DIR))
+    target = os.path.normcase(os.path.abspath(profile_dir))
     killed = 0
     for proc in psutil.process_iter(['name', 'cmdline']):
         try:
             name = (proc.info.get('name') or '').lower()
-            if 'chrome' not in name:
+            if 'chrome' not in name and 'whale' not in name:
                 continue
             cmdline = proc.info.get('cmdline') or []
             if any(target in os.path.normcase(arg) for arg in cmdline):
@@ -179,7 +186,23 @@ def _kill_stray_browser_processes(L=None):
         except Exception:
             continue
     if killed and L is not None:
-        L(f'이전에 남아있던 오너클랜 전용 크롬 프로세스 {killed}개를 정리하고 새로 띄웁니다.')
+        L(f'이전에 남아있던 오너클랜 전용 브라우저 프로세스 {killed}개를 정리하고 새로 띄웁니다.')
+
+
+def _find_whale_executable():
+    """네이버 웨일 브라우저의 실행파일을 흔한 설치 위치에서 찾는다(사용자
+    요청: "웨일브라우저로 할수는 없냐 크롬말고"). 웨일도 크로미움 기반이라
+    Playwright가 executable_path로 그대로 띄울 수 있다. 못 찾으면 None을
+    돌려주고, 그러면 호출부가 기본(Playwright 내장 크로미움)으로 돌아간다."""
+    candidates = [
+        os.path.expandvars(r'%LOCALAPPDATA%\Naver\Naver Whale\Application\whale.exe'),
+        os.path.expandvars(r'%PROGRAMFILES%\Naver\Naver Whale\Application\whale.exe'),
+        os.path.expandvars(r'%PROGRAMFILES(X86)%\Naver\Naver Whale\Application\whale.exe'),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return None
 
 
 def _get_or_launch_page(L, launch_if_missing=True):
@@ -198,12 +221,20 @@ def _get_or_launch_page(L, launch_if_missing=True):
         return None
 
     from playwright.sync_api import sync_playwright
-    os.makedirs(PROFILE_DIR, exist_ok=True)
+    # 웨일이 설치돼 있으면 그걸로 띄운다(사용자 요청: "웨일브라우저로 할수는
+    # 없냐 크롬말고") - 웨일용 프로필은 크롬용과 따로 둔다(버전이 다른
+    # 크로미움 프로필을 그대로 공유하면 깨질 위험이 있어서). 웨일이 없으면
+    # 예전처럼 Playwright 내장 크로미움 + 기존 프로필을 그대로 쓴다.
+    whale_path = _find_whale_executable()
+    profile_dir = WHALE_PROFILE_DIR if whale_path else PROFILE_DIR
+    os.makedirs(profile_dir, exist_ok=True)
+    if whale_path:
+        L(f'네이버 웨일 브라우저로 엽니다: {whale_path} (오너클랜 로그인은 이 창에서 처음 한 번 다시 해야 합니다 - 전용 프로필이 새로 생겨서요.)')
     # 지금 이 파이썬 프로세스 안에서는 브라우저를 한 번도 띄운 적이 없는데도
     # 여기 도달했다는 건, 이전 실행(이전 버전 등)이 남긴 고아 크롬 프로세스가
     # 있을 수 있다는 뜻이다 - 새로 띄우기 전에 먼저 정리한다.
-    _kill_stray_browser_processes(L)
-    _mark_profile_clean_exit()
+    _kill_stray_browser_processes(profile_dir, L)
+    _mark_profile_clean_exit(profile_dir)
     pw = sync_playwright().start()
     # 화면 밖 좌표(--window-position=-32000,-32000)에 띄우는 방법도 써봤는데,
     # 그러면 로그인하려고 나중에 'normal'로 복원해도 windowState만 바뀌고
@@ -211,14 +242,17 @@ def _get_or_launch_page(L, launch_if_missing=True):
     # 재현 확인함). 그래서 화면 밖 배치는 포기하고, 아래에서 최소화만으로
     # 백그라운드 처리한다 - 로그인 때는 _set_window_state가 명시적으로
     # 화면 안쪽 좌표까지 같이 지정해서 확실히 보이게 만든다.
-    context = pw.chromium.launch_persistent_context(
-        PROFILE_DIR, headless=False,
+    launch_kwargs = dict(
+        headless=False,
         args=[
             '--disable-blink-features=AutomationControlled',
             '--disable-session-crashed-bubble',
         ],
         no_viewport=True,
     )
+    if whale_path:
+        launch_kwargs['executable_path'] = whale_path
+    context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
     page = context.pages[0] if context.pages else context.new_page()
     page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     page.on('dialog', lambda d: d.accept())
