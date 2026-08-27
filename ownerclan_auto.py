@@ -252,7 +252,26 @@ def _get_or_launch_page(L, launch_if_missing=True):
     )
     if whale_path:
         launch_kwargs['executable_path'] = whale_path
-    context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
+    try:
+        context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
+    except Exception as e:
+        if not whale_path:
+            raise
+        # 웨일이 이미 다른 창(사용자가 평소 쓰던 웨일)으로 떠 있으면, 새로
+        # 띄운 웨일 프로세스가 기존 창에 요청을 넘기고 자기는 바로 꺼져버려서
+        # Playwright가 방금 띄운 프로세스와 연결이 끊기는 경우가 있다(사용자가
+        # 실제로 겪음: TargetClosedError - "Target page, context or browser
+        # has been closed"). 이럴 땐 웨일을 포기하고 기본 브라우저(Playwright
+        # 내장 크로미움)로 대신 띄운다 - 자동화 자체가 아예 안 되는 것보단
+        # 낫다.
+        L(f"웨일 브라우저 실행에 실패했습니다({type(e).__name__}) - 웨일이 이미 다른 창으로 열려있으면 "
+          f"자동화 전용 창을 새로 못 띄울 수 있습니다. 기본 브라우저로 대신 엽니다.")
+        profile_dir = PROFILE_DIR
+        os.makedirs(profile_dir, exist_ok=True)
+        _kill_stray_browser_processes(profile_dir, L)
+        _mark_profile_clean_exit(profile_dir)
+        launch_kwargs.pop('executable_path', None)
+        context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
     page = context.pages[0] if context.pages else context.new_page()
     page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     page.on('dialog', lambda d: d.accept())
