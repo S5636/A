@@ -251,16 +251,24 @@ def compute_dataset(db_path, fees_path):
     owner_group_of = _build_owner_matches(cur, purchase_dict)
     stock_map = {}
     try:
-        cur.execute("SELECT vendor_prod_id, option_name, status, est_buy_price FROM stock_check")
-        stock_map = {(row[0], row[1] or ''): (row[2], row[3] or '') for row in cur.fetchall()}
+        cur.execute("SELECT vendor_prod_id, option_name, status, est_buy_price, est_ship_fee FROM stock_check")
+        stock_map = {(row[0], row[1] or ''): (row[2], row[3] or '', row[4] or '') for row in cur.fetchall()}
     except sqlite3.OperationalError:
-        pass  # 아직 stock_check 테이블이 없는 예전 DB일 수 있음
+        try:
+            cur.execute("SELECT vendor_prod_id, option_name, status, est_buy_price FROM stock_check")
+            stock_map = {(row[0], row[1] or ''): (row[2], row[3] or '', '') for row in cur.fetchall()}
+        except sqlite3.OperationalError:
+            pass  # 아직 stock_check 테이블이 없는 예전 DB일 수 있음
     # STOCK이 읽어오는 매입예상가는 상품 옵션 1개당 판매가일 뿐이라, 그대로
     # 보여주면 정산예정액/실정산가 같은 다른 열(전부 그 행의 총액)과 자릿수가
     # 안 맞아서 실제보다 훨씬 작아 보인다(사용자 지적: "수량 곱하고 배송비
-    # 더했니?"). 배송비는 오너클랜 상품페이지에서 따로 읽어오지 않으므로,
-    # 같은 판매사상품코드로 실제 매입했던 가장 최근 발주내역(ownerclan_raw)의
-    # 배송비를 추정치로 재사용한다 - 실제 매입 이력이 없으면 0으로 둔다.
+    # 더했니?"). 배송비는 상품마다 실제로 다르므로(사용자 지적: "제품마다
+    # 배송비가 다른데 니멋대로 하지말고") STOCK 확인 시 그 상품의 실제
+    # 배송비를 직접 읽어와서 est_ship_fee에 저장해둔다(ownerclan_auto.py의
+    # _extract_ship_fee). 이 값이 있으면 그대로 쓰고, 아직 이 기능이 나오기
+    # 전에 확인된 옛 데이터라 값이 비어있는 경우에만 같은 판매사상품코드로
+    # 실제 매입했던 가장 최근 발주내역(ownerclan_raw)의 배송비를 대체
+    # 추정치로 재사용한다 - 둘 다 없으면 0으로 둔다.
     vendor_ship_fee = {}
     try:
         cur.execute("SELECT 상품코드, 배송비, 배송상태 FROM ownerclan_raw ORDER BY rowid ASC")
@@ -463,6 +471,12 @@ def compute_dataset(db_path, fees_path):
 
         is_toss = 'TOSS' in market_name or 'TOSS' in source_name
 
+        stock_option_key = str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''
+        stock_status_val, stock_unit_price, stock_ship_fee_str = stock_map.get(
+            (m['vendor_prod_id'], stock_option_key), ('', '', ''))
+        est_ship_fee = safe_float(stock_ship_fee_str) if stock_ship_fee_str else vendor_ship_fee.get(m['vendor_prod_id'], 0)
+        est_buy_price_val = _est_buy_price_display(stock_unit_price, r[idx_['qty']], est_ship_fee)
+
         result.append({
             'order_id': oid,
             'bundle_no': b_no,
@@ -493,12 +507,8 @@ def compute_dataset(db_path, fees_path):
             # 보여준다. 확인 대상 선정(app.py의 check_stock)도 '신규주문'
             # 대신 '아직 이 칸이 비어있는지'로 바꿔서, 취소/반품이 아닌 이상
             # 상태가 뭐든 값이 채워질 때까지 계속 확인 대상에 포함되게 했다.
-            'stock_status': stock_map.get(
-                (m['vendor_prod_id'], str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ('', ''))[0],
-            'est_buy_price': _est_buy_price_display(
-                stock_map.get((m['vendor_prod_id'],
-                               str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''), ('', ''))[1],
-                r[idx_['qty']], vendor_ship_fee.get(m['vendor_prod_id'], 0)),
+            'stock_status': stock_status_val,
+            'est_buy_price': est_buy_price_val,
             'buy_cost': int(display_buy_cost),
             'buy_ship_fee': int(display_buy_ship),
             'buy_total': int(display_buy_cost + display_buy_ship),

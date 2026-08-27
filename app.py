@@ -182,12 +182,18 @@ def init_db():
         pass
     cur.execute("""CREATE TABLE IF NOT EXISTS stock_check (
         vendor_prod_id TEXT, option_name TEXT, status TEXT, checked_at TEXT,
-        est_buy_price TEXT DEFAULT '', PRIMARY KEY (vendor_prod_id, option_name))""")
+        est_buy_price TEXT DEFAULT '', est_ship_fee TEXT DEFAULT '',
+        PRIMARY KEY (vendor_prod_id, option_name))""")
     try:
         cur.execute("PRAGMA table_info(stock_check)")
         cols = {row[1] for row in cur.fetchall()}
         if 'est_buy_price' not in cols:
             cur.execute("ALTER TABLE stock_check ADD COLUMN est_buy_price TEXT DEFAULT ''")
+        # 상품마다 배송비가 다른데(사용자 지적) 예전엔 배송비를 상품페이지에서
+        # 안 읽고 과거 매입이력에서 재사용하는 추정치를 썼다 - 이제 STOCK
+        # 확인 때 이 상품의 실제 배송비를 직접 읽어와서 여기 저장한다.
+        if 'est_ship_fee' not in cols:
+            cur.execute("ALTER TABLE stock_check ADD COLUMN est_ship_fee TEXT DEFAULT ''")
     except Exception:
         pass
     conn.commit()
@@ -541,9 +547,12 @@ def api_ownerclan_check_stock():
             if entry.get('status') == '확인실패':
                 continue
             price = entry.get('price')
-            cur.execute("""INSERT OR REPLACE INTO stock_check (vendor_prod_id, option_name, status, checked_at, est_buy_price)
-                VALUES (?, ?, ?, ?, ?)""", (entry['vendor_prod_id'], entry['option_name'], entry['status'], now,
-                                             str(price) if price is not None else ''))
+            ship_fee = entry.get('ship_fee')
+            cur.execute("""INSERT OR REPLACE INTO stock_check
+                (vendor_prod_id, option_name, status, checked_at, est_buy_price, est_ship_fee)
+                VALUES (?, ?, ?, ?, ?, ?)""", (entry['vendor_prod_id'], entry['option_name'], entry['status'], now,
+                                                str(price) if price is not None else '',
+                                                str(ship_fee) if ship_fee is not None else ''))
         conn.commit()
         conn.close()
     result['checked'] = len(result.get('results') or [])
