@@ -10,6 +10,7 @@ import re
 import sqlite3
 import time
 import traceback
+from datetime import datetime
 
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from werkzeug.exceptions import HTTPException
@@ -621,11 +622,55 @@ def api_ownerclan_place_orders():
         cur.execute(f"SELECT order_id, raw_json FROM merged_orders WHERE order_id IN ({qmarks})", order_ids)
         raw_json_map = {row[0]: row[1] for row in cur.fetchall()}
         conn.close()
-    # 같은 상품+같은 받는사람+같은 배송지로 여러 건이 체크됐으면(=묶음배송으로
-    # 한 박스에 같이 갈 건들) 오너클랜에 따로따로 주문하지 않고 수량을 합쳐서
-    # 한 번만 주문한다(사용자 지적: "묶음배송이면 한번에 주문해야지 따로따로
-    # 하고 앉아있냐" - 배송비도 한 번만 나가고 카드결제도 한 번만 하면 됨).
-    # 판매측 bundle_no(합배송코드)는 신뢰할 수 없어서 그룹 판정에 쓰지 않는다는
+    # 원장주문코드에는 대표 주문번호 하나만 남긴다(사용자 지적: "원장주문코드는
+    # 9807 작은 숫자하나만 기록하는거 알지? 그래야 묶음으로 인식하는거지" -
+    # 콤마로 여러 개 이어붙이면 다팔자가 묶음으로 인식을 못 한다). 대표를
+    # 정하는 그룹은 옵션이 달라도(색상만 다른 등, 실제로 각각 따로 주문될 수
+    # 있는 경우도) 같은 배송 묶음으로 봐야 하므로, calc_engine.py의 합배송
+    # 판정과 동일한 방식(판매측 bundle_no는 안 쓰고, 같은 상품코드+같은
+    # 받는사람+같은 배송지 + 주문시각 90초 이내)으로 체크된 건들만 다시
+    # 클러스터링해서 그룹별로 가장 작은 주문번호를 대표로 정한다.
+    def _parse_order_dt(s):
+        try:
+            return datetime.strptime(str(s or '').strip()[:19], '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return None
+
+    pra_groups = {}
+    for r in checked:
+        vendor_prod_id = r.get('vendor_prod_id', '')
+        recipient = r.get('recipient', '')
+        ship_address = r.get('ship_address', '')
+        oid = r.get('order_id', '')
+        dt = _parse_order_dt(r.get('order_date'))
+        if not (vendor_prod_id and recipient and ship_address and oid and dt):
+            continue
+        pra_key = (vendor_prod_id, recipient, ship_address)
+        pra_groups.setdefault(pra_key, []).append((oid, dt))
+
+    representative_of = {}
+    for items in pra_groups.values():
+        items.sort(key=lambda x: x[1])
+        clusters = []
+        for oid, dt in items:
+            for cluster in clusters:
+                if abs((dt - cluster[-1][1]).total_seconds()) <= 90:
+                    cluster.append((oid, dt))
+                    break
+            else:
+                clusters.append([(oid, dt)])
+        for cluster in clusters:
+            rep = min((o for o, _ in cluster), key=lambda x: (len(x), x))
+            for oid, _ in cluster:
+                representative_of[oid] = rep
+
+    # 같은 상품+같은 옵션+같은 받는사람+같은 배송지로 여러 건이 체크됐으면
+    # 오너클랜에 따로따로 주문하지 않고 수량을 합쳐서 한 번만 주문한다
+    # (사용자 지적: "묶음배송이면 한번에 주문해야지 따로따로 하고 앉아있냐" -
+    # 배송비도 한 번만 나가고 카드결제도 한 번만 하면 됨). 옵션까지 같아야
+    # 수량을 합칠 수 있다 - 색상이 다르면 실제로는 서로 다른 상품이라 수량을
+    # 합치면 잘못된 옵션으로 여러 개를 주문하는 사고가 된다. 판매측
+    # bundle_no(합배송코드)는 신뢰할 수 없어서 그룹 판정에 쓰지 않는다는
     # 원칙(calc_engine.py 주석 참고)이 있으므로, 여기서도 bundle_no는 안 쓰고
     # 실제 배송 단위를 그대로 결정하는 (상품코드, 옵션, 받는사람, 우편번호,
     # 배송지) 조합으로 직접 묶는다.
@@ -666,7 +711,9 @@ def api_ownerclan_place_orders():
         g = groups[key]
         order_ids_in_group = [o for o in g['order_id'] if o]
         g['qty'] = str(g['qty'])
-        g['order_id'] = ','.join(order_ids_in_group)
+        # 원장주문코드엔 이 묶음의 대표 주문번호(가장 작은 번호) 하나만 남긴다 -
+        # 콤마로 이어붙이면 다팔자가 묶음으로 인식하지 못한다(사용자 지적).
+        g['order_id'] = representative_of.get(order_ids_in_group[0], order_ids_in_group[0]) if order_ids_in_group else ''
         items.append(g)
 
     result = ownerclan_auto.place_orders(settings.get('ownerclan_url', ''), items)
