@@ -11,6 +11,7 @@ compute_dataset() 결과만 사용한다 - 화면마다 계산을 따로 구현�
 import sqlite3
 import re
 import json
+import math
 from datetime import datetime
 
 MARKETS = ["쿠팡", "네이버", "11번가", "지마켓", "옥션", "TOSS", "카카오"]
@@ -72,17 +73,24 @@ def safe_float(value):
         return 0.0
 
 
-def _est_buy_price_display(unit_price_str, qty_raw, ship_fee):
+def _est_buy_price_display(unit_price_str, qty_raw, ship_fee, bundle_max_qty_str=''):
     """STOCK이 읽어온 매입예상가(옵션 1개당 판매가)를 그 행의 수량만큼
-    곱하고, 같은 상품의 과거 실제 매입 배송비 추정치를 더해서 화면에 보여줄
-    행 단위 총액으로 만든다. 단가를 아예 못 읽었으면(옵션 인식 실패 등)
-    빈 문자열을 그대로 돌려줘서 '-'로 표시되게 한다."""
+    곱하고, 같은 상품의 배송비 추정치를 더해서 화면에 보여줄 행 단위
+    총액으로 만든다. 단가를 아예 못 읽었으면(옵션 인식 실패 등) 빈 문자열을
+    그대로 돌려줘서 '-'로 표시되게 한다.
+
+    묶음배송가능수량을 넘겨 주문하면 배송비가 그만큼 여러 번 붙는다(사용자
+    스크린샷으로 확인 - "묶음배송가능수량 5개"인 상품을 10개 주문하면 배송비가
+    1번이 아니라 2번 나감). bundle_max_qty가 있으면 배송비 횟수를
+    ceil(수량 / bundle_max_qty)로 계산하고, 없으면(무제한 포함) 항상 1번이다."""
     unit_price_str = str(unit_price_str or '').strip()
     if not unit_price_str:
         return ''
     unit_price = safe_float(unit_price_str)
     qty = safe_float(qty_raw) or 1
-    return str(int(unit_price * qty + ship_fee))
+    bundle_max_qty = safe_float(bundle_max_qty_str)
+    ship_units = math.ceil(qty / bundle_max_qty) if bundle_max_qty > 0 else 1
+    return str(int(unit_price * qty + ship_fee * ship_units))
 
 
 def fetch_coupang_fee_rate(prod_name):
@@ -251,14 +259,18 @@ def compute_dataset(db_path, fees_path):
     owner_group_of = _build_owner_matches(cur, purchase_dict)
     stock_map = {}
     try:
-        cur.execute("SELECT vendor_prod_id, option_name, status, est_buy_price, est_ship_fee FROM stock_check")
-        stock_map = {(row[0], row[1] or ''): (row[2], row[3] or '', row[4] or '') for row in cur.fetchall()}
+        cur.execute("SELECT vendor_prod_id, option_name, status, est_buy_price, est_ship_fee, bundle_max_qty FROM stock_check")
+        stock_map = {(row[0], row[1] or ''): (row[2], row[3] or '', row[4] or '', row[5] or '') for row in cur.fetchall()}
     except sqlite3.OperationalError:
         try:
-            cur.execute("SELECT vendor_prod_id, option_name, status, est_buy_price FROM stock_check")
-            stock_map = {(row[0], row[1] or ''): (row[2], row[3] or '', '') for row in cur.fetchall()}
+            cur.execute("SELECT vendor_prod_id, option_name, status, est_buy_price, est_ship_fee FROM stock_check")
+            stock_map = {(row[0], row[1] or ''): (row[2], row[3] or '', row[4] or '', '') for row in cur.fetchall()}
         except sqlite3.OperationalError:
-            pass  # 아직 stock_check 테이블이 없는 예전 DB일 수 있음
+            try:
+                cur.execute("SELECT vendor_prod_id, option_name, status, est_buy_price FROM stock_check")
+                stock_map = {(row[0], row[1] or ''): (row[2], row[3] or '', '', '') for row in cur.fetchall()}
+            except sqlite3.OperationalError:
+                pass  # 아직 stock_check 테이블이 없는 예전 DB일 수 있음
     # STOCK이 읽어오는 매입예상가는 상품 옵션 1개당 판매가일 뿐이라, 그대로
     # 보여주면 정산예정액/실정산가 같은 다른 열(전부 그 행의 총액)과 자릿수가
     # 안 맞아서 실제보다 훨씬 작아 보인다(사용자 지적: "수량 곱하고 배송비
@@ -472,10 +484,10 @@ def compute_dataset(db_path, fees_path):
         is_toss = 'TOSS' in market_name or 'TOSS' in source_name
 
         stock_option_key = str(r[idx_['option_name']] or '') if 'option_name' in idx_ else ''
-        stock_status_val, stock_unit_price, stock_ship_fee_str = stock_map.get(
-            (m['vendor_prod_id'], stock_option_key), ('', '', ''))
+        stock_status_val, stock_unit_price, stock_ship_fee_str, stock_bundle_max_qty = stock_map.get(
+            (m['vendor_prod_id'], stock_option_key), ('', '', '', ''))
         est_ship_fee = safe_float(stock_ship_fee_str) if stock_ship_fee_str else vendor_ship_fee.get(m['vendor_prod_id'], 0)
-        est_buy_price_val = _est_buy_price_display(stock_unit_price, r[idx_['qty']], est_ship_fee)
+        est_buy_price_val = _est_buy_price_display(stock_unit_price, r[idx_['qty']], est_ship_fee, stock_bundle_max_qty)
 
         result.append({
             'order_id': oid,

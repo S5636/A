@@ -645,6 +645,30 @@ def _extract_ship_fee(page, L, code):
     return None
 
 
+def _extract_bundle_max_qty(page, L, code):
+    """상품 상세페이지의 '묶음배송가능수량'을 읽는다(사용자 스크린샷으로 확인 -
+    "택배배송 3,000원 · 반품교환비용 3,000원 · 묶음배송가능수량 5개" 형태,
+    '무제한'인 상품도 있음). 이 수량을 넘어서 주문하면 배송비가 그만큼 여러
+    번 붙는다(사용자 지적: 수량 10개인데 묶음배송가능수량이 5개면 배송비가
+    1번이 아니라 2번 나가야 함) - '무제한'이면 몇 개를 사든 배송비 1번이므로
+    None을 돌려준다(=제한 없음)."""
+    try:
+        text = page.locator('body').inner_text()
+    except Exception as e:
+        L(f"[{code}] 묶음배송가능수량 확인용 페이지 텍스트 읽기 실패: {type(e).__name__}: {e}")
+        return None
+    if re.search(r'묶음배송가능수량\s*무제한', text):
+        return None
+    m = re.search(r'묶음배송가능수량\s*([\d,]+)\s*개', text)
+    if m:
+        try:
+            v = int(m.group(1).replace(',', ''))
+            return v if v > 0 else None
+        except Exception:
+            return None
+    return None
+
+
 def _extract_option_addon(li, L, code):
     """선택된 옵션에 추가금이 있으면(예: "2세대-기본형(+850원)") 그 금액을
     더한다 - 실제 화면에서 옵션에 따라 가격이 달라지는 걸 스크린샷으로
@@ -673,7 +697,7 @@ def _check_one_stock(page, order_url, code, option, L):
     같다는 보장은 없는 추정치임을 호출부에 알린다."""
     url = _detail_url_for_code(order_url, code)
     if not _goto_detail_page(page, url, code, L):
-        return '확인실패', None, False, None
+        return '확인실패', None, False, None, None
 
     try:
         page.wait_for_load_state('networkidle', timeout=15000)
@@ -695,7 +719,7 @@ def _check_one_stock(page, order_url, code, option, L):
     if 'view.php' not in current_url:
         L(f"[{code}] 상세페이지 주소로 이동을 시도했는데 실제로는 다른 페이지로 보입니다"
           f"(현재 주소: {current_url}) - 상품이 없거나 판매중지됐을 수 있습니다.")
-        return '확인실패', None, False, None
+        return '확인실패', None, False, None, None
 
     # 옵션(사이즈/색상 등)이 있는 상품은 '바로구매' 버튼이 옵션과 무관하게
     # 항상 떠 있어서, 텍스트로만 보면 특정 옵션이 품절이어도 못 잡는다.
@@ -710,10 +734,11 @@ def _check_one_stock(page, order_url, code, option, L):
         option_count = option_lis.count()
     except Exception as e:
         L(f"[{code}] 옵션 목록 확인 실패: {type(e).__name__}: {e}")
-        return '확인실패', None, False, None
+        return '확인실패', None, False, None, None
 
     base_price = _extract_base_price(page, L, code)
     ship_fee = _extract_ship_fee(page, L, code)
+    bundle_max_qty = _extract_bundle_max_qty(page, L, code)
 
     # 판정 기준(사용자 지시): '바로구매' 버튼 유무는 더 이상 기준으로 안
     # 쓴다. ①찾는 옵션칸 자체에 '품절'이라고 써있거나 ②찾는 옵션이 목록에
@@ -722,23 +747,23 @@ def _check_one_stock(page, order_url, code, option, L):
     if option_count > 0:
         if not option:
             L(f"[{code}] 이 상품은 옵션이 {option_count}개 있는데 주문에 기록된 옵션 정보가 없어서 정확히 판정할 수 없습니다.")
-            return '확인실패', None, False, ship_fee
+            return '확인실패', None, False, ship_fee, bundle_max_qty
         li, matched_name = _find_matching_option_li(option_lis, option_count, option, code, L)
         if li is None:
             # 찾는 옵션이 목록에 없음 -> 품절로 본다.
             L(f"[{code}] 주문 옵션 '{option}'을 오너클랜 옵션 목록에서 못 찾았습니다 - 품절로 처리합니다.")
-            return '품절', None, False, ship_fee
+            return '품절', None, False, ship_fee, bundle_max_qty
         try:
             soldout = li.get_attribute('option-soldout')
         except Exception as e:
             L(f"[{code}] 옵션 품절여부 확인 실패: {type(e).__name__}: {e}")
-            return '확인실패', None, False, ship_fee
+            return '확인실패', None, False, ship_fee, bundle_max_qty
         addon = _extract_option_addon(li, L, code)
         price = (base_price + addon) if base_price is not None else None
         if addon and price is not None:
             L(f"[{code}] 옵션 '{matched_name}'에 추가금 {addon}원 확인 - 매입예상가 {price}원(기본 {base_price}원 + 추가금 {addon}원).")
         L(f"[{code}] 주문 옵션 '{option}' → 오너클랜 옵션 '{matched_name}' 매칭, {'구매 가능' if soldout == '0' else '품절'}.")
-        return ('정상' if soldout == '0' else '품절'), price, False, ship_fee
+        return ('정상' if soldout == '0' else '품절'), price, False, ship_fee, bundle_max_qty
 
     # 옵션 목록 자체가 없는 단일 상품. 페이지 전체에서 '품절'을 느슨하게
     # (exact=False) 찾으면 리뷰/추천상품/안내문구 등 상품 자체와 무관한
@@ -751,7 +776,7 @@ def _check_one_stock(page, order_url, code, option, L):
         has_soldout = page.get_by_text('품절', exact=True).count() > 0
     except Exception as e:
         L(f"[{code}] 상품 페이지 상태 확인 실패: {type(e).__name__}: {e}")
-        return '확인실패', None, False, ship_fee
+        return '확인실패', None, False, ship_fee, bundle_max_qty
 
     # 옵션이 있는 상품인데도 li.option[option-soldout] 셀렉터가 0개로
     # 잘못 잡혀서 전부 이 '단일상품' 경로로 빠지고 있다는 지적(사용자: "옵션
@@ -774,7 +799,7 @@ def _check_one_stock(page, order_url, code, option, L):
           f"이 상품은 실제로 옵션이 있을 가능성이 높습니다(재고상태를 못 믿을 수 있음). 진단: {alt_counts}")
 
     L(f"[{code}] 옵션 없는 단일상품(또는 옵션 목록 인식 실패) - '품절' 배지 {'있음' if has_soldout else '없음'}.")
-    return ('품절' if has_soldout else '정상'), base_price, bool(option), ship_fee
+    return ('품절' if has_soldout else '정상'), base_price, bool(option), ship_fee, bundle_max_qty
 
 
 def _check_stock_impl(order_url, items, L):
@@ -794,11 +819,12 @@ def _check_stock_impl(order_url, items, L):
             continue
         label = f"{code}/{option}" if option else code
         L(f"[{label}] 오너클랜에서 재고상태 확인 중...")
-        status, price, uncertain, ship_fee = _check_one_stock(page, order_url, code, option, L)
+        status, price, uncertain, ship_fee, bundle_max_qty = _check_one_stock(page, order_url, code, option, L)
         results.append({'vendor_prod_id': code, 'option_name': option, 'status': status, 'price': price,
-                         'option_uncertain': uncertain, 'ship_fee': ship_fee})
+                         'option_uncertain': uncertain, 'ship_fee': ship_fee, 'bundle_max_qty': bundle_max_qty})
         ship_note = f", 배송비 {ship_fee}원" if ship_fee is not None else ""
-        L(f"[{label}] → {status}" + (f" (매입예상가 {price}원{ship_note})" if price is not None else ""))
+        bundle_note = f", 묶음배송가능수량 {bundle_max_qty}개" if bundle_max_qty is not None else ""
+        L(f"[{label}] → {status}" + (f" (매입예상가 {price}원{ship_note}{bundle_note})" if price is not None else ""))
     return results
 
 

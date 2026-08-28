@@ -183,7 +183,7 @@ def init_db():
         pass
     cur.execute("""CREATE TABLE IF NOT EXISTS stock_check (
         vendor_prod_id TEXT, option_name TEXT, status TEXT, checked_at TEXT,
-        est_buy_price TEXT DEFAULT '', est_ship_fee TEXT DEFAULT '',
+        est_buy_price TEXT DEFAULT '', est_ship_fee TEXT DEFAULT '', bundle_max_qty TEXT DEFAULT '',
         PRIMARY KEY (vendor_prod_id, option_name))""")
     try:
         cur.execute("PRAGMA table_info(stock_check)")
@@ -195,6 +195,11 @@ def init_db():
         # 확인 때 이 상품의 실제 배송비를 직접 읽어와서 여기 저장한다.
         if 'est_ship_fee' not in cols:
             cur.execute("ALTER TABLE stock_check ADD COLUMN est_ship_fee TEXT DEFAULT ''")
+        # 묶음배송가능수량을 넘겨 주문하면 배송비가 여러 번 붙는데(사용자 지적:
+        # 수량 10개인데 묶음배송가능수량 5개면 배송비 2번) 이걸 몰라서 매입예상가가
+        # 실제보다 훨씬 크게 잘못 나온 적이 있었다 - 상품페이지에서 같이 읽어와 저장.
+        if 'bundle_max_qty' not in cols:
+            cur.execute("ALTER TABLE stock_check ADD COLUMN bundle_max_qty TEXT DEFAULT ''")
     except Exception:
         pass
     conn.commit()
@@ -549,11 +554,13 @@ def api_ownerclan_check_stock():
                 continue
             price = entry.get('price')
             ship_fee = entry.get('ship_fee')
+            bundle_max_qty = entry.get('bundle_max_qty')
             cur.execute("""INSERT OR REPLACE INTO stock_check
-                (vendor_prod_id, option_name, status, checked_at, est_buy_price, est_ship_fee)
-                VALUES (?, ?, ?, ?, ?, ?)""", (entry['vendor_prod_id'], entry['option_name'], entry['status'], now,
-                                                str(price) if price is not None else '',
-                                                str(ship_fee) if ship_fee is not None else ''))
+                (vendor_prod_id, option_name, status, checked_at, est_buy_price, est_ship_fee, bundle_max_qty)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""", (entry['vendor_prod_id'], entry['option_name'], entry['status'], now,
+                                                   str(price) if price is not None else '',
+                                                   str(ship_fee) if ship_fee is not None else '',
+                                                   str(bundle_max_qty) if bundle_max_qty is not None else ''))
         conn.commit()
         conn.close()
     result['checked'] = len(result.get('results') or [])
