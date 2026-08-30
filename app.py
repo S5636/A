@@ -224,6 +224,20 @@ def init_db():
                 f.write('done')
         except Exception:
             pass
+    # 재고상태는 '정상'으로 채워졌는데 매입예상가는 못 읽어서 빈칸으로 남은
+    # 행은(사용자 지적: "판매중이라고 써있는데 매입예상가도 없고") 위의
+    # 일회성 초기화 이후에도 계속 생길 수 있다(가격 추출이 매번 실패하는
+    # 상품페이지 구조일 수 있어서) - 매번 시작할 때마다 이런 행을 지워서
+    # 다음 STOCK 실행 때 다시 시도되게 한다. 앞으로는 check_stock 저장
+    # 로직 자체가 이런 값을 안 남기게 고쳤으니(app.py의 저장 부분 참고),
+    # 이건 그 고침 이전에 이미 잘못 저장된 옛 데이터를 청소하는 안전망이다.
+    try:
+        conn3 = sqlite3.connect(DB_PATH)
+        conn3.execute("DELETE FROM stock_check WHERE status='정상' AND (est_buy_price IS NULL OR est_buy_price='')")
+        conn3.commit()
+        conn3.close()
+    except Exception:
+        pass
     if not os.path.exists(FEES_PATH):
         ce.save_fees_config(FEES_PATH, ce.DEFAULT_FEES)
 
@@ -573,6 +587,17 @@ def api_ownerclan_check_stock():
             if entry.get('status') == '확인실패':
                 continue
             price = entry.get('price')
+            # '정상'인데 가격을 못 읽어온 경우도 '확인실패'와 똑같이 다뤄야
+            # 한다 - 그대로 저장해버리면 재고상태 칸은 채워져서 "판매중"으로
+            # 보이는데 매입예상가는 영원히 빈칸으로 남는다(사용자 지적: "판매중
+            # 이라고 써있는데 매입예상가도 없고" - 상태가 채워지면 재확인 대상
+            # 조건에서 빠지기 때문에 다음 STOCK을 아무리 돌려도 다시 시도조차
+            # 안 됨). 가격을 못 읽은 이유는 ownerclan_auto.py가 이미 로그로
+            # 남기니, 여기선 그냥 저장을 건너뛰고 다음 STOCK 실행 때 다시
+            # 시도되게 한다. '품절'은 애초에 가격이 안 뜨는 상품도 많아서
+            # 재시도 대상으로 삼지 않는다.
+            if entry.get('status') == '정상' and price is None:
+                continue
             ship_fee = entry.get('ship_fee')
             bundle_max_qty = entry.get('bundle_max_qty')
             cur.execute("""INSERT OR REPLACE INTO stock_check
