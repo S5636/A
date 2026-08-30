@@ -601,13 +601,22 @@ def _extract_base_price(page, L, code):
     회색 취소선)가 정가, 두 번째(빨간색 인라인스타일, class 없음)가 실제
     판매가다. 취소선 없이 가격이 하나만 있는 상품은 span이 1개뿐일 텐데,
     그 경우도 마지막(=유일한) span이 항상 실제 판매가이므로 "마지막 span"
-    규칙 하나로 두 경우 다 커버된다."""
+    규칙 하나로 두 경우 다 커버된다.
+
+    처음엔 `.locator('span')`(자손 전체)로 찾았다가 실패했다 - 개발자도구
+    캡처의 그 span 앞에 "▶"(펼침 삼각형)가 있었는데, 이게 안에 또 다른
+    요소(숫자와 "원"을 나누는 중첩 span 등)가 접혀있다는 뜻이었다. 자손 전체를
+    찾으면 그 중첩된 "원"만 있는 하위 span까지 걸려서, 맨 마지막 걸 집으면
+    "원" 조각만 잡히는 사고로 이어졌다(사용자가 실제로 겪음 - 거의 모든
+    상품에서 가격을 못 찾음). `> span`(직계 자식만)으로 좁혀서 이 문제를
+    없앤다 - inner_text()는 중첩된 자손의 글자도 다 이어붙여서 돌려주므로,
+    직계 자식 span만 정확히 골라도 "9,450원" 전체 텍스트가 그대로 나온다."""
     try:
         price_box = page.locator('div.m-price').first
         if price_box.count() == 0:
             L(f"[{code}] 가격 영역(div.m-price)을 못 찾았습니다 - 가격 확인을 건너뜁니다.")
             return None
-        spans = price_box.locator('span')
+        spans = price_box.locator('> span')
         n = spans.count()
         if n == 0:
             L(f"[{code}] div.m-price 안에서 가격 span을 못 찾았습니다.")
