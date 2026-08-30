@@ -193,12 +193,43 @@ def _kill_stray_browser_processes(profile_dir, L=None):
         L(f'이전에 남아있던 오너클랜 전용 브라우저 프로세스 {killed}개를 정리하고 새로 띄웁니다.')
 
 
+def _find_via_registry(exe_name):
+    """레지스트리 App Paths에 등록된 실제 설치 경로를 찾는다. 웨일/크롬을
+    흔한 설치 경로 목록으로만 찾다가 계속 못 찾는 사고가 있었다(사용자
+    지적: "웨일 브라우저를 못불러온다니까") - 다른 드라이브나 커스텀
+    경로에 설치된 경우 고정된 경로 목록으로는 못 찾는다. 설치 프로그램은
+    보통 이 레지스트리 키에 자기 실행파일의 실제 경로를 등록해두므로,
+    고정 경로보다 이쪽이 더 신뢰할 수 있다."""
+    if platform.system() != 'Windows':
+        return None
+    try:
+        import winreg
+    except ImportError:
+        return None
+    key_path = r'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\%s' % exe_name
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(hive, key_path) as key:
+                path, _ = winreg.QueryValueEx(key, None)
+                if path and os.path.exists(path):
+                    return path
+        except OSError:
+            continue
+    return None
+
+
 def _find_whale_executable():
-    """네이버 웨일 브라우저의 실행파일을 흔한 설치 위치에서 찾는다(사용자
-    요청: "웨일브라우저로 할수는 없냐 크롬말고"). 웨일도 크로미움 기반이라
-    Playwright가 executable_path로 그대로 띄울 수 있다. 못 찾으면 None을
-    돌려주고, 그러면 호출부가 실제 설치된 크롬 → Playwright 내장 크로미움
+    """네이버 웨일 브라우저의 실행파일을 찾는다(사용자 요청: "웨일브라우저로
+    할수는 없냐 크롬말고"). 웨일도 크로미움 기반이라 Playwright가
+    executable_path로 그대로 띄울 수 있다. 흔한 설치 경로 목록만으로
+    찾다가 실제로는 계속 못 찾는 사고가 있어서(사용자 지적: "웨일
+    브라우저를 못불러온다니까"), 레지스트리(App Paths)도 같이 찾아본다 -
+    설치 위치가 달라도 이쪽으로 찾을 확률이 더 높다. 그래도 못 찾으면
+    None을 돌려주고, 호출부가 실제 설치된 크롬 → Playwright 내장 크로미움
     순으로 넘어간다."""
+    reg_path = _find_via_registry('whale.exe')
+    if reg_path:
+        return reg_path
     candidates = [
         os.path.expandvars(r'%LOCALAPPDATA%\Naver\Naver Whale\Application\whale.exe'),
         os.path.expandvars(r'%PROGRAMFILES%\Naver\Naver Whale\Application\whale.exe'),
@@ -216,7 +247,12 @@ def _find_chrome_executable():
     깨지는 문제가 있었다(사용자 지적: "저놈의 네모네모 창 계속 뜨는데") -
     시스템에 실제 설치된 브라우저(웨일이든 크롬이든)를 쓰면 OS 폰트를
     그대로 쓸 수 있어서 이 문제가 해결될 가능성이 높다. 웨일이 없을 때
-    이거라도 먼저 찾아보고, 그것도 없으면 그때만 내장 크로미움을 쓴다."""
+    이거라도 먼저 찾아보고, 그것도 없으면 그때만 내장 크로미움을 쓴다.
+    웨일과 마찬가지로 레지스트리(App Paths)를 먼저 찾아보고, 없으면 흔한
+    설치 경로로 넘어간다."""
+    reg_path = _find_via_registry('chrome.exe')
+    if reg_path:
+        return reg_path
     candidates = [
         os.path.expandvars(r'%PROGRAMFILES%\Google\Chrome\Application\chrome.exe'),
         os.path.expandvars(r'%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe'),
@@ -266,6 +302,11 @@ def _get_or_launch_page(L, launch_if_missing=True):
     context = None
     for name, exe_path, profile_dir in candidates:
         if name != '기본(Playwright 내장)' and exe_path is None:
+            # 못 찾은 이유를 로그에 안 남기고 그냥 넘어가면, 사용자 입장에선
+            # 왜 웨일이 안 쓰였는지 전혀 알 수가 없다(사용자 지적: "웨일
+            # 브라우저를 못불러온다니까" - 아무 설명도 없이 조용히 다음
+            # 후보로 넘어가던 게 원인 중 하나였다).
+            L(f'{name} 브라우저 실행파일을 못 찾았습니다(레지스트리/흔한 설치 경로 모두 확인함) - 설치가 안 돼있거나 표준 위치가 아닌 곳에 설치된 것 같습니다. 다음 후보로 넘어갑니다.')
             continue
         os.makedirs(profile_dir, exist_ok=True)
         if name != '기본(Playwright 내장)':

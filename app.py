@@ -628,16 +628,40 @@ def _extract_delivery_note(raw_json_text):
     "배송요청사항에 왜 상품명을 넣냐 배송요청을 넣어야지" - 상품명을 넣던
     건 실제 요청사항 데이터가 없어서 대신 채운 임시방편이었다), 업로드
     시점에 원본 행 전체를 그대로 저장해둔 raw_json에서 흔히 쓰이는
-    컬럼명 후보들로 찾아본다. 실제 컬럼명이 다르면 못 찾을 수 있다."""
+    컬럼명 후보들로 찾아본다.
+
+    TOSS 주문에서 계속 못 가져온다는 지적이 있었다(사용자: "토스 주문에
+    배송요청을 못가져왔다니까") - parsers.py의 _get_col과 똑같은 이유로
+    보인다: 실제 엑셀 헤더가 후보 문자열과 띄어쓰기만 다르면(예: "배송
+    요청사항") 정확히 같은 문자열만 찾는 dict.get()으로는 못 찾는다.
+    그래서 1) 정확히 일치, 2) 공백 무시하고 일치(옵션명 버그 때 썼던 방식과
+    동일), 3) 그래도 못 찾으면 raw_json의 모든 키 중에 "요청사항"이
+    들어있는 키를 찾는 순서로 넓혀간다. 실제 컬럼명이 이 셋 다에 안 걸리는
+    완전히 다른 이름이면 그래도 못 찾을 수 있다."""
     if not raw_json_text:
         return ''
     try:
         data = json.loads(raw_json_text)
     except Exception:
         return ''
+
+    def _valid(v):
+        return v is not None and str(v).strip() and str(v).strip().lower() not in ('nan', 'none', '-')
+
     for key in DELIVERY_NOTE_KEYS:
         v = data.get(key)
-        if v is not None and str(v).strip() and str(v).strip().lower() not in ('nan', 'none', '-'):
+        if _valid(v):
+            return str(v).strip()
+    normalized = {str(k).replace(' ', ''): k for k in data.keys()}
+    for key in DELIVERY_NOTE_KEYS:
+        actual_key = normalized.get(key.replace(' ', ''))
+        if actual_key is not None:
+            v = data.get(actual_key)
+            if _valid(v):
+                return str(v).strip()
+    for k, v in data.items():
+        k_norm = str(k).replace(' ', '')
+        if any(kw in k_norm for kw in ('요청사항', '배송메시지', '배송메모')) and _valid(v):
             return str(v).strip()
     return ''
 
