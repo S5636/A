@@ -215,10 +215,12 @@ def init_db():
     # 여부로는 이 순간을 구분할 수 없다 - 그래서 별도 마커 파일로 "이번
     # 재계산 로직 배포 이후 한 번은 전부 지웠는지"를 딱 한 번만 기록해서,
     # 그 전까지 확인된 값은 전부 지우고 다음 STOCK 실행 때 새 로직으로 다시
-    # 확인되게 한다. 가격 추출 로직(_extract_base_price)을 이 델리버리에서
-    # 또 바꿨으니 마커 버전을 v3로 올려서 한 번 더 전체 초기화한다 - 앞으로
-    # 이 함수의 판정 로직을 또 바꿀 때마다 이 버전을 올려야 새로 반영된다.
-    recalc_marker = os.path.join(BASE_DIR, '.stock_recalc_v3_done')
+    # 확인되게 한다. _extract_base_price를 텍스트 위치 추측 방식에서 실제
+    # HTML 구조(div.m-price 안의 span, 사용자가 개발자도구로 확인해준 구조)
+    # 기준으로 완전히 바꿨으니 마커 버전을 v4로 올려서 한 번 더 전체
+    # 초기화한다 - 앞으로 이 함수의 판정 로직을 또 바꿀 때마다 이 버전을
+    # 올려야 새로 반영된다.
+    recalc_marker = os.path.join(BASE_DIR, '.stock_recalc_v4_done')
     if not os.path.exists(recalc_marker):
         conn2 = sqlite3.connect(DB_PATH)
         conn2.execute("DELETE FROM stock_check")

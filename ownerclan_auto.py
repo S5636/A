@@ -591,46 +591,37 @@ def _find_matching_option_li(option_lis, option_count, target_option, code, L):
 
 
 def _extract_base_price(page, L, code):
-    """상품 상세페이지 상단에 표시되는 판매가를 읽는다. 실제 화면 구조(사용자
-    스크린샷으로 확인): "상품코드 W..." 줄 바로 아래 상품명/별점이 나오고,
-    그 다음 취소선(정가) 가격 -> 실제 판매가 순서로 두 개의 '~원' 숫자가
-    나온 뒤 "오너클랜 멤버십 혜택" 박스(멤버십 전용가 반복 표시), 그 다음
-    "택배배송 N원" 배송비 문구가 이어진다. 사이드바 광고에도 '~원' 가격이
-    많고, DOM 순서가 화면에 보이는 순서와 다를 수 있어(사용자가 실제로 겪음
-    - WB80215에서 실제 페이지엔 9,450원인데 9,740원을 잘못 집어온 사례,
-    광고가 옆에 있어도 body.inner_text() 안에서는 본문보다 먼저 나올 수
-    있음) 구간을 최대한 좁혀야 안전하다. 그래서 끝 경계로 "오너클랜 멤버십
-    혜택"을 최우선으로 쓴다 - 실제 판매가 바로 다음에 나오는 가장 가까운
-    표식이라 광고가 낄 자리가 가장 적다. 이게 없는 상품을 대비해 "택배배송",
-    그것도 없으면 "예상배송일자" 순으로 폴백한다("예상배송일자" 자체가 없는
-    상품도 실제로 있었음 - WB80215). 정가 취소선 없이 가격이 하나만 뜨는
-    상품도 있을 수 있어 그 경우는 그 값을 쓴다. (멤버십 전용 추가할인가는
-    셀러가 별도로 선점해야 적용되는 값이라 기본 판매가로 보지 않는다 -
-    실제 발주 시 결제금액과 다르면 조정 필요.)"""
+    """상품 상세페이지 상단에 표시되는 판매가를 읽는다. 예전엔 body 텍스트
+    전체에서 "상품코드"~"택배배송" 등 문구 사이 구간을 잘라 그 안의 '~원'
+    숫자 중 몇 번째인지 위치로 추측했는데, 실제로 다른 값을 잘못 집어오는
+    사고가 반복됐다(사용자가 실제로 겪음 - WB80215에서 화면엔 9,450원인데
+    9,740원을 가져옴). 텍스트 위치 추측은 근본적으로 못 미더워서, 사용자가
+    개발자도구로 직접 확인해준 실제 HTML 구조로 바꿨다: 가격은
+    `div.m-price` 안에 `<span>` 두 개로 들어있고, 첫 번째(class="price",
+    회색 취소선)가 정가, 두 번째(빨간색 인라인스타일, class 없음)가 실제
+    판매가다. 취소선 없이 가격이 하나만 있는 상품은 span이 1개뿐일 텐데,
+    그 경우도 마지막(=유일한) span이 항상 실제 판매가이므로 "마지막 span"
+    규칙 하나로 두 경우 다 커버된다."""
     try:
-        text = page.locator('body').inner_text()
+        price_box = page.locator('div.m-price').first
+        if price_box.count() == 0:
+            L(f"[{code}] 가격 영역(div.m-price)을 못 찾았습니다 - 가격 확인을 건너뜁니다.")
+            return None
+        spans = price_box.locator('span')
+        n = spans.count()
+        if n == 0:
+            L(f"[{code}] div.m-price 안에서 가격 span을 못 찾았습니다.")
+            return None
+        text = spans.nth(n - 1).inner_text()
     except Exception as e:
-        L(f"[{code}] 가격 확인용 페이지 텍스트 읽기 실패: {type(e).__name__}: {e}")
+        L(f"[{code}] 가격 확인용 페이지 읽기 실패: {type(e).__name__}: {e}")
         return None
-    start = text.find('상품코드')
-    end_candidates = [('오너클랜 멤버십 혜택', text.find('오너클랜 멤버십 혜택')),
-                       ('택배배송', text.find('택배배송')),
-                       ('예상배송일자', text.find('예상배송일자'))]
-    end, end_label = -1, ''
-    for label, idx in end_candidates:
-        if idx != -1 and (start == -1 or idx > start):
-            end, end_label = idx, label
-            break
-    if start == -1 or end == -1:
-        L(f"[{code}] 가격이 있어야 할 화면 영역(상품코드~오너클랜 멤버십 혜택/택배배송/예상배송일자)을 못 찾았습니다 - 가격 확인을 건너뜁니다.")
-        return None
-    region = text[start:end]
-    prices = re.findall(r'([\d,]{3,})원', region)
-    if not prices:
-        L(f"[{code}] '상품코드~{end_label}' 영역에서 '~원' 가격을 못 찾았습니다.")
+    m = re.search(r'([\d,]+)원', text)
+    if not m:
+        L(f"[{code}] 가격 span 텍스트('{text}')에서 '~원' 숫자를 못 찾았습니다.")
         return None
     try:
-        return int(prices[1].replace(',', '')) if len(prices) >= 2 else int(prices[0].replace(',', ''))
+        return int(m.group(1).replace(',', ''))
     except Exception:
         return None
 
