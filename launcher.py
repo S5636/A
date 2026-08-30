@@ -5,69 +5,14 @@ Windows 콘솔 코드페이지에 따라 명령어가 깨져서 해석되는 문
 .bat은 최대한 아무 내용도 없게(순수 영문) 두고 이 스크립트가 안내/설치/실행을 전담한다."""
 import hashlib
 import os
-import platform
 import subprocess
 import sys
 import time
 import threading
-import uuid
 import webbrowser
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _SETUP_MARKER = os.path.join(BASE_DIR, ".setup_done")
-_DEELEVATE_FLAG = "--deelevate-attempted"
-
-
-def _is_admin():
-    if platform.system() != "Windows":
-        return False
-    try:
-        import ctypes
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception:
-        return False
-
-
-def _relaunch_without_admin():
-    """마진보드가 관리자 권한(Administrator)으로 실행 중이면, 일반 권한
-    프로세스로 자기 자신을 다시 띄우고 지금 이(관리자 권한) 프로세스는
-    끝낸다. 관리자 권한 프로세스가 띄운 크로미움 계열 브라우저(웨일/크롬)는
-    스스로 샌드박스를 끄면서(--no-sandbox) 불안정해지는 문제가 있고,
-    실제로 웨일 자동화 창이 이것 때문으로 보이는 TargetClosedError로 계속
-    실패했다. 사용자는 관리자 권한으로 실행한 적이 없다고 확인했으므로
-    (UAC가 꺼져있거나, 바로가기/실행파일에 저장된 호환성 설정 등 정확한
-    원인은 PC마다 다를 수 있음), 원인을 사용자가 직접 찾아 고치게 하는
-    대신 코드가 알아서 감지해서 항상 일반 권한으로 강제 전환한다.
-    작업 스케줄러(schtasks)로 RunLevel을 LIMITED(일반 권한)로 지정한
-    임시 작업을 만들어 실행하는 방식을 쓴다 - 설치 프로그램들이 관리자
-    권한 설치 후 일반 권한으로 재시작할 때 흔히 쓰는 표준적인 방법이다.
-    --deelevate-attempted 플래그로 한 번 시도했는데도 여전히 관리자
-    권한이면(이 PC 계정 자체가 항상 관리자 권한으로 동작하는 경우 등)
-    무한 재실행에 빠지지 않도록 더 시도하지 않는다."""
-    if _DEELEVATE_FLAG in sys.argv:
-        print("[안내] 일반 권한으로 다시 실행을 시도했지만 여전히 관리자 권한입니다 - "
-              "이 PC 계정/설정 자체가 항상 관리자 권한으로 동작하는 것 같습니다. 그대로 계속 진행합니다.")
-        return False
-    print("[안내] 마진보드가 관리자 권한(Administrator)으로 실행되고 있습니다.")
-    print("[안내] 크로미움 계열 브라우저 자동화가 불안정해지는 걸 막기 위해, 일반 권한으로 자동으로 다시 실행합니다...")
-    print("[안내] (이 창은 자동으로 닫히고, 일반 권한으로 새 창이 뜹니다)")
-    script_path = os.path.abspath(__file__)
-    cmd_parts = [sys.executable, script_path] + sys.argv[1:] + [_DEELEVATE_FLAG]
-    quoted = " ".join(f'"{a}"' for a in cmd_parts)
-    task_name = f"MarginBoardDeElevate_{uuid.uuid4().hex[:8]}"
-    try:
-        subprocess.run(
-            ["schtasks", "/Create", "/TN", task_name, "/TR", quoted, "/SC", "ONCE",
-             "/ST", "00:00", "/RL", "LIMITED", "/F"],
-            check=True, capture_output=True,
-        )
-        subprocess.run(["schtasks", "/Run", "/TN", task_name], check=True, capture_output=True)
-        time.sleep(2)
-        subprocess.run(["schtasks", "/Delete", "/TN", task_name, "/F"], capture_output=True)
-        return True
-    except Exception as e:
-        print(f"[안내] 일반 권한 재실행 시도가 실패했습니다({type(e).__name__}) - 그대로 관리자 권한인 채로 계속 진행합니다.")
-        return False
 
 
 def open_browser_later():
@@ -151,9 +96,6 @@ def main():
 
 
 if __name__ == "__main__":
-    if _is_admin() and _relaunch_without_admin():
-        sys.exit(0)
-
     ok = True
     try:
         ok = main()

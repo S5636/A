@@ -299,30 +299,6 @@ def _get_or_launch_page(L, launch_if_missing=True):
         ],
         no_viewport=True,
     )
-    # "지원되지 않는 명령줄 플래그(--no-sandbox)를 사용 중이므로 안정성과
-    # 보안에 문제가 발생합니다" 배너는 우리가 --no-sandbox를 넘긴 적이
-    # 없는데도(위 args 목록 참고) 뜬다 - 이건 크로미움 계열 브라우저가
-    # "관리자 권한(Administrator)으로 실행된 프로세스가 자신을 띄웠다"고
-    # 판단하면 스스로 샌드박스를 끄고 이 배너를 띄우는 크로미움 자체 동작이라
-    # 마진보드가 관리자 권한으로 뜨고 있는지 여기서 직접 확인해서 로그로
-    # 남긴다. 다만 네모네모(글자 깨짐)의 원인이라고 단정한 건 아니었다 -
-    # 사용자가 실제로 확인해준 바로는 평소 쓰는 웨일 창에서는 네모네모가
-    # 전혀 안 뜨고 크롬 계열(실제 설치된 크롬/Playwright 내장 둘 다)에서만
-    # 뜬다("웨일에서는 안뜬다고 크롬창은 무조건 계속 뜨니까") - 이건 관리자
-    # 권한과 무관하게 웨일에만 있는 뭔가(내장 폰트/리소스 등) 때문일 가능성이
-    # 더 높다는 뜻이다. 그래도 이 배너 자체는 실제로 나는 현상이고
-    # 브라우저가 불안정하게 닫히는 문제(TargetClosedError)와는 관련 있을 수
-    # 있어서, 참고용으로 계속 로그에 남긴다.
-    if platform.system() == 'Windows':
-        try:
-            import ctypes
-            if ctypes.windll.shell32.IsUserAnAdmin():
-                L('★ 지금 마진보드 프로그램 자체가 관리자 권한(Administrator)으로 실행 중입니다. 크로미움 계열 브라우저는 '
-                  '관리자 권한 프로세스가 띄우면 스스로 샌드박스를 끄면서 "--no-sandbox" 경고 배너를 띄웁니다 (네모네모 글자 깨짐과 '
-                  '직접 관련 있는지는 아직 확실치 않습니다 - 웨일에서는 이 문제가 없다고 확인돼서 웨일 자체 리소스 쪽 원인일 가능성이 '
-                  '더 높아 보입니다). 참고용으로만 남깁니다.')
-        except Exception:
-            pass
     context = None
     for name, exe_path, profile_dir in candidates:
         if name != '기본(Playwright 내장)' and exe_path is None:
@@ -378,6 +354,31 @@ def _get_or_launch_page(L, launch_if_missing=True):
               f"자동으로 다음 후보로 넘어갑니다.")
     if context is None:
         raise RuntimeError('브라우저를 하나도 띄우지 못했습니다.')
+    # 결제 페이지(order_pg.php)의 네모네모(글자 깨짐)가 크롬 계열(실제
+    # 설치된 크롬/Playwright 내장)에서만 나고 웨일에서는 안 난다는 게
+    # 확인됐다("웨일에서는 안뜬다고") - 페이지가 CSS로 지정한 폰트가 웨일엔
+    # 있는데 크롬 계열엔 없어서 글자가 깨지는 것으로 보인다(관리자 권한은
+    # 이미 확인해봤지만 원인이 아니었음 - 크롬은 관리자 권한이어도 멀쩡히
+    # 뜸). 정확히 어떤 폰트인지는 몰라도, 윈도우에 항상 기본으로 깔려있는
+    # "맑은 고딕"으로 전체 글꼴을 강제로 덮어써서 우회한다 - 지금 이
+    # 컨텍스트에서 여는 모든 페이지(팝업 포함)에 적용되게 컨텍스트
+    # 단위로 등록한다.
+    context.add_init_script("""
+        (function() {
+            function applyFont() {
+                try {
+                    var style = document.createElement('style');
+                    style.textContent = '* { font-family: "Malgun Gothic", "맑은 고딕", sans-serif !important; }';
+                    (document.head || document.documentElement).appendChild(style);
+                } catch (e) {}
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', applyFont);
+            } else {
+                applyFont();
+            }
+        })();
+    """)
     page = context.pages[0] if context.pages else context.new_page()
     page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     page.on('dialog', lambda d: d.accept())
