@@ -193,36 +193,6 @@ def _kill_stray_browser_processes(profile_dir, L=None):
         L(f'이전에 남아있던 오너클랜 전용 브라우저 프로세스 {killed}개를 정리하고 새로 띄웁니다.')
 
 
-def _kill_all_processes_by_name(name_substr, L=None):
-    """실행 중인 모든 whale.exe를(프로필 상관없이, 즉 사용자가 평소 쓰던
-    창까지 포함해서) 강제로 끝낸다. 웨일은 프로필 폴더를 달리 줘도 이미
-    떠있는 창이 하나라도 있으면 새 창 요청을 그 기존 창에 그냥 넘겨버리고
-    자기는 꺼져서(TargetClosedError), 프로필별로만 정리하는
-    _kill_stray_browser_processes로는 웨일을 절대 못 띄운다(3번 재시도해도
-    동일 - 사용자 확인). 결제 페이지 네모네모(글자 깨짐)가 웨일에서는 아예
-    안 난다는 것도 확인됐기 때문에("웨일에서는 안뜬다고"), 웨일을 확실히
-    띄우는 게 더 중요해서 마지막 수단으로 이 방식을 쓴다. 사용자가 다른
-    탭에서 뭔가 하고 있었다면 그 탭은 같이 닫힌다 - 그래서 이 시점에
-    로그로 분명히 알린다."""
-    try:
-        import psutil
-    except ImportError:
-        return 0
-    killed = 0
-    for proc in psutil.process_iter(['name']):
-        try:
-            name = (proc.info.get('name') or '').lower()
-            if name_substr in name:
-                proc.kill()
-                killed += 1
-        except Exception:
-            continue
-    if killed and L is not None:
-        L(f'★ 웨일이 프로필을 나눠도 계속 실패해서, 지금 떠있던 웨일 창 {killed}개를 전부 강제로 닫고 새로 띄웁니다 - '
-          f'그 창에서 다른 작업(다른 탭 등) 중이었다면 같이 닫혔을 수 있습니다.')
-    return killed
-
-
 def _find_via_registry(exe_name):
     """레지스트리 App Paths에 등록된 실제 설치 경로를 찾는다. 웨일/크롬을
     흔한 설치 경로 목록으로만 찾다가 계속 못 찾는 사고가 있었다(사용자
@@ -393,18 +363,6 @@ def _get_or_launch_page(L, launch_if_missing=True):
                 if attempt < max_attempts:
                     L(f'{name} 브라우저 실행 실패, 재시도 중... ({attempt}/{max_attempts})')
                     time.sleep(1.5)
-        # 프로필별 정리 + 재시도로도 웨일이 계속 실패하면, 마지막 수단으로
-        # 떠있는 웨일 창을 전부(프로필 상관없이) 강제로 닫고 한 번 더
-        # 시도한다(사용자 지시: "안된다 다른방법 찾아" - 재시도만으로는 안
-        # 됐음이 확인됨).
-        if context is None and name == '웨일':
-            if _kill_all_processes_by_name('whale', L):
-                time.sleep(1.5)
-                try:
-                    context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
-                    last_err = None
-                except Exception as e:
-                    last_err = e
         if context is not None:
             break
         if last_err is not None:
