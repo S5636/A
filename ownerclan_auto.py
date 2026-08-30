@@ -41,6 +41,10 @@ PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile')
 # 프로필 폴더의 내부 형식(Local State 등) 호환 문제로 깨질 위험이 있어서,
 # 웨일 전용 프로필을 따로 둔다(사용자 지시: "웨일브라우저로 할수는 없냐").
 WHALE_PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile_whale')
+# 실제 설치된 크롬으로 열 때도 같은 이유로 전용 프로필을 따로 둔다(폰트가
+# 부족한 Playwright 내장 크로미움 대신 시스템 크롬을 쓰기 위한 것 - 사용자
+# 지적: "네모네모 창 계속 뜨는데").
+CHROME_PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile_chrome')
 
 _state = {'pw': None, 'context': None, 'page': None}
 
@@ -193,11 +197,30 @@ def _find_whale_executable():
     """네이버 웨일 브라우저의 실행파일을 흔한 설치 위치에서 찾는다(사용자
     요청: "웨일브라우저로 할수는 없냐 크롬말고"). 웨일도 크로미움 기반이라
     Playwright가 executable_path로 그대로 띄울 수 있다. 못 찾으면 None을
-    돌려주고, 그러면 호출부가 기본(Playwright 내장 크로미움)으로 돌아간다."""
+    돌려주고, 그러면 호출부가 실제 설치된 크롬 → Playwright 내장 크로미움
+    순으로 넘어간다."""
     candidates = [
         os.path.expandvars(r'%LOCALAPPDATA%\Naver\Naver Whale\Application\whale.exe'),
         os.path.expandvars(r'%PROGRAMFILES%\Naver\Naver Whale\Application\whale.exe'),
         os.path.expandvars(r'%PROGRAMFILES(X86)%\Naver\Naver Whale\Application\whale.exe'),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
+def _find_chrome_executable():
+    """실제로 윈도우에 설치된 크롬 실행파일을 찾는다. Playwright 내장
+    크로미움은 최소 설치라 시스템 폰트가 부족해서 특정 글자가 네모(□)로
+    깨지는 문제가 있었다(사용자 지적: "저놈의 네모네모 창 계속 뜨는데") -
+    시스템에 실제 설치된 브라우저(웨일이든 크롬이든)를 쓰면 OS 폰트를
+    그대로 쓸 수 있어서 이 문제가 해결될 가능성이 높다. 웨일이 없을 때
+    이거라도 먼저 찾아보고, 그것도 없으면 그때만 내장 크로미움을 쓴다."""
+    candidates = [
+        os.path.expandvars(r'%PROGRAMFILES%\Google\Chrome\Application\chrome.exe'),
+        os.path.expandvars(r'%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe'),
+        os.path.expandvars(r'%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe'),
     ]
     for c in candidates:
         if c and os.path.exists(c):
@@ -221,28 +244,18 @@ def _get_or_launch_page(L, launch_if_missing=True):
         return None
 
     from playwright.sync_api import sync_playwright
-    # 웨일이 설치돼 있으면 그걸로 띄운다(사용자 요청: "웨일브라우저로 할수는
-    # 없냐 크롬말고") - 웨일용 프로필은 크롬용과 따로 둔다(버전이 다른
-    # 크로미움 프로필을 그대로 공유하면 깨질 위험이 있어서). 웨일이 없으면
-    # 예전처럼 Playwright 내장 크로미움 + 기존 프로필을 그대로 쓴다.
-    whale_path = _find_whale_executable()
-    profile_dir = WHALE_PROFILE_DIR if whale_path else PROFILE_DIR
-    os.makedirs(profile_dir, exist_ok=True)
-    if whale_path:
-        L(f'네이버 웨일 브라우저로 엽니다: {whale_path} (오너클랜 로그인은 이 창에서 처음 한 번 다시 해야 합니다 - 전용 프로필이 새로 생겨서요.)')
-    # 지금 이 파이썬 프로세스 안에서는 브라우저를 한 번도 띄운 적이 없는데도
-    # 여기 도달했다는 건, 이전 실행(이전 버전 등)이 남긴 고아 크롬 프로세스가
-    # 있을 수 있다는 뜻이다 - 새로 띄우기 전에 먼저 정리한다.
-    _kill_stray_browser_processes(profile_dir, L)
-    _mark_profile_clean_exit(profile_dir)
+    # Playwright 내장 크로미움은 최소 설치라 시스템 폰트가 부족해서 특정
+    # 글자가 네모(□)로 깨지는 문제가 있었다(사용자 지적: "네모네모 창 계속
+    # 뜨는데") - 실제로 시스템에 설치된 브라우저를 쓰면 OS 폰트를 그대로
+    # 쓸 수 있어서 이 문제가 해결될 가능성이 높다. 그래서 웨일 -> 실제 설치된
+    # 크롬 -> (둘 다 없으면 그때만) Playwright 내장 크로미움 순으로 시도한다.
+    # 각 브라우저는 전용 프로필을 따로 둔다(버전이 다른 크로미움 프로필을
+    # 그대로 공유하면 깨질 위험이 있어서).
+    candidates = [('웨일', _find_whale_executable(), WHALE_PROFILE_DIR),
+                  ('크롬', _find_chrome_executable(), CHROME_PROFILE_DIR),
+                  ('기본(Playwright 내장)', None, PROFILE_DIR)]
     pw = sync_playwright().start()
-    # 화면 밖 좌표(--window-position=-32000,-32000)에 띄우는 방법도 써봤는데,
-    # 그러면 로그인하려고 나중에 'normal'로 복원해도 windowState만 바뀌고
-    # 좌표는 화면 밖 그대로라 로그인창 자체가 안 보이는 사고가 났다(직접
-    # 재현 확인함). 그래서 화면 밖 배치는 포기하고, 아래에서 최소화만으로
-    # 백그라운드 처리한다 - 로그인 때는 _set_window_state가 명시적으로
-    # 화면 안쪽 좌표까지 같이 지정해서 확실히 보이게 만든다.
-    launch_kwargs = dict(
+    launch_kwargs_base = dict(
         headless=False,
         args=[
             '--disable-blink-features=AutomationControlled',
@@ -250,28 +263,35 @@ def _get_or_launch_page(L, launch_if_missing=True):
         ],
         no_viewport=True,
     )
-    if whale_path:
-        launch_kwargs['executable_path'] = whale_path
-    try:
-        context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
-    except Exception as e:
-        if not whale_path:
-            raise
-        # 웨일이 이미 다른 창(사용자가 평소 쓰던 웨일)으로 떠 있으면, 새로
-        # 띄운 웨일 프로세스가 기존 창에 요청을 넘기고 자기는 바로 꺼져버려서
-        # Playwright가 방금 띄운 프로세스와 연결이 끊기는 경우가 있다(사용자가
-        # 실제로 겪음: TargetClosedError - "Target page, context or browser
-        # has been closed"). 이럴 땐 웨일을 포기하고 기본 브라우저(Playwright
-        # 내장 크로미움)로 대신 띄운다 - 자동화 자체가 아예 안 되는 것보단
-        # 낫다.
-        L(f"웨일 브라우저 실행에 실패했습니다({type(e).__name__}) - 웨일이 이미 다른 창으로 열려있으면 "
-          f"자동화 전용 창을 새로 못 띄울 수 있습니다. 기본 브라우저로 대신 엽니다.")
-        profile_dir = PROFILE_DIR
+    context = None
+    for name, exe_path, profile_dir in candidates:
+        if name != '기본(Playwright 내장)' and exe_path is None:
+            continue
         os.makedirs(profile_dir, exist_ok=True)
+        if name != '기본(Playwright 내장)':
+            L(f'{name} 브라우저로 엽니다: {exe_path} (오너클랜 로그인은 이 창에서 처음 한 번 다시 해야 합니다 - 전용 프로필이 새로 생겨서요.)')
+        # 지금 이 파이썬 프로세스 안에서는 브라우저를 한 번도 띄운 적이 없는데도
+        # 여기 도달했다는 건, 이전 실행(이전 버전 등)이 남긴 고아 브라우저
+        # 프로세스가 있을 수 있다는 뜻이다 - 새로 띄우기 전에 먼저 정리한다.
         _kill_stray_browser_processes(profile_dir, L)
         _mark_profile_clean_exit(profile_dir)
-        launch_kwargs.pop('executable_path', None)
-        context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
+        launch_kwargs = dict(launch_kwargs_base)
+        if exe_path:
+            launch_kwargs['executable_path'] = exe_path
+        try:
+            context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
+            break
+        except Exception as e:
+            # 웨일/크롬이 이미 다른 창(사용자가 평소 쓰던 창)으로 떠 있으면,
+            # 새로 띄운 프로세스가 기존 창에 요청을 넘기고 자기는 바로
+            # 꺼져버려서 Playwright가 방금 띄운 프로세스와 연결이 끊기는
+            # 경우가 있다(사용자가 실제로 겪음: TargetClosedError -
+            # "Target page, context or browser has been closed"). 이럴 땐
+            # 다음 후보로 넘어간다 - 자동화 자체가 아예 안 되는 것보단 낫다.
+            L(f"{name} 브라우저 실행에 실패했습니다({type(e).__name__}) - 이미 다른 창으로 열려있으면 "
+              f"자동화 전용 창을 새로 못 띄울 수 있습니다. 다음 후보로 넘어갑니다.")
+    if context is None:
+        raise RuntimeError('브라우저를 하나도 띄우지 못했습니다.')
     page = context.pages[0] if context.pages else context.new_page()
     page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     page.on('dialog', lambda d: d.accept())
@@ -894,6 +914,31 @@ def check_stock(order_url, items):
 # readonly라 자바스크립트로 값만 직접 넣는다(팝업 검색 자동화 대신).
 # ---------------------------------------------------------------------------
 
+def _format_phone(raw):
+    """연락처를 오너클랜 주문서가 요구하는 "000-0000-0000" 형식으로 바꾼다
+    (사용자 지적: "연락처 형식 000-0000 대시가 왜 없냐" - 원본 데이터에
+    숫자만 있는 경우가 많아서 그대로 채우면 하이픈이 없었다). 010 등
+    일반 휴대폰(11자리, 3-4-4), 050X 안심번호(12자리, 4-4-4), 02 서울
+    지역번호(9~10자리), 그 외 지역번호(10자리, 3-3-4)를 구분해서 넣는다.
+    어떤 패턴에도 안 맞으면 숫자만이라도 그대로 돌려준다(무리하게 나누다가
+    틀린 위치에 하이픈을 넣는 것보다 낫다)."""
+    digits = re.sub(r'[^0-9]', '', str(raw or ''))
+    if not digits:
+        return ''
+    if digits.startswith('02'):
+        if len(digits) == 9:
+            return f'{digits[:2]}-{digits[2:5]}-{digits[5:]}'
+        if len(digits) == 10:
+            return f'{digits[:2]}-{digits[2:6]}-{digits[6:]}'
+    elif len(digits) == 11:
+        return f'{digits[:3]}-{digits[3:7]}-{digits[7:]}'
+    elif len(digits) == 12 and digits.startswith('05'):
+        return f'{digits[:4]}-{digits[4:8]}-{digits[8:]}'
+    elif len(digits) == 10:
+        return f'{digits[:3]}-{digits[3:6]}-{digits[6:]}'
+    return digits
+
+
 def _split_ship_address(ship_address):
     """'배송지'를 기본주소/상세주소로 나눈다.
     실제 업로드 데이터 72건을 전수 확인한 결과 오너클랜/다팔자 주소는
@@ -950,7 +995,7 @@ def _place_one_order(page, order_url, item, L):
     option = str(item.get('option_name') or '').strip()
     order_id = str(item.get('order_id') or '').strip()
     recipient = str(item.get('recipient') or '').strip()
-    recipient_phone = str(item.get('recipient_phone') or '').strip()
+    recipient_phone = _format_phone(item.get('recipient_phone'))
     zipcode = str(item.get('zipcode') or '').strip()
     ship_address = str(item.get('ship_address') or '').strip()
     prod_name = str(item.get('prod_name') or '').strip()
@@ -1118,13 +1163,16 @@ def _place_one_order(page, order_url, item, L):
     # 저장해둔 원본 행 전체(raw_json)에서 흔한 컬럼명 후보로 찾은 값
     # (app.py의 _extract_delivery_note)을 넣는다 - 못 찾으면 빈 채로
     # 둔다(엉뚱하게 상품명 같은걸 대신 채우지 않는다).
-    if delivery_note:
-        try:
-            page.locator('textarea[name="order_prmsg[]"]').first.fill(delivery_note)
-        except Exception as e:
-            L(f"[{order_id}/{code}] 배송요청사항 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
-    else:
-        L(f"[{order_id}/{code}] 배송요청사항 원본 데이터를 못 찾아서 비워뒀습니다 - 필요하면 결제 전 직접 입력해주세요.")
+    # 오너클랜 주문서 자체가 이 칸에 "상품명 : X" 같은 기본값을 미리 채워
+    # 놓는 경우가 있었다(사용자가 실제로 겪음 - 우리가 못 채웠으면 그냥
+    # 안 건드리기만 했는데도 상품명이 그대로 남아있었음) - delivery_note가
+    # 없을 때 그냥 넘어가지 않고 빈 문자열로 확실히 지운다.
+    try:
+        page.locator('textarea[name="order_prmsg[]"]').first.fill(delivery_note)
+        if not delivery_note:
+            L(f"[{order_id}/{code}] 배송요청사항 원본 데이터를 못 찾아서 비웠습니다 - 필요하면 결제 전 직접 입력해주세요.")
+    except Exception as e:
+        L(f"[{order_id}/{code}] 배송요청사항 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
 
     # 결제수단: 카드
     try:
