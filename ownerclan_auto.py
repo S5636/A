@@ -299,6 +299,28 @@ def _get_or_launch_page(L, launch_if_missing=True):
         ],
         no_viewport=True,
     )
+    # "지원되지 않는 명령줄 플래그(--no-sandbox)를 사용 중이므로 안정성과
+    # 보안에 문제가 발생합니다" 배너는 우리가 --no-sandbox를 넘긴 적이
+    # 없는데도(위 args 목록 참고) 뜬다 - 이건 크로미움 계열 브라우저가
+    # "관리자 권한(Administrator)으로 실행된 프로세스가 자신을 띄웠다"고
+    # 판단하면 스스로 샌드박스를 끄고 이 배너를 띄우는 크로미움 자체 동작이다.
+    # 실제 크롬으로 바꿔도 네모네모(글자 깨짐)가 그대로였다는 사용자 확인
+    # ("지금 열리는창도 여전히 네모네모잖아")으로, 앞서 세웠던 "내장
+    # 크로미움 폰트 부족" 가설은 틀렸다는 게 드러났다 - 브라우저 종류가
+    # 아니라 이 관리자 권한(샌드박스 꺼짐) 쪽이 더 유력한 원인으로 보인다.
+    # 마진보드 자체가 관리자 권한으로 실행 중인지 여기서 직접 확인해서
+    # 로그로 남긴다(사용자에게 다시 캡쳐/확인을 부탁하는 대신, 코드가 직접
+    # 검사할 수 있는 부분이라 바로 검사한다).
+    if platform.system() == 'Windows':
+        try:
+            import ctypes
+            if ctypes.windll.shell32.IsUserAnAdmin():
+                L('★ 지금 마진보드 프로그램 자체가 관리자 권한(Administrator)으로 실행 중입니다. 크로미움 계열 브라우저는 '
+                  '관리자 권한 프로세스가 띄우면 스스로 샌드박스를 끄면서 "--no-sandbox" 경고 배너를 띄우는데, 이게 결제 페이지의 '
+                  '네모네모(글자 깨짐) 및 브라우저가 불안정하게 닫히는 문제와 관련 있을 가능성이 높습니다. 마진보드를 관리자 권한 없이 '
+                  '(일반 권한으로) 실행해서 이 문제가 없어지는지 확인해주세요.')
+        except Exception:
+            pass
     context = None
     for name, exe_path, profile_dir in candidates:
         if name != '기본(Playwright 내장)' and exe_path is None:
@@ -323,14 +345,16 @@ def _get_or_launch_page(L, launch_if_missing=True):
             context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
             break
         except Exception as e:
-            # 웨일/크롬이 이미 다른 창(사용자가 평소 쓰던 창)으로 떠 있으면,
-            # 새로 띄운 프로세스가 기존 창에 요청을 넘기고 자기는 바로
-            # 꺼져버려서 Playwright가 방금 띄운 프로세스와 연결이 끊기는
-            # 경우가 있다(사용자가 실제로 겪음: TargetClosedError -
-            # "Target page, context or browser has been closed"). 이럴 땐
-            # 다음 후보로 넘어간다 - 자동화 자체가 아예 안 되는 것보단 낫다.
-            L(f"{name} 브라우저 실행에 실패했습니다({type(e).__name__}) - 이미 다른 창으로 열려있으면 "
-              f"자동화 전용 창을 새로 못 띄울 수 있습니다. 다음 후보로 넘어갑니다.")
+            # 웨일은(적어도 일부 빌드는) 프로필 폴더가 달라도 이미 떠있는
+            # 웨일 창이 있으면 새 창 요청을 그 기존 창에 넘기고 방금 띄운
+            # 프로세스는 바로 꺼버리는 경우가 있다(사용자가 실제로 겪음:
+            # TargetClosedError). 이건 사용자가 평소 쓰는 웨일 창(마진보드
+            # 화면을 띄워둔 창 포함)을 닫아야 한다는 뜻이 아니다 - 그 창은
+            # 그대로 두고, 자동화는 아래처럼 다음 후보(크롬 등)로 자동
+            # 넘어가서 계속 진행된다. 정확한 원인은 아래 원본 오류 메시지
+            # 참고.
+            L(f"{name} 브라우저 실행에 실패했습니다({type(e).__name__}: {e}) - 평소 쓰시는 {name} 창을 닫을 필요는 없습니다, "
+              f"자동으로 다음 후보로 넘어갑니다.")
     if context is None:
         raise RuntimeError('브라우저를 하나도 띄우지 못했습니다.')
     page = context.pages[0] if context.pages else context.new_page()
