@@ -391,8 +391,20 @@
     const table = document.getElementById('dash-table');
     const tableWidth = table.getBoundingClientRect().width;
     const startX = e.clientX;
-    const startA = colWidths[index], startB = colWidths[index + 1];
+    // 예전엔 바로 다음 칸(index+1)에서만 폭을 뺏어와서, 앞칸 하나 넓히면
+    // 바로 뒤 칸만 쪼그라들고 그 뒤 칸들은 그대로라 표 전체가 안 맞아서
+    // 뒤 칸들을 일일이 다시 손으로 조절해야 했다(사용자 지적: "셀 열간격을
+    // 조절하면 뒤로 밀리게 해놔야지 앞칸 간격조절하는데 저 뒤까지 다
+    // 일일히 간격을 밀어야되냐"). 이제 늘어난 만큼을 나머지 모든 칸에서
+    // 원래 폭 비율대로 나눠서 조금씩 뺀다 - 한 칸만 찌그러지지 않고 뒤
+    // 칸들이 다같이 살짝씩 밀리듯 줄어든다.
+    const startWidths = colWidths.slice();
+    const startA = startWidths[index];
+    const total = startWidths.reduce((s, w) => s + w, 0);
     const MIN = 2.2;
+    const otherIdxs = startWidths.map((_, i) => i).filter(i => i !== index);
+    const otherStartSum = otherIdxs.reduce((s, i) => s + startWidths[i], 0);
+    const maxA = total - MIN * otherIdxs.length;
     let pendingDx = null;
     let rafId = null;
 
@@ -400,10 +412,16 @@
       rafId = null;
       if (pendingDx === null) return;
       const deltaPct = (pendingDx / tableWidth) * 100;
-      let a = startA + deltaPct, b = startB - deltaPct;
-      if (a < MIN) { b -= (MIN - a); a = MIN; }
-      if (b < MIN) { a -= (MIN - b); b = MIN; }
-      colWidths[index] = a; colWidths[index + 1] = b;
+      let a = startA + deltaPct;
+      if (a < MIN) a = MIN;
+      if (a > maxA) a = maxA;
+      const actualDelta = a - startA;
+      const othersTarget = otherStartSum - actualDelta;
+      otherIdxs.forEach(i => {
+        const share = startWidths[i] / otherStartSum;
+        colWidths[i] = Math.max(MIN, othersTarget * share);
+      });
+      colWidths[index] = a;
       applyColWidths();
     }
     function onMove(ev) {
