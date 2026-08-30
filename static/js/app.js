@@ -21,7 +21,7 @@
     ['ship_fee', '배송비', 'r', 3.3],
     ['add_ship_fee', '추가\n배송비', 'r', 3.6], ['fee_rate_display', '수수료율', 'r', 4.0], ['fee_amt', '마켓\n수수료', 'r', 4.0],
     ['settle_amt', '정산\n예정액', 'r', 4.3], ['settle_amt_dpj', '실정산가', 'r', 3.6],
-    ['vendor_prod_id', '판매사\n상품코드', 'l', 4.7],
+    ['vendor_prod_id', '판매사\n상품코드', 'l', 4.7], ['option_name', '옵션', 'l', 3.6],
     ['stock_status', '재고\n상태', 'c', 3.0], ['est_buy_price', '매입\n예상가', 'r', 3.6],
     ['order_chk', '발주', 'c', 2.6], ['buy_cost', '매입가', 'r', 3.6],
     ['buy_ship_fee', '매입\n배송비', 'r', 3.6], ['buy_total', '매입\n합계', 'r', 3.6], ['margin_amt', '최종\n마진', 'r', 4.0],
