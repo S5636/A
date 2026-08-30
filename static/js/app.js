@@ -629,14 +629,11 @@
         const missingCols = u.raw_columns_found
           ? Object.entries(u.raw_columns_found).filter(([, found]) => !found).map(([name]) => name)
           : [];
-        if (missingCols.length) {
-          // 할인액/실정산가/연락처/우편번호가 계속 빈 값으로 보이는 게
-          // 파싱 문제인지 이번 파일에 그 컬럼 자체가 없는 건지 바로
-          // 알 수 있게, 컬럼이 없을 땐 로그를 지우지 않고 보여준다.
-          renderCollectLog('collect-log', data);
-        } else {
-          log.innerHTML = '';
-        }
+        // 수집 자체에 오류가 없으면 로그를 지운다(사용자 지시: "DPJ에
+        // 수집오류없으면 로그 지워") - 컬럼 누락 같은 진단정보는 에러가
+        // 아니니 로그를 계속 띄워둘 이유가 아니고, 토스트 메시지(colWarn)로
+        // 이미 같이 보여준다.
+        log.innerHTML = '';
         const extra = (typeof u.total_rows === 'number')
           ? ` (옵션 ${u.option_filled || 0}/${u.total_rows}건, 합배송코드 ${u.bundle_filled || 0}/${u.total_rows}건, 주문상태 빈값 ${u.status_blank || 0}건)`
           : '';

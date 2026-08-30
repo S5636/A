@@ -54,9 +54,19 @@ def _raw_json_column(df):
 
 
 def _get_col(df, name_list):
+    """후보 컬럼명 중 하나라도 df에 있으면 그 컬럼을 돌려준다. 정확히 같은
+    문자열만 찾다가 실제 파일에서 띄어쓰기가 다른 헤더("마켓 상품 옵션명")를
+    "마켓상품옵션명"(띄어쓰기 없음) 후보로만 찾다가 못 찾은 사고가 있었다
+    (사용자 지적: WDFA0B0/WE628F0 주문의 옵션이 계속 빈칸으로 남던 원인) -
+    공백을 무시하고 비교해서 이런 헤더 표기 차이에 안 걸리게 한다."""
     for n in name_list:
         if n in df.columns:
             return df[n]
+    normalized = {str(c).replace(' ', ''): c for c in df.columns}
+    for n in name_list:
+        key = n.replace(' ', '')
+        if key in normalized:
+            return df[normalized[key]]
     return pd.Series([''] * len(df), index=df.index)
 
 
