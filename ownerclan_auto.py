@@ -303,22 +303,24 @@ def _get_or_launch_page(L, launch_if_missing=True):
     # 보안에 문제가 발생합니다" 배너는 우리가 --no-sandbox를 넘긴 적이
     # 없는데도(위 args 목록 참고) 뜬다 - 이건 크로미움 계열 브라우저가
     # "관리자 권한(Administrator)으로 실행된 프로세스가 자신을 띄웠다"고
-    # 판단하면 스스로 샌드박스를 끄고 이 배너를 띄우는 크로미움 자체 동작이다.
-    # 실제 크롬으로 바꿔도 네모네모(글자 깨짐)가 그대로였다는 사용자 확인
-    # ("지금 열리는창도 여전히 네모네모잖아")으로, 앞서 세웠던 "내장
-    # 크로미움 폰트 부족" 가설은 틀렸다는 게 드러났다 - 브라우저 종류가
-    # 아니라 이 관리자 권한(샌드박스 꺼짐) 쪽이 더 유력한 원인으로 보인다.
-    # 마진보드 자체가 관리자 권한으로 실행 중인지 여기서 직접 확인해서
-    # 로그로 남긴다(사용자에게 다시 캡쳐/확인을 부탁하는 대신, 코드가 직접
-    # 검사할 수 있는 부분이라 바로 검사한다).
+    # 판단하면 스스로 샌드박스를 끄고 이 배너를 띄우는 크로미움 자체 동작이라
+    # 마진보드가 관리자 권한으로 뜨고 있는지 여기서 직접 확인해서 로그로
+    # 남긴다. 다만 네모네모(글자 깨짐)의 원인이라고 단정한 건 아니었다 -
+    # 사용자가 실제로 확인해준 바로는 평소 쓰는 웨일 창에서는 네모네모가
+    # 전혀 안 뜨고 크롬 계열(실제 설치된 크롬/Playwright 내장 둘 다)에서만
+    # 뜬다("웨일에서는 안뜬다고 크롬창은 무조건 계속 뜨니까") - 이건 관리자
+    # 권한과 무관하게 웨일에만 있는 뭔가(내장 폰트/리소스 등) 때문일 가능성이
+    # 더 높다는 뜻이다. 그래도 이 배너 자체는 실제로 나는 현상이고
+    # 브라우저가 불안정하게 닫히는 문제(TargetClosedError)와는 관련 있을 수
+    # 있어서, 참고용으로 계속 로그에 남긴다.
     if platform.system() == 'Windows':
         try:
             import ctypes
             if ctypes.windll.shell32.IsUserAnAdmin():
                 L('★ 지금 마진보드 프로그램 자체가 관리자 권한(Administrator)으로 실행 중입니다. 크로미움 계열 브라우저는 '
-                  '관리자 권한 프로세스가 띄우면 스스로 샌드박스를 끄면서 "--no-sandbox" 경고 배너를 띄우는데, 이게 결제 페이지의 '
-                  '네모네모(글자 깨짐) 및 브라우저가 불안정하게 닫히는 문제와 관련 있을 가능성이 높습니다. 마진보드를 관리자 권한 없이 '
-                  '(일반 권한으로) 실행해서 이 문제가 없어지는지 확인해주세요.')
+                  '관리자 권한 프로세스가 띄우면 스스로 샌드박스를 끄면서 "--no-sandbox" 경고 배너를 띄웁니다 (네모네모 글자 깨짐과 '
+                  '직접 관련 있는지는 아직 확실치 않습니다 - 웨일에서는 이 문제가 없다고 확인돼서 웨일 자체 리소스 쪽 원인일 가능성이 '
+                  '더 높아 보입니다). 참고용으로만 남깁니다.')
         except Exception:
             pass
     context = None
@@ -341,10 +343,29 @@ def _get_or_launch_page(L, launch_if_missing=True):
         launch_kwargs = dict(launch_kwargs_base)
         if exe_path:
             launch_kwargs['executable_path'] = exe_path
-        try:
-            context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
+        # 웨일에서는 결제 페이지 네모네모(글자 깨짐)가 아예 안 뜬다는 사용자
+        # 확인("웨일에서는 안뜬다고 크롬창은 무조건 계속 뜨니까") - 크롬
+        # 계열(실제 설치된 크롬이든 Playwright 내장이든)에서만 나는 문제라는
+        # 뜻이므로, 웨일을 반드시 성공시키는 쪽이 훨씬 중요해졌다. 웨일은
+        # 이미 떠있던 창과의 핸드오프 타이밍 때문인지 첫 시도에서
+        # TargetClosedError로 실패했다가 다시 시도하면 되는 경우가 있어서,
+        # 웨일만 몇 번 더 재시도한다(크롬/내장은 재시도해도 다시 뜨는
+        # 종류의 실패가 아니라서 그대로 1번만).
+        max_attempts = 3 if name == '웨일' else 1
+        last_err = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                if attempt < max_attempts:
+                    L(f'{name} 브라우저 실행 실패, 재시도 중... ({attempt}/{max_attempts})')
+                    time.sleep(1.5)
+        if context is not None:
             break
-        except Exception as e:
+        if last_err is not None:
             # 웨일은(적어도 일부 빌드는) 프로필 폴더가 달라도 이미 떠있는
             # 웨일 창이 있으면 새 창 요청을 그 기존 창에 넘기고 방금 띄운
             # 프로세스는 바로 꺼버리는 경우가 있다(사용자가 실제로 겪음:
@@ -353,7 +374,7 @@ def _get_or_launch_page(L, launch_if_missing=True):
             # 그대로 두고, 자동화는 아래처럼 다음 후보(크롬 등)로 자동
             # 넘어가서 계속 진행된다. 정확한 원인은 아래 원본 오류 메시지
             # 참고.
-            L(f"{name} 브라우저 실행에 실패했습니다({type(e).__name__}: {e}) - 평소 쓰시는 {name} 창을 닫을 필요는 없습니다, "
+            L(f"{name} 브라우저 실행에 실패했습니다({type(last_err).__name__}: {last_err}) - 평소 쓰시는 {name} 창을 닫을 필요는 없습니다, "
               f"자동으로 다음 후보로 넘어갑니다.")
     if context is None:
         raise RuntimeError('브라우저를 하나도 띄우지 못했습니다.')
