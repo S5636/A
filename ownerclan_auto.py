@@ -1166,15 +1166,22 @@ def _place_one_order(page, order_url, item, L):
             li.click(timeout=5000)
         except Exception:
             try:
-                # 자바스크립트로 스크립트 클릭(el.click())을 흉내내면 크로미움이
-                # "진짜 사용자 클릭"으로 안 쳐줘서, 이 클릭 때문에 나중에 뜨는
-                # 팝업(결제창 등)이 사용자 제스처 없이 열린 걸로 판정돼 막힐 수
-                # 있다. force=True도 Playwright가 실제 마우스 입력 이벤트를
-                # 그대로 보내는 거라 사용자 제스처로 인정된다 - 그래서 fallback도
-                # 스크립트 클릭 대신 이걸 쓴다.
                 li.click(timeout=5000, force=True)
-            except Exception as e:
-                return {'ok': False, 'reason': f'옵션 선택(클릭) 실패: {type(e).__name__}: {e}'}
+            except Exception:
+                try:
+                    # force 클릭도 "Element is not visible"로 실패한다는 건
+                    # (STOCK 쪽은 이 li를 클릭 없이 속성만 읽어서 문제없이
+                    # 통과하는 걸 보면) 이 옵션 <li>가 진짜로 display:none 등으로
+                    # 숨겨진 상태라는 뜻으로 보인다 - 옵션 목록이 접혀있는
+                    # 드롭다운/탭 안에 있고 그걸 펼치는 단계가 우리 코드에 없을
+                    # 가능성이 높다. 정확히 어떤 트리거를 눌러야 열리는지는
+                    # 모르지만, dispatch_event('click')은 화면에 보이는지와
+                    # 무관하게 그 요소에 바인딩된 클릭 이벤트 핸들러를 그대로
+                    # 실행시키므로, 드롭다운이 안 열려있어도 "이 옵션을
+                    # 선택한다"는 로직 자체는 그대로 발동시킬 수 있다.
+                    li.dispatch_event('click')
+                except Exception as e:
+                    return {'ok': False, 'reason': f'옵션 선택(클릭) 실패: {type(e).__name__}: {e}'}
         L(f"[{order_id}/{code}] 옵션 '{matched_name}' 선택 완료.")
         time.sleep(0.5)
 
