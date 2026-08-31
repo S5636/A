@@ -379,6 +379,24 @@ def _get_or_launch_page(L, launch_if_missing=True):
             }
         })();
     """)
+    # 카드결제 팝업창이 about:blank인 채로 멈춘 것처럼 보인다는 지적("결국
+    # 결제페이지로 안넘어가는데") - 실제로 멈춘 건지, 아니면 잠깐 뒤에
+    # 정상적으로 로딩되는 건지 눈으로 캡쳐해서 확인해달라고 또 부탁하는
+    # 대신, 새 창(팝업)이 뜨면 코드가 직접 몇 초 지켜보고 최종 주소가
+    # 뭔지 로그에 남긴다.
+    def _on_new_page(new_page):
+        L(f'새 창(팝업)이 열렸습니다: {new_page.url}')
+
+        def _log_popup_status():
+            time.sleep(4)
+            try:
+                L(f'그 팝업의 4초 뒤 상태 - 주소: {new_page.url} / 제목: {new_page.title()}')
+            except Exception as e:
+                L(f'그 팝업이 4초 안에 닫혔거나 상태를 못 읽었습니다({type(e).__name__}) - 닫혔다면 정상, 아니면 결제 전 직접 확인해주세요.')
+
+        threading.Thread(target=_log_popup_status, daemon=True).start()
+
+    context.on('page', _on_new_page)
     page = context.pages[0] if context.pages else context.new_page()
     page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     page.on('dialog', lambda d: d.accept())
@@ -1148,7 +1166,13 @@ def _place_one_order(page, order_url, item, L):
             li.click(timeout=5000)
         except Exception:
             try:
-                li.evaluate('el => el.click()')
+                # 자바스크립트로 스크립트 클릭(el.click())을 흉내내면 크로미움이
+                # "진짜 사용자 클릭"으로 안 쳐줘서, 이 클릭 때문에 나중에 뜨는
+                # 팝업(결제창 등)이 사용자 제스처 없이 열린 걸로 판정돼 막힐 수
+                # 있다. force=True도 Playwright가 실제 마우스 입력 이벤트를
+                # 그대로 보내는 거라 사용자 제스처로 인정된다 - 그래서 fallback도
+                # 스크립트 클릭 대신 이걸 쓴다.
+                li.click(timeout=5000, force=True)
             except Exception as e:
                 return {'ok': False, 'reason': f'옵션 선택(클릭) 실패: {type(e).__name__}: {e}'}
         L(f"[{order_id}/{code}] 옵션 '{matched_name}' 선택 완료.")
@@ -1175,7 +1199,9 @@ def _place_one_order(page, order_url, item, L):
         buy_btn.click(timeout=10000)
     except Exception:
         try:
-            page.get_by_text('바로구매', exact=False).first.evaluate('el => el.click()')
+            # 스크립트 클릭 대신 force=True(실제 입력 이벤트) 사용 - 아래
+            # '옵션 선택(클릭) 실패' 처리부의 이유와 동일.
+            page.get_by_text('바로구매', exact=False).first.click(timeout=10000, force=True)
         except Exception as e2:
             return {'ok': False, 'reason': f"'바로 구매' 버튼 클릭 실패: {type(e2).__name__}: {e2}"}
     try:
@@ -1199,7 +1225,7 @@ def _place_one_order(page, order_url, item, L):
         page.get_by_text('신규배송지', exact=True).first.click(timeout=8000)
     except Exception as e:
         try:
-            page.get_by_text('신규배송지', exact=True).first.evaluate('el => el.click()')
+            page.get_by_text('신규배송지', exact=True).first.click(timeout=8000, force=True)
         except Exception as e2:
             L(f"[{order_id}/{code}] 주소 '신규배송지' 선택 실패({type(e2).__name__}) - 우편번호/주소는 아래서 직접 값을 넣으니 "
               f"큰 영향은 없지만, 결제 전 라디오 버튼이 '신규배송지'로 선택돼있는지 확인해주세요.")
@@ -1272,14 +1298,21 @@ def _place_one_order(page, order_url, item, L):
     # 반드시 사람이 직접 한다. 바로 위에서 여러 칸을 자바스크립트로 값만
     # 바꿔치기했는데(우편번호/기본주소), 화면이 그 변화를 반영할 시간을
     # 못 주고 곧바로 클릭하면 버튼이 아직 유효성 검사를 못 마친 상태일 수
-    # 있어 잠깐 대기한 뒤, 다른 버튼들처럼 클릭 실패시 자바스크립트 클릭도
-    # 시도한다.
+    # 있어 잠깐 대기한다.
+    #
+    # fallback으로 자바스크립트 el.click()을 쓰면 안 된다 - 이 버튼은 카드결제
+    # 팝업창(window.open)을 여는 버튼인데, 스크립트로 흉내낸 클릭은 크로미움이
+    # "진짜 사용자 클릭"으로 인정하지 않아서 그 팝업이 사용자 제스처 없이 열린
+    # 걸로 판정돼 빈 창(about:blank)으로 막힐 수 있다(사용자 확인: "결국
+    # 결제페이지로 안넘어가는데" - 카드결제 팝업이 안 뜨거나 빈 채로 멈춰있는
+    # 것으로 보임). force=True는 Playwright가 실제 마우스 입력 이벤트를 그대로
+    # 보내는 거라 사용자 제스처로 인정되므로, fallback도 이걸로 바꾼다.
     time.sleep(1)
     try:
         page.get_by_text('결제하기', exact=True).first.click(timeout=10000)
     except Exception as e:
         try:
-            page.get_by_text('결제하기', exact=True).first.evaluate('el => el.click()')
+            page.get_by_text('결제하기', exact=True).first.click(timeout=10000, force=True)
         except Exception as e2:
             return {'ok': False, 'reason': f"'결제하기' 버튼 클릭 실패({type(e2).__name__}) - 주문서 화면에서 직접 확인해주세요."}
 
