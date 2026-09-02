@@ -656,6 +656,45 @@ def _detail_url_for_code(order_url, code):
     return f'{base}/V2/product/view.php?selfcode={quote(code)}'
 
 
+def _try_auto_login_if_needed(page, L):
+    """이동한 곳이 로그인 페이지(loginform.php)면, 브라우저가 이미 저장해둔
+    아이디/비밀번호가 자동으로 채워져 있는 경우가 많아서(사용자 확인 캡쳐)
+    '로그인' 버튼만 누르면 되는 상태다. 세션이 끊긴 이유(자동화 전용
+    프로필이 오래됨, 브라우저 전환 등)는 다양할 수 있지만, 매번 사람이
+    직접 눌러야 하게 두는 대신 여기서 자동으로 눌러준다 - DPJ 자동화가
+    다팔자 프로그램 버튼을 누르는 것과 같은 종류의 자동화라 다를 이유가
+    없다. 아이디/비밀번호 값 자체는 우리가 채우지 않는다 - 브라우저
+    자동완성이 이미 채워둔 값을 그대로 두고 로그인 버튼만 누른다(카드
+    정보와 달리 로그인 자체는 이 자동화가 이미 하고 있는 다른 버튼
+    클릭들과 성격이 같다고 판단). 로그인 폼 바깥에도(우측 상단 등)
+    '로그인'이라는 글자가 링크로 따로 있어서, 비밀번호 입력칸이 있는
+    <form> 안으로 검색 범위를 좁혀 진짜 제출 버튼만 클릭한다."""
+    try:
+        if 'loginform.php' not in page.url:
+            return False
+    except Exception:
+        return False
+    L('로그인이 풀려있어서(세션 만료 등으로 보임) 자동으로 로그인 버튼을 눌러 다시 로그인합니다...')
+    try:
+        form = page.locator('form:has(input[type="password"])').first
+        form.get_by_text('로그인', exact=True).first.click(timeout=5000)
+    except Exception:
+        try:
+            form.get_by_text('로그인', exact=True).first.click(timeout=5000, force=True)
+        except Exception as e:
+            L(f'자동 로그인 버튼 클릭 실패({type(e).__name__}) - 직접 로그인해주세요.')
+            return False
+    try:
+        page.wait_for_load_state('domcontentloaded', timeout=15000)
+    except Exception:
+        pass
+    if _is_logged_in(page) or 'loginform.php' not in page.url:
+        L('자동 로그인에 성공한 것으로 보입니다.')
+        return True
+    L('자동 로그인 버튼을 눌렀지만 로그인이 안 된 것 같습니다(아이디/비밀번호가 자동완성 안 돼있을 수 있음) - 직접 로그인해주세요.')
+    return False
+
+
 def _goto_detail_page(page, url, code, L):
     """상세페이지로 이동한다. 성공하면 True, 실패하면 False.
 
@@ -671,6 +710,8 @@ def _goto_detail_page(page, url, code, L):
     for attempt in range(2):
         try:
             page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            if _try_auto_login_if_needed(page, L):
+                page.goto(url, wait_until='domcontentloaded', timeout=30000)
             return True
         except Exception as e:
             err_text = str(e)
@@ -1222,6 +1263,18 @@ def _place_one_order(page, order_url, item, L):
     except Exception:
         pass
     time.sleep(1)
+    # '바로구매' 클릭 결과 로그인 페이지로 빠졌을 수 있다(세션 만료) - 여기서도
+    # 확인해서 자동으로 로그인하고 다시 시도한다.
+    if _try_auto_login_if_needed(page, L):
+        try:
+            buy_btn = page.get_by_text('바로 구매', exact=False).first
+            if buy_btn.count() == 0:
+                buy_btn = page.get_by_text('바로구매', exact=False).first
+            buy_btn.click(timeout=10000)
+            page.wait_for_load_state('domcontentloaded', timeout=15000)
+            time.sleep(1)
+        except Exception as e:
+            return {'ok': False, 'reason': f"자동 로그인 뒤 '바로 구매' 재시도 실패: {type(e).__name__}: {e}"}
 
     # 주문서(ORDER SHEET) 페이지 - 원장주문코드에 상품주문번호(order_id)를
     # 남긴다(사용자 지시) - 나중에 오너클랜 발주내역을 다시 받으면 이 값으로
