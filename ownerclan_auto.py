@@ -1296,38 +1296,48 @@ def _place_one_order(page, order_url, item, L):
     # order_prmsg[] 라는 이름 자체가 배열 표기라, "기본주소/신규배송지/직접입력"
     # 탭마다 이 textarea가 각각 따로(숨겨진 채로) 존재할 수 있다 - .first로
     # 하나만 채우면 실제 화면에 보이는(현재 선택된 탭의) 칸이 아니라 다른
-    # 탭의 안 보이는 칸을 채웠을 수 있다(사용자 확인: 분명히 비웠다고
-    # 로그에 남았는데 실제 화면엔 여전히 "상품명 : ..."가 남아있었음 - 신규배송지
-    # 탭 전환 자체도 실패했던 걸 보면 지금 활성 탭이 우리가 생각한 탭이 아닐
-    # 가능성이 높다). 그래서 이제 매칭되는 모든 order_prmsg[] 칸에 다 채운다 -
-    # 숨겨진 탭의 칸은 fill()이 "안 보임"으로 실패할 수 있어서, 그런 칸은
-    # 화면에 보이는지와 무관하게 자바스크립트로 값+input/change 이벤트를
-    # 직접 넣는다.
-    try:
-        prmsg_boxes = page.locator('textarea[name="order_prmsg[]"]')
-        prmsg_count = prmsg_boxes.count()
-        filled_any = False
-        for i in range(prmsg_count):
-            box = prmsg_boxes.nth(i)
-            try:
-                box.fill(delivery_note)
-                filled_any = True
-            except Exception:
+    # 탭의 안 보이는 칸을 채웠을 수 있다. 그래서 매칭되는 모든 order_prmsg[]
+    # 칸에 다 채운다 - 숨겨진 탭의 칸은 fill()이 "안 보임"으로 실패할 수
+    # 있어서, 그런 칸은 화면에 보이는지와 무관하게 자바스크립트로 값+
+    # input/change 이벤트를 직접 넣는다.
+    #
+    # 이렇게 다 채웠는데도 여전히 "상품명 : ..."가 남아있다는 게 사용자
+    # 캡쳐로 재확인됐다 - 탭 문제가 아니라, 오너클랜 주문서 자체가 이
+    # 칸의 기본값을 "상품명: X"으로 채우는 스크립트를 페이지 로드 후
+    # 약간의 지연을 두고(주소/상품 정보를 다시 조회하는 등) 실행하는
+    # 것으로 보인다 - 우리가 먼저 채워도 그 뒤에 사이트 자체 스크립트가
+    # 다시 덮어써버리는 경쟁 상태(race condition)다. 그래서 이 채우기를
+    # 함수로 빼서, 결제 직전(카드 선택 뒤, '결제하기' 클릭 바로 전)에
+    # 한 번 더 실행해서 마지막에 우리 값이 이기게 한다.
+    def _fill_delivery_note():
+        try:
+            prmsg_boxes = page.locator('textarea[name="order_prmsg[]"]')
+            prmsg_count = prmsg_boxes.count()
+            filled_any = False
+            for i in range(prmsg_count):
+                box = prmsg_boxes.nth(i)
                 try:
-                    box.evaluate(
-                        "(el, v) => { el.value = v; el.dispatchEvent(new Event('input', {bubbles: true})); "
-                        "el.dispatchEvent(new Event('change', {bubbles: true})); }",
-                        delivery_note,
-                    )
+                    box.fill(delivery_note)
                     filled_any = True
                 except Exception:
-                    pass
-        if filled_any and not delivery_note:
-            L(f"[{order_id}/{code}] 배송요청사항 원본 데이터를 못 찾아서 비웠습니다 - 필요하면 결제 전 직접 입력해주세요.")
-        elif not filled_any:
-            L(f"[{order_id}/{code}] 배송요청사항 칸을 하나도 못 채웠습니다 - 결제 전 직접 확인해주세요.")
-    except Exception as e:
-        L(f"[{order_id}/{code}] 배송요청사항 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
+                    try:
+                        box.evaluate(
+                            "(el, v) => { el.value = v; el.dispatchEvent(new Event('input', {bubbles: true})); "
+                            "el.dispatchEvent(new Event('change', {bubbles: true})); }",
+                            delivery_note,
+                        )
+                        filled_any = True
+                    except Exception:
+                        pass
+            return filled_any
+        except Exception:
+            return False
+
+    filled_any = _fill_delivery_note()
+    if filled_any and not delivery_note:
+        L(f"[{order_id}/{code}] 배송요청사항 원본 데이터를 못 찾아서 비웠습니다 - 필요하면 결제 전 직접 입력해주세요.")
+    elif not filled_any:
+        L(f"[{order_id}/{code}] 배송요청사항 칸을 하나도 못 채웠습니다 - 결제 전 직접 확인해주세요.")
 
     # 결제수단: 카드
     try:
@@ -1350,6 +1360,10 @@ def _place_one_order(page, order_url, item, L):
     # 것으로 보임). force=True는 Playwright가 실제 마우스 입력 이벤트를 그대로
     # 보내는 거라 사용자 제스처로 인정되므로, fallback도 이걸로 바꾼다.
     time.sleep(1)
+    # 배송요청사항을 여기서 한 번 더 채운다 - 위에서 채운 뒤 사이트 자체
+    # 스크립트가 뒤늦게 기본값으로 덮어썼을 수 있는 시간(카드 선택, 대기
+    # 등)이 지났으니, 결제 직전 마지막 순간에 우리 값으로 다시 확정한다.
+    _fill_delivery_note()
     try:
         page.get_by_text('결제하기', exact=True).first.click(timeout=10000)
     except Exception as e:
