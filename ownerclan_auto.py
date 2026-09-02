@@ -1287,10 +1287,39 @@ def _place_one_order(page, order_url, item, L):
     # 놓는 경우가 있었다(사용자가 실제로 겪음 - 우리가 못 채웠으면 그냥
     # 안 건드리기만 했는데도 상품명이 그대로 남아있었음) - delivery_note가
     # 없을 때 그냥 넘어가지 않고 빈 문자열로 확실히 지운다.
+    # order_prmsg[] 라는 이름 자체가 배열 표기라, "기본주소/신규배송지/직접입력"
+    # 탭마다 이 textarea가 각각 따로(숨겨진 채로) 존재할 수 있다 - .first로
+    # 하나만 채우면 실제 화면에 보이는(현재 선택된 탭의) 칸이 아니라 다른
+    # 탭의 안 보이는 칸을 채웠을 수 있다(사용자 확인: 분명히 비웠다고
+    # 로그에 남았는데 실제 화면엔 여전히 "상품명 : ..."가 남아있었음 - 신규배송지
+    # 탭 전환 자체도 실패했던 걸 보면 지금 활성 탭이 우리가 생각한 탭이 아닐
+    # 가능성이 높다). 그래서 이제 매칭되는 모든 order_prmsg[] 칸에 다 채운다 -
+    # 숨겨진 탭의 칸은 fill()이 "안 보임"으로 실패할 수 있어서, 그런 칸은
+    # 화면에 보이는지와 무관하게 자바스크립트로 값+input/change 이벤트를
+    # 직접 넣는다.
     try:
-        page.locator('textarea[name="order_prmsg[]"]').first.fill(delivery_note)
-        if not delivery_note:
+        prmsg_boxes = page.locator('textarea[name="order_prmsg[]"]')
+        prmsg_count = prmsg_boxes.count()
+        filled_any = False
+        for i in range(prmsg_count):
+            box = prmsg_boxes.nth(i)
+            try:
+                box.fill(delivery_note)
+                filled_any = True
+            except Exception:
+                try:
+                    box.evaluate(
+                        "(el, v) => { el.value = v; el.dispatchEvent(new Event('input', {bubbles: true})); "
+                        "el.dispatchEvent(new Event('change', {bubbles: true})); }",
+                        delivery_note,
+                    )
+                    filled_any = True
+                except Exception:
+                    pass
+        if filled_any and not delivery_note:
             L(f"[{order_id}/{code}] 배송요청사항 원본 데이터를 못 찾아서 비웠습니다 - 필요하면 결제 전 직접 입력해주세요.")
+        elif not filled_any:
+            L(f"[{order_id}/{code}] 배송요청사항 칸을 하나도 못 채웠습니다 - 결제 전 직접 확인해주세요.")
     except Exception as e:
         L(f"[{order_id}/{code}] 배송요청사항 입력 실패({type(e).__name__}) - 결제 전 직접 확인해주세요.")
 
