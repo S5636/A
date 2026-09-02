@@ -397,8 +397,14 @@ def _get_or_launch_page(L, launch_if_missing=True):
         threading.Thread(target=_log_popup_status, daemon=True).start()
 
     context.on('page', _on_new_page)
+    # navigator.webdriver 숨기기를 page.add_init_script로만 해뒀었는데, 그건
+    # 이 최초 page 하나에만 적용되고 나중에 뜨는 팝업(카드결제창 등)에는
+    # 안 먹는다 - 카드결제 팝업이 계속 about:blank로 멈춰있는 문제("결국
+    # 결제페이지로 안넘어가는데")가, 팝업 쪽에서 자동화(navigator.webdriver)를
+    # 감지해서 스스로 안 열리는 결제 보안모듈 때문일 가능성이 있다. 폰트
+    # 강제지정과 마찬가지로 컨텍스트 단위로 등록해서 팝업에도 똑같이 적용한다.
+    context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     page = context.pages[0] if context.pages else context.new_page()
-    page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     page.on('dialog', lambda d: d.accept())
     _state['pw'] = pw
     _state['context'] = context
