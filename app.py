@@ -8,6 +8,7 @@ import os
 import json
 import re
 import sqlite3
+import threading
 import time
 import traceback
 from datetime import datetime
@@ -408,8 +409,9 @@ def api_dapalza_progress():
     return jsonify({'log': dapalza_auto.get_progress()})
 
 
-@app.route('/api/dapalza/collect', methods=['POST'])
-def api_dapalza_collect():
+def _dpj_collect_once():
+    """DPJ(다팔자 자동수집) 한 번 실행 - '지금 수집' 버튼과 아래 30분 자동
+    스케줄러가 완전히 동일한 로직을 타게 하려고 공용 함수로 뺐다."""
     # 오너클랜 창이 로그인 등으로 화면에 떠서 다팔자 창을 가리고 있으면,
     # 가려진 Electron 창의 접근성 트리 갱신이 멈춰서 다팔자 자동화가 탭/버튼을
     # 하나도 못 찾는 사고로 이어질 수 있다 - 다팔자를 건드리기 전에 오너클랜
@@ -423,7 +425,7 @@ def api_dapalza_collect():
         save_filename='다팔자.xlsx',
     )
     if not result.get('ok'):
-        return jsonify(result)
+        return result
     try:
         # 다팔자가 직접 디스크에 저장한 파일이라 메모리로 못 우회함 - 읽기만 재시도.
         buf = io.BytesIO(_read_with_retry(result['file_path']))
@@ -497,7 +499,86 @@ def api_dapalza_collect():
                 and '[HL]' not in (r.get('buy_status') or '') for r in rows)
         except Exception:
             result['has_new_orders'] = False
-    return jsonify(result)
+    return result
+
+
+@app.route('/api/dapalza/collect', methods=['POST'])
+def api_dapalza_collect():
+    return jsonify(_dpj_collect_once())
+
+
+# ---------------------------------------------------------------------------
+# DPJ 30분 자동 수집 - 사용자 요청: "30분에한번씩 dpj버튼 자동으로눌러주고
+# 신규주문있으면 알림받고싶은데". 마진보드 서버가 켜져있는 동안 백그라운드
+# 스레드가 30분마다 위와 똑같은 수집을 자동으로 돌리고, 신규주문이 새로
+# 생겼으면(위의 has_new_orders와 완전히 같은 기준) 화면(브라우저 알림)에
+# 띄울 수 있게 상태를 저장해둔다. 수동으로 DPJ 버튼을 눌러도 다팔자
+# 자동화 쪽에 이미 있는 "동시 실행 방지" 잠금(dapalza_auto.py)이 있어서
+# 자동 실행과 겹쳐도 서로 충돌하지 않고 하나는 대기만 한다.
+# ---------------------------------------------------------------------------
+DPJ_AUTO_INTERVAL_SECONDS = 30 * 60
+
+_dpj_auto_state = {
+    'pending': False,       # 신규주문 알림을 아직 화면에 안 보여줬으면 True
+    'message': '',
+    'at': '',                # 알림 발생 시각
+    'last_run_at': '',       # 가장 최근 자동 수집이 끝난 시각(성공/실패 무관)
+    'last_error': '',        # 가장 최근 자동 수집이 실패했으면 그 이유(성공하면 빈 문자열)
+}
+_dpj_auto_lock = threading.Lock()
+
+
+def _dpj_auto_loop():
+    while True:
+        time.sleep(DPJ_AUTO_INTERVAL_SECONDS)
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            result = _dpj_collect_once()
+        except Exception as e:
+            with _dpj_auto_lock:
+                _dpj_auto_state['last_run_at'] = now
+                _dpj_auto_state['last_error'] = _friendly_error(e)
+            continue
+        with _dpj_auto_lock:
+            _dpj_auto_state['last_run_at'] = now
+            if not result.get('ok'):
+                _dpj_auto_state['last_error'] = (result.get('log') or ['알 수 없는 오류'])[-1]
+                continue
+            upload_err = (result.get('upload') or {}).get('error')
+            if upload_err:
+                _dpj_auto_state['last_error'] = upload_err
+                continue
+            _dpj_auto_state['last_error'] = ''
+            if result.get('has_new_orders'):
+                _dpj_auto_state['pending'] = True
+                _dpj_auto_state['message'] = f'{now} 자동 수집 - 신규주문이 있습니다.'
+                _dpj_auto_state['at'] = now
+
+
+_dpj_auto_thread_started = False
+
+
+def _start_dpj_auto_scheduler():
+    global _dpj_auto_thread_started
+    if _dpj_auto_thread_started:
+        return
+    _dpj_auto_thread_started = True
+    threading.Thread(target=_dpj_auto_loop, daemon=True).start()
+
+
+@app.route('/api/dapalza/auto_alert')
+def api_dapalza_auto_alert():
+    with _dpj_auto_lock:
+        return jsonify(dict(_dpj_auto_state))
+
+
+@app.route('/api/dapalza/auto_alert/ack', methods=['POST'])
+def api_dapalza_auto_alert_ack():
+    # 화면이 알림을 실제로 보여준 뒤 이걸 호출해서 pending을 꺼준다 -
+    # 안 그러면 새로고침/재접속할 때마다 같은 알림이 계속 다시 뜬다.
+    with _dpj_auto_lock:
+        _dpj_auto_state['pending'] = False
+    return jsonify({'ok': True})
 
 
 @app.route('/api/ownerclan/setup_login', methods=['POST'])
@@ -913,6 +994,12 @@ def api_settings_save():
         json.dump(settings, f, ensure_ascii=False, indent=2)
     return jsonify(settings)
 
+
+# 모듈을 import하는 시점(launcher.py의 "import app")에 바로 시작한다 - 이래야
+# launcher.py가 app.app.run(...)을 부르기 전에도 스케줄러가 이미 돌기
+# 시작한다. debug=False로 고정 실행하므로(launcher.py) 리로더로 인한 중복
+# 시작 걱정은 없다.
+_start_dpj_auto_scheduler()
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

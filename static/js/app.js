@@ -1193,4 +1193,48 @@
   });
 
   activateTab('summary');
+
+  // ================= DPJ 30분 자동 수집 알림 =================
+  // 사용자 요청: "30분에한번씩 dpj버튼 자동으로눌러주고 신규주문있으면
+  // 알림받고싶은데" - 실제 30분 자동 수집은 app.py 백그라운드 스레드가
+  // 돈다. 여기서는 그 결과(신규주문 여부)를 주기적으로 물어봐서, 신규주문이
+  // 있으면 윈도우 알림(Notification API - 마진보드 탭/창이 떠있기만 하면
+  // 최소화돼 있어도 뜬다)과 화면 토스트로 같이 알려준다.
+  if ('Notification' in window && Notification.permission === 'default') {
+    // 페이지 로드 직후 곧바로 권한을 물으면 사용자가 이유를 모른 채 거절하기
+    // 쉬워서, 이유를 먼저 토스트로 알려준 다음 요청한다.
+    toast('신규주문 자동 알림을 받으려면 브라우저의 알림 권한을 허용해주세요.', '');
+    Notification.requestPermission();
+  }
+
+  async function checkDpjAutoAlert() {
+    let data;
+    try {
+      data = await api('/api/dapalza/auto_alert');
+    } catch (_) {
+      return;
+    }
+    if (data.last_error) {
+      // 자동 수집 자체가 실패했다는 걸 사람이 못 보고 지나치면(창을 안
+      // 보고 있는 시간이 대부분일 테니) 계속 실패만 반복될 수 있다 - 실패도
+      // 알림/토스트로 알려준다. 같은 실패를 반복 알림하지 않도록 마지막으로
+      // 알려준 시각을 기억해둔다.
+      if (data.last_run_at && data.last_run_at !== checkDpjAutoAlert._lastErrorShownAt) {
+        checkDpjAutoAlert._lastErrorShownAt = data.last_run_at;
+        toast(`DPJ 30분 자동 수집 실패(${data.last_run_at}) - ${data.last_error}`, 'err');
+      }
+    }
+    if (!data.pending) return;
+    toast(data.message || '신규주문이 있습니다.', 'ok');
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        const n = new Notification('이유상점 Margin Board - 신규주문', { body: data.message || '신규주문이 있습니다.' });
+        n.onclick = () => { window.focus(); activateTab('dashboard'); };
+      } catch (_) { /* 알림 생성 자체가 막혀있으면 위 토스트로 충분 */ }
+    }
+    try { await api('/api/dapalza/auto_alert/ack', { method: 'POST' }); } catch (_) {}
+  }
+
+  checkDpjAutoAlert();
+  setInterval(checkDpjAutoAlert, 30000);
 })();
