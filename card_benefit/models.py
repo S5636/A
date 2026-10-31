@@ -87,6 +87,35 @@ CREATE TABLE IF NOT EXISTS performance (
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     PRIMARY KEY (card_id, year_month)
 );
+
+-- 대출 (자산 전체 관리의 첫 항목). 상환 기록은 "상환 후 잔액"을 그대로
+-- 입력받아 current_balance를 갱신하는 방식으로 관리한다(사용자가 직접
+-- 얼마 갚았는지 계산할 필요 없이, 명세서에 찍힌 "남은 잔액"만 그대로 넣으면 됨).
+CREATE TABLE IF NOT EXISTS loans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    loan_type TEXT DEFAULT '',          -- 신용대출/담보대출/학자금대출/카드론 등
+    principal REAL NOT NULL DEFAULT 0,       -- 최초 대출원금
+    current_balance REAL NOT NULL DEFAULT 0, -- 현재 남은 원금
+    interest_rate REAL NOT NULL DEFAULT 0,   -- 연 금리(%)
+    repayment_type TEXT DEFAULT '',     -- 원리금균등/원금균등/만기일시상환 등
+    start_date TEXT DEFAULT '',
+    end_date TEXT DEFAULT '',           -- 만기일
+    payment_day INTEGER NOT NULL DEFAULT 0,  -- 매월 상환일(1~31, 0=없음)
+    memo TEXT DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS loan_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    loan_id INTEGER NOT NULL REFERENCES loans(id) ON DELETE CASCADE,
+    paid_at TEXT NOT NULL,              -- 'YYYY-MM-DD'
+    amount REAL NOT NULL DEFAULT 0,     -- 이번에 줄어든 금액(상환 전 잔액 - 상환 후 잔액). 잔액이 늘었으면 음수.
+    balance_after REAL NOT NULL DEFAULT 0,  -- 이 상환 후 남은 잔액
+    memo TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
 """
 
 

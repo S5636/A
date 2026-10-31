@@ -10,7 +10,7 @@
 
   const CARD_COLORS = ["#a78bfa", "#ec4899", "#fab219", "#22c55e", "#3987e5", "#f97316"];
 
-  let state = { cards: [], inbox: [], no_benefit: [] };
+  let state = { cards: [], inbox: [], no_benefit: [], loans: [] };
   let noBenefitOpen = false;
   const openLogPanels = new Set(); // benefit id 목록 - 펼쳐진 사용내역 기억
   const openMemoPanels = new Set(); // "card-1", "benefit-3" 같은 키 - 펼쳐진 설명 기억
@@ -95,8 +95,22 @@
     renderNoBenefit();
     renderCards();
     renderMonthlySummary();
+    renderLoans();
     requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
   }
+
+  // ---- 탭(카드/대출) ----
+  let activeView = "card";
+  document.querySelectorAll(".view-tab").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      activeView = btn.dataset.view;
+      document.querySelectorAll(".view-tab").forEach((b) => b.classList.toggle("active", b === btn));
+      document.getElementById("card-view").style.display = activeView === "card" ? "" : "none";
+      document.getElementById("loan-view").style.display = activeView === "loan" ? "" : "none";
+      document.querySelectorAll(".view-only-card").forEach((el) => el.style.display = activeView === "card" ? "" : "none");
+      document.querySelectorAll(".view-only-loan").forEach((el) => el.style.display = activeView === "loan" ? "" : "none");
+    })
+  );
 
   // ---- 최상단 이번 달 적립/캐시백/혜택률 합계 ----
   function renderMonthlySummary() {
@@ -449,6 +463,182 @@
       })
     );
   }
+
+  // ---- 대출 목록 ----
+  function renderLoans() {
+    const loanList = document.getElementById("loan-list");
+    const emptyLoanHint = document.getElementById("empty-loan-hint");
+    loanList.querySelectorAll(".card").forEach((el) => el.remove());
+    emptyLoanHint.style.display = state.loans.length ? "none" : "block";
+
+    state.loans.forEach((loan) => {
+      const el = document.createElement("div");
+      el.className = "card";
+      el.id = `loan-${loan.id}`;
+      el.innerHTML = loanTemplate(loan);
+      loanList.appendChild(el);
+      wireLoan(el, loan);
+    });
+  }
+
+  function loanTemplate(loan) {
+    const logKey = `loan-${loan.id}`;
+    const logsOpen = openLogPanels.has(logKey);
+    const percent = loan.percent_paid != null ? loan.percent_paid : 0;
+    const ddayText = loan.days_left != null
+      ? (loan.days_left >= 0 ? ` (D-${loan.days_left})` : ` (${fmt(Math.abs(loan.days_left))}일 지남)`)
+      : "";
+    const infoLine2 = [
+      loan.end_date ? `만기 ${loan.end_date}${ddayText}` : "",
+      loan.payment_day ? `매월 ${loan.payment_day}일 상환` : "",
+    ].filter(Boolean).join(" · ");
+
+    const logsHtml = loan.payments.length
+      ? loan.payments.map((p) => `
+          <div class="log-item">
+            <span>${p.paid_at} · ${p.amount >= 0 ? "상환" : "증가"} ${fmt(Math.abs(p.amount))}원 → 잔액 ${fmt(p.balance_after)}원${p.memo ? " · " + escapeHtml(p.memo) : ""}</span>
+            <button class="delete-loan-payment" data-id="${p.id}">삭제</button>
+          </div>
+        `).join("")
+      : `<div class="log-item"><span>상환 기록 없음</span></div>`;
+
+    return `
+      <div class="card-head">
+        <div class="card-title-row">
+          <span class="card-title">${escapeHtml(loan.name)}</span>
+          ${loan.loan_type ? `<span class="loan-type-badge">${escapeHtml(loan.loan_type)}</span>` : ""}
+        </div>
+        <div class="card-actions">
+          <button class="icon-btn edit-loan" data-id="${loan.id}" title="대출 수정">✏️</button>
+          <button class="icon-btn delete-loan" data-id="${loan.id}" title="대출 삭제">🗑️</button>
+        </div>
+      </div>
+      <div class="benefit-top">
+        <span class="benefit-name">현재 잔액</span>
+        <span class="benefit-remaining">${fmt(loan.current_balance)}원</span>
+      </div>
+      ${loan.principal > 0 ? `<div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>` : ""}
+      <div class="perf-row-sub">
+        원금 ${fmt(loan.principal)}원${loan.principal > 0 ? ` · ${percent}% 상환` : ""}${loan.interest_rate ? ` · 금리 ${loan.interest_rate}%` : ""}${loan.repayment_type ? ` · ${escapeHtml(loan.repayment_type)}` : ""}
+      </div>
+      ${infoLine2 ? `<div class="perf-row-sub">${infoLine2}</div>` : ""}
+      ${memoToggleTemplate(logKey, loan.memo)}
+      <div class="benefit-sub">
+        <div class="benefit-buttons">
+          <button class="icon-btn add-loan-payment" data-id="${loan.id}" title="상환 기록">➕</button>
+          <button class="btn small toggle-loan-log" data-id="${loan.id}">내역</button>
+        </div>
+      </div>
+      <div class="log-list ${logsOpen ? "open" : ""}" data-log-for="${logKey}">${logsHtml}</div>
+    `;
+  }
+
+  function wireLoan(el, loan) {
+    el.querySelector(".edit-loan").addEventListener("click", () => openLoanModal(loan));
+    el.querySelector(".delete-loan").addEventListener("click", async () => {
+      if (!confirm(`"${loan.name}" 대출을 삭제할까요? 상환 기록도 모두 삭제됩니다.`)) return;
+      state = await api(`/api/loans/${loan.id}`, { method: "DELETE" });
+      render();
+    });
+    el.querySelector(".add-loan-payment").addEventListener("click", () => openLoanPaymentModal(loan));
+    el.querySelector(".toggle-loan-log").addEventListener("click", () => {
+      const key = `loan-${loan.id}`;
+      if (openLogPanels.has(key)) openLogPanels.delete(key);
+      else openLogPanels.add(key);
+      render();
+    });
+    el.querySelectorAll(".memo-toggle").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.memoKey;
+        if (openMemoPanels.has(key)) openMemoPanels.delete(key);
+        else openMemoPanels.add(key);
+        render();
+      })
+    );
+    el.querySelectorAll(".delete-loan-payment").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("이 상환 기록을 삭제할까요?")) return;
+        state = await api(`/api/loan-payments/${btn.dataset.id}`, { method: "DELETE" });
+        render();
+      })
+    );
+  }
+
+  // ---- 대출 추가/수정 모달 ----
+  const loanModal = document.getElementById("loan-modal");
+  let editingLoanId = null;
+
+  function openLoanModal(loan) {
+    editingLoanId = loan ? loan.id : null;
+    document.getElementById("loan-modal-title").textContent = loan ? "대출 수정" : "대출 추가";
+    document.getElementById("loan-name").value = loan ? loan.name : "";
+    document.getElementById("loan-type").value = loan ? loan.loan_type : "";
+    document.getElementById("loan-principal").value = loan ? loan.principal : "";
+    document.getElementById("loan-balance").value = loan ? loan.current_balance : "";
+    document.getElementById("loan-rate").value = loan && loan.interest_rate ? loan.interest_rate : "";
+    document.getElementById("loan-repay-type").value = loan ? loan.repayment_type : "";
+    document.getElementById("loan-start-date").value = loan ? loan.start_date : "";
+    document.getElementById("loan-end-date").value = loan ? loan.end_date : "";
+    document.getElementById("loan-payment-day").value = loan && loan.payment_day ? loan.payment_day : "";
+    document.getElementById("loan-memo").value = loan ? loan.memo : "";
+    loanModal.classList.add("open");
+  }
+  document.getElementById("btn-add-loan").addEventListener("click", () => openLoanModal(null));
+  document.getElementById("loan-cancel").addEventListener("click", () => loanModal.classList.remove("open"));
+  document.getElementById("loan-save").addEventListener("click", async () => {
+    const payload = {
+      name: document.getElementById("loan-name").value.trim(),
+      loan_type: document.getElementById("loan-type").value.trim(),
+      principal: document.getElementById("loan-principal").value || 0,
+      current_balance: document.getElementById("loan-balance").value,
+      interest_rate: document.getElementById("loan-rate").value || 0,
+      repayment_type: document.getElementById("loan-repay-type").value.trim(),
+      start_date: document.getElementById("loan-start-date").value,
+      end_date: document.getElementById("loan-end-date").value,
+      payment_day: document.getElementById("loan-payment-day").value || 0,
+      memo: document.getElementById("loan-memo").value.trim(),
+    };
+    if (!payload.name) { alert("대출 이름을 입력하세요."); return; }
+    const url = editingLoanId ? `/api/loans/${editingLoanId}` : "/api/loans";
+    const method = editingLoanId ? "PUT" : "POST";
+    state = await api(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    loanModal.classList.remove("open");
+    render();
+  });
+
+  // ---- 대출 상환 기록 모달 ----
+  const loanPaymentModal = document.getElementById("loan-payment-modal");
+  let payingLoan = null;
+
+  function openLoanPaymentModal(loan) {
+    payingLoan = loan;
+    document.getElementById("loan-payment-current-balance-label").textContent = `현재 잔액: ${fmt(loan.current_balance)}원`;
+    document.getElementById("loan-payment-balance").value = "";
+    document.getElementById("loan-payment-date").value = new Date().toISOString().slice(0, 10);
+    document.getElementById("loan-payment-memo").value = "";
+    loanPaymentModal.classList.add("open");
+  }
+  document.getElementById("loan-payment-cancel").addEventListener("click", () => loanPaymentModal.classList.remove("open"));
+  document.getElementById("loan-payment-save").addEventListener("click", async () => {
+    const balance = document.getElementById("loan-payment-balance").value;
+    if (balance === "" || Number(balance) < 0) { alert("상환 후 남은 잔액을 입력하세요."); return; }
+    const payload = {
+      balance_after: balance,
+      paid_at: document.getElementById("loan-payment-date").value,
+      memo: document.getElementById("loan-payment-memo").value.trim(),
+    };
+    state = await api(`/api/loans/${payingLoan.id}/payments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    loanPaymentModal.classList.remove("open");
+    render();
+  });
 
   // ---- 카드 모달 ----
   const cardModal = document.getElementById("card-modal");
@@ -946,7 +1136,7 @@
     importFile.value = "";
   });
 
-  [cardModal, benefitModal, useModal, assignModal, webhookModal, perfModal].forEach((modal) => {
+  [cardModal, benefitModal, useModal, assignModal, webhookModal, perfModal, loanModal, loanPaymentModal].forEach((modal) => {
     modal.addEventListener("click", (e) => {
       if (e.target === modal) modal.classList.remove("open");
     });

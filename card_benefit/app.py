@@ -149,9 +149,51 @@ def serialize_full():
             "cards": _serialize_cards(conn),
             "inbox": serialize_inbox(conn),
             "no_benefit": serialize_no_benefit(conn),
+            "loans": serialize_loans(conn),
         }
     finally:
         conn.close()
+
+
+def serialize_loans(conn):
+    rows = conn.execute("SELECT * FROM loans ORDER BY sort_order ASC, id ASC").fetchall()
+    result = []
+    for loan in rows:
+        payments = conn.execute(
+            "SELECT * FROM loan_payments WHERE loan_id = ? ORDER BY paid_at DESC, id DESC",
+            (loan["id"],),
+        ).fetchall()
+
+        principal = loan["principal"] or 0
+        balance = loan["current_balance"] or 0
+        percent_paid = None
+        if principal > 0:
+            percent_paid = max(0, min(100, round((principal - balance) / principal * 100)))
+
+        days_left = None
+        if loan["end_date"]:
+            try:
+                days_left = (date.fromisoformat(loan["end_date"]) - date.today()).days
+            except ValueError:
+                days_left = None
+
+        result.append({
+            "id": loan["id"],
+            "name": loan["name"],
+            "loan_type": loan["loan_type"],
+            "principal": principal,
+            "current_balance": balance,
+            "interest_rate": loan["interest_rate"],
+            "repayment_type": loan["repayment_type"],
+            "start_date": loan["start_date"],
+            "end_date": loan["end_date"],
+            "payment_day": loan["payment_day"],
+            "memo": loan["memo"],
+            "percent_paid": percent_paid,
+            "days_left": days_left,
+            "payments": [dict(p) for p in payments],
+        })
+    return result
 
 
 def _serialize_cards(conn):
@@ -444,6 +486,187 @@ def delete_card(card_id):
     conn = get_conn()
     try:
         conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+# ---- 대출 ----
+
+
+@app.route("/api/loans", methods=["POST"])
+def create_loan():
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "대출 이름을 입력하세요."}), 400
+    try:
+        principal = float(data.get("principal") or 0)
+    except (TypeError, ValueError):
+        principal = 0
+    try:
+        current_balance = float(
+            data.get("current_balance") if data.get("current_balance") not in (None, "") else principal
+        )
+    except (TypeError, ValueError):
+        current_balance = principal
+    try:
+        interest_rate = float(data.get("interest_rate") or 0)
+    except (TypeError, ValueError):
+        interest_rate = 0
+    try:
+        payment_day = int(data.get("payment_day") or 0)
+    except (TypeError, ValueError):
+        payment_day = 0
+
+    conn = get_conn()
+    try:
+        max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM loans").fetchone()["m"]
+        conn.execute(
+            """INSERT INTO loans (name, loan_type, principal, current_balance, interest_rate,
+               repayment_type, start_date, end_date, payment_day, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                name,
+                (data.get("loan_type") or "").strip(),
+                principal,
+                current_balance,
+                interest_rate,
+                (data.get("repayment_type") or "").strip(),
+                (data.get("start_date") or "").strip(),
+                (data.get("end_date") or "").strip(),
+                payment_day,
+                (data.get("memo") or "").strip(),
+                max_order + 1,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/loans/<int:loan_id>", methods=["PUT"])
+def update_loan(loan_id):
+    data = request.get_json(force=True) or {}
+    conn = get_conn()
+    try:
+        loan = conn.execute("SELECT * FROM loans WHERE id = ?", (loan_id,)).fetchone()
+        if not loan:
+            return jsonify({"error": "대출을 찾을 수 없습니다."}), 404
+
+        name = (data.get("name") or loan["name"]).strip()
+        try:
+            principal = float(data.get("principal", loan["principal"]))
+        except (TypeError, ValueError):
+            principal = loan["principal"]
+        try:
+            current_balance = float(data.get("current_balance", loan["current_balance"]))
+        except (TypeError, ValueError):
+            current_balance = loan["current_balance"]
+        try:
+            interest_rate = float(data.get("interest_rate", loan["interest_rate"]))
+        except (TypeError, ValueError):
+            interest_rate = loan["interest_rate"]
+        try:
+            payment_day = int(data.get("payment_day", loan["payment_day"]))
+        except (TypeError, ValueError):
+            payment_day = loan["payment_day"]
+
+        conn.execute(
+            """UPDATE loans SET name=?, loan_type=?, principal=?, current_balance=?, interest_rate=?,
+               repayment_type=?, start_date=?, end_date=?, payment_day=?, memo=? WHERE id=?""",
+            (
+                name,
+                (data.get("loan_type", loan["loan_type"]) or "").strip(),
+                principal,
+                current_balance,
+                interest_rate,
+                (data.get("repayment_type", loan["repayment_type"]) or "").strip(),
+                (data.get("start_date", loan["start_date"]) or "").strip(),
+                (data.get("end_date", loan["end_date"]) or "").strip(),
+                payment_day,
+                (data.get("memo", loan["memo"]) or "").strip(),
+                loan_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/loans/<int:loan_id>", methods=["DELETE"])
+def delete_loan(loan_id):
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM loans WHERE id = ?", (loan_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/loans/<int:loan_id>/payments", methods=["POST"])
+def log_loan_payment(loan_id):
+    """상환 기록을 "이번에 얼마 갚았나"가 아니라 "상환 후 잔액이 얼마 남았나"로
+    입력받는다 - 명세서에 찍힌 숫자를 그대로 넣으면 되고, 계산해서 뺄 필요가 없다."""
+    data = request.get_json(force=True) or {}
+    conn = get_conn()
+    try:
+        loan = conn.execute("SELECT * FROM loans WHERE id = ?", (loan_id,)).fetchone()
+        if not loan:
+            return jsonify({"error": "대출을 찾을 수 없습니다."}), 404
+
+        try:
+            balance_after = float(data.get("balance_after"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "상환 후 잔액을 입력하세요."}), 400
+        if balance_after < 0:
+            return jsonify({"error": "잔액은 0 이상이어야 합니다."}), 400
+
+        paid_at = (data.get("paid_at") or "").strip()
+        try:
+            datetime.strptime(paid_at, "%Y-%m-%d")
+        except ValueError:
+            paid_at = date.today().isoformat()
+
+        memo = (data.get("memo") or "").strip()
+        amount = (loan["current_balance"] or 0) - balance_after
+
+        conn.execute(
+            "INSERT INTO loan_payments (loan_id, paid_at, amount, balance_after, memo) VALUES (?, ?, ?, ?, ?)",
+            (loan_id, paid_at, amount, balance_after, memo),
+        )
+        conn.execute("UPDATE loans SET current_balance = ? WHERE id = ?", (balance_after, loan_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/loan-payments/<int:payment_id>", methods=["DELETE"])
+def delete_loan_payment(payment_id):
+    """상환 기록을 지우면, 그 대출의 현재 잔액을 "남아있는 기록 중 가장 최근 것의
+    잔액"(기록이 하나도 없으면 원금)으로 다시 계산한다 - 중간 기록을 지워도
+    최신 기록 기준으로 항상 맞게 유지하기 위해(삭제 순서와 무관하게 안전)."""
+    conn = get_conn()
+    try:
+        payment = conn.execute("SELECT loan_id FROM loan_payments WHERE id = ?", (payment_id,)).fetchone()
+        if payment:
+            loan_id = payment["loan_id"]
+            conn.execute("DELETE FROM loan_payments WHERE id = ?", (payment_id,))
+            latest = conn.execute(
+                "SELECT balance_after FROM loan_payments WHERE loan_id = ? ORDER BY paid_at DESC, id DESC LIMIT 1",
+                (loan_id,),
+            ).fetchone()
+            if latest:
+                new_balance = latest["balance_after"]
+            else:
+                principal_row = conn.execute("SELECT principal FROM loans WHERE id = ?", (loan_id,)).fetchone()
+                new_balance = principal_row["principal"] if principal_row else 0
+            conn.execute("UPDATE loans SET current_balance = ? WHERE id = ?", (new_balance, loan_id))
         conn.commit()
     finally:
         conn.close()
