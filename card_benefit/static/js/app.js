@@ -471,7 +471,7 @@
   }
 
   // ---- 대출 목록 ----
-  let loanSort = "maturity";
+  let loanSort = "day";
   const loanSortSelect = document.getElementById("loan-sort-select");
   loanSortSelect.addEventListener("change", () => {
     loanSort = loanSortSelect.value;
@@ -870,7 +870,9 @@
     document.getElementById("recurring-category").value = item ? item.category : "";
     document.getElementById("recurring-amount").value = item ? item.amount : "";
 
-    recurringMethodOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
+    const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
+    const usedOptions = state.recurring_payments.map((r) => r.payment_method).filter(Boolean);
+    recurringMethodOptions = [...new Set([...cardOptions, ...usedOptions])];
     methodInput.value = item ? (item.payment_method || "") : "";
     methodSuggest.classList.remove("open");
 
