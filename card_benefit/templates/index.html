@@ -97,6 +97,7 @@
         <option value="maturity">만기임박순</option>
         <option value="balance">잔액 많은순</option>
         <option value="rate">금리 높은순</option>
+        <option value="day">상환일 오름차순</option>
         <option value="manual">직접 정한 순서</option>
       </select>
     </div>
@@ -118,6 +119,13 @@
         </div>
       </div>
     </section>
+    <div class="sort-row">
+      <label for="recurring-sort-select">정렬</label>
+      <select id="recurring-sort-select">
+        <option value="day">일자순</option>
+        <option value="amount">금액순</option>
+      </select>
+    </div>
     <main id="recurring-list" class="card-list">
       <p class="empty-hint" id="empty-recurring-hint">아직 등록된 고정지출이 없습니다. "고정지출 추가"를 눌러 시작하세요.</p>
     </main>
@@ -426,7 +434,7 @@
         <option value="주거/관리비">주거/관리비</option>
         <option value="통신비">통신비</option>
         <option value="보험료">보험료</option>
-        <option value="구독서비스">구독서비스</option>
+        <option value="구독">구독</option>
         <option value="교통/차량">교통/차량</option>
         <option value="교육비">교육비</option>
         <option value="마귀">마귀</option>

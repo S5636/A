@@ -262,6 +262,7 @@
       <div class="card-head">
         <div class="card-title-row">
           <span class="card-title">${escapeHtml(shortCardName(card.name))}</span>
+          ${card.last4 ? `<span class="loan-type-badge">...${escapeHtml(card.last4)}</span>` : ""}
           ${card.perf_threshold ? `<span class="perf-badge ${card.perf_met ? "met" : "unmet"}">${card.perf_met ? "실적 충족" : "실적 부족"}</span>` : ""}
         </div>
         <div class="card-actions">
@@ -485,6 +486,13 @@
       loans.sort((a, b) => (b.interest_rate || 0) - (a.interest_rate || 0));
     } else if (loanSort === "manual") {
       loans.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    } else if (loanSort === "day") {
+      loans.sort((a, b) => {
+        if (!a.payment_day && !b.payment_day) return 0;
+        if (!a.payment_day) return 1;
+        if (!b.payment_day) return -1;
+        return a.payment_day - b.payment_day;
+      });
     } else {
       // 만기임박순(기본): 만기일 없는 건 맨 뒤로
       loans.sort((a, b) => {
@@ -574,12 +582,12 @@
         </div>
       </div>
       <div class="benefit-top">
-        <span class="benefit-name">이번 달 상환 예정</span>
-        <span class="benefit-remaining remaining-warn">${dueText}</span>
+        <span class="benefit-name">이번 달 낼 금액</span>
+        <span class="benefit-remaining amount-accent">${dueText}</span>
       </div>
       <div class="benefit-top">
         <span class="benefit-name">현재 잔액</span>
-        <span class="benefit-remaining">${fmt(loan.current_balance)}원</span>
+        <span class="benefit-remaining amount-accent">${fmt(loan.current_balance)}원</span>
       </div>
       ${(!isBullet && loan.principal > 0) ? `<div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>` : ""}
       <div class="perf-row-sub">${infoLine}</div>
@@ -589,6 +597,8 @@
         <div class="benefit-buttons">
           <button class="icon-btn add-loan-payment" data-id="${loan.id}" title="상환 기록">➕</button>
           <button class="btn small toggle-loan-log" data-id="${loan.id}">내역</button>
+        </div>
+        <div class="benefit-buttons">
           <button class="icon-btn edit-loan" data-id="${loan.id}" title="대출 수정">✏️</button>
           <button class="icon-btn delete-loan" data-id="${loan.id}" title="대출 삭제">🗑️</button>
         </div>
@@ -730,6 +740,32 @@
   });
 
   // ---- 고정지출(구독/자동이체) 목록 ----
+  let recurringSort = "day";
+  const recurringSortSelect = document.getElementById("recurring-sort-select");
+  recurringSortSelect.addEventListener("change", () => {
+    recurringSort = recurringSortSelect.value;
+    render();
+  });
+
+  function sortedRecurring() {
+    const items = state.recurring_payments.slice();
+    if (recurringSort === "amount") {
+      items.sort((a, b) => (b.amount || 0) - (a.amount || 0));
+    } else {
+      items.sort((a, b) => {
+        if (!a.payment_day && !b.payment_day) return 0;
+        if (!a.payment_day) return 1;
+        if (!b.payment_day) return -1;
+        return a.payment_day - b.payment_day;
+      });
+    }
+    return items;
+  }
+
+  function fmt100(n) {
+    return fmt(Math.floor(Number(n) / 100) * 100);
+  }
+
   function renderRecurring() {
     const list = document.getElementById("recurring-list");
     const emptyHint = document.getElementById("empty-recurring-hint");
@@ -741,7 +777,7 @@
     document.getElementById("recurring-total-value").textContent = `₩${fmt(total)}`;
     document.getElementById("recurring-grand-total-value").textContent = `₩${fmt(total + loanTotal)}`;
 
-    state.recurring_payments.forEach((item) => {
+    sortedRecurring().forEach((item) => {
       const el = document.createElement("div");
       el.className = "card";
       el.id = `recurring-${item.id}`;
@@ -752,27 +788,26 @@
   }
 
   function recurringTemplate(item) {
-    const dayText = item.payment_day ? `매월 ${item.payment_day}일` : "결제일 미정";
+    const isVariable = item.category === "주거/관리비";
+    const amountText = isVariable ? fmt100(item.amount) : fmt(item.amount);
     return `
       <div class="card-head">
-        <div class="card-title-row">
+        <div class="card-head-left">
+          ${item.payment_day ? `<div class="loan-day-badge" title="매월 결제일">${item.payment_day}</div>` : ""}
           <span class="card-title-scroll"><span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.name)}</span></span>
+        </div>
+        <div class="card-head-right">
           ${item.category ? `<span class="loan-type-badge">${escapeHtml(item.category)}</span>` : ""}
           ${item.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">중단</span>`}
-        </div>
-      </div>
-      <div class="benefit-top">
-        <span class="benefit-name">${dayText}</span>
-        <span class="benefit-remaining">${fmt(item.amount)}원</span>
-      </div>
-      <div class="perf-row-sub">${item.payment_method ? escapeHtml(item.payment_method) : "결제수단 미입력"}</div>
-      ${memoToggleTemplate(`recurring-${item.id}`, item.memo)}
-      <div class="benefit-sub">
-        <div class="benefit-buttons">
           <button class="icon-btn edit-recurring" data-id="${item.id}" title="수정">✏️</button>
           <button class="icon-btn delete-recurring" data-id="${item.id}" title="삭제">🗑️</button>
         </div>
       </div>
+      <div class="benefit-top">
+        <span class="benefit-name">${item.payment_method ? escapeHtml(item.payment_method) : "결제수단 미입력"}</span>
+        <span class="benefit-remaining amount-accent">${amountText}원</span>
+      </div>
+      ${memoToggleTemplate(`recurring-${item.id}`, item.memo)}
     `;
   }
 

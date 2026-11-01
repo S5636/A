@@ -18,6 +18,7 @@
   --warning: #fab219;
   --critical: #e66767;
   --accent-pink: #ec4899;
+  --accent-purple: #b347ff;
 
   --radius-lg: 16px;
   --radius-md: 10px;
@@ -41,7 +42,7 @@ html, body {
 html { scrollbar-gutter: stable; overflow-y: scroll; }
 body { padding-bottom: 40px; }
 
-.app-shell { max-width: 720px; margin: 0 auto; padding: 16px 10px 0; }
+.app-shell { max-width: 720px; margin: 0 auto; padding: 12px 8px 0; }
 
 /* ---------- Header ---------- */
 .app-header {
@@ -63,7 +64,7 @@ body { padding-bottom: 40px; }
 .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ---------- 탭(카드/대출) ---------- */
-.view-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.view-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
 .view-tab {
   background: var(--surface);
   border: 1px solid var(--border-strong);
@@ -149,26 +150,33 @@ body { padding-bottom: 40px; }
 .card-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .empty-hint { text-align: center; color: var(--text-muted); margin-top: 60px; }
 
-.monthly-summary { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+.monthly-summary { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .summary-boxes { display: flex; gap: 8px; }
 .summary-box {
   flex: 1;
   border: 1px solid var(--border);
   border-top: 3px solid var(--accent);
   border-radius: var(--radius-md);
-  padding: 10px 10px;
+  padding: 8px 10px;
   min-width: 0;
+  box-shadow: 0 0 10px -2px var(--accent);
 }
 .summary-earn { --accent: #00f0ff; }
-.summary-cashback { --accent: #39ff14; }
+.summary-cashback { --accent: var(--accent-purple); }
 .summary-rate { --accent: #ff2bd6; }
 .summary-label { font-size: 11.5px; color: var(--text-muted); margin-bottom: 4px; }
-.summary-value { font-size: 19px; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
+.summary-value {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+  text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent);
+}
 
 .summary-jump-row { display: flex; gap: 6px; flex-wrap: wrap; }
 .jump-btn {
@@ -185,12 +193,13 @@ body { padding-bottom: 40px; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 10px 8px;
+  padding: 8px 8px;
   scroll-margin-top: 84px; /* 상단 고정 헤더에 카드 제목이 가려지지 않게 */
 }
 
-.card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
 .card-head-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.card-head-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .card-title-row { display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 0; }
 .card-title-scroll {
   flex: 1 1 auto;
@@ -207,10 +216,12 @@ body { padding-bottom: 40px; }
   font-size: 26px;
   font-weight: 800;
   line-height: 1;
-  color: var(--series-1);
+  color: var(--accent-purple);
+  text-shadow: 0 0 10px rgba(179,71,255,0.5);
   min-width: 32px;
   text-align: center;
 }
+.amount-accent { color: var(--accent-purple) !important; }
 .card-title { font-size: 15.5px; font-weight: 700; color: var(--text-primary); }
 .card-issuer { font-size: 12px; color: var(--text-muted); }
 .card-cycle { font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
@@ -250,13 +261,13 @@ body { padding-bottom: 40px; }
 }
 .memo-text.open { display: block; }
 
-.benefit-list { display: flex; flex-direction: column; gap: 7px; margin-top: 7px; }
+.benefit-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 
 .benefit {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 8px 8px;
+  padding: 6px 8px;
 }
 
 .benefit-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -294,7 +305,7 @@ body { padding-bottom: 40px; }
   margin-left: 2px;
 }
 
-.benefit-sub { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; font-size: 11.5px; color: var(--text-muted); }
+.benefit-sub { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: 11.5px; color: var(--text-muted); }
 .benefit-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .add-benefit-row { margin-top: 12px; }
