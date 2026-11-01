@@ -3,7 +3,6 @@
 :root {
   color-scheme: dark;
   --bg: #0a0f1c;
-  --bg-grad: radial-gradient(circle at 15% -10%, #14203a 0%, #0a0f1c 45%), #0a0f1c;
   --surface: #121a2c;
   --surface-2: #182238;
   --surface-3: #1e2a44;
@@ -33,7 +32,7 @@ html, body {
   margin: 0;
   padding: 0;
   min-height: 100%;
-  background: var(--bg-grad);
+  background: var(--bg);
   color: var(--text-primary);
   font-family: var(--font);
   font-size: 14px;
