@@ -842,12 +842,11 @@
     document.getElementById("recurring-category").value = item ? item.category : "";
     document.getElementById("recurring-amount").value = item ? item.amount : "";
 
-    const methodSelect = document.getElementById("recurring-method");
-    const current = item ? (item.payment_method || "") : "";
+    const methodInput = document.getElementById("recurring-method");
+    const methodList = document.getElementById("recurring-method-list");
     const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
-    const allOptions = cardOptions.includes(current) || !current ? cardOptions : [current, ...cardOptions];
-    methodSelect.innerHTML = allOptions.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("");
-    methodSelect.value = current || (cardOptions[0] || "");
+    methodList.innerHTML = cardOptions.map((o) => `<option value="${escapeHtml(o)}"></option>`).join("");
+    methodInput.value = item ? (item.payment_method || "") : "";
 
     document.getElementById("recurring-day").value = item && item.payment_day ? item.payment_day : "";
     document.getElementById("recurring-active").checked = item ? !!item.active : true;
