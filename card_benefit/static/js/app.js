@@ -850,17 +850,25 @@
     methodSuggest.innerHTML = matches.map((o) => `<div class="suggest-item">${escapeHtml(o)}</div>`).join("");
     methodSuggest.classList.add("open");
   }
-  methodInput.addEventListener("focus", renderMethodSuggestions);
-  methodInput.addEventListener("input", renderMethodSuggestions);
-  methodInput.addEventListener("blur", () => {
-    setTimeout(() => methodSuggest.classList.remove("open"), 150);
+  let suppressFocusReopen = false;
+  methodInput.addEventListener("focus", () => {
+    if (suppressFocusReopen) return;
+    renderMethodSuggestions();
   });
-  methodSuggest.addEventListener("mousedown", (e) => {
+  methodInput.addEventListener("input", renderMethodSuggestions);
+  methodSuggest.addEventListener("click", (e) => {
     const item = e.target.closest(".suggest-item");
     if (!item) return;
-    e.preventDefault();
     methodInput.value = item.textContent;
     methodSuggest.classList.remove("open");
+    // 선택 직후 터치 기기에서 input이 다시 focus되면서 목록이 바로 재오픈되는 것을 방지
+    suppressFocusReopen = true;
+    setTimeout(() => { suppressFocusReopen = false; }, 400);
+  });
+  document.addEventListener("click", (e) => {
+    if (e.target !== methodInput && !methodSuggest.contains(e.target)) {
+      methodSuggest.classList.remove("open");
+    }
   });
 
   function openRecurringModal(item) {
@@ -870,9 +878,20 @@
     document.getElementById("recurring-category").value = item ? item.category : "";
     document.getElementById("recurring-amount").value = item ? item.amount : "";
 
+    const baseName = (s) => s.replace(/\([^)]*\)\s*$/, "").trim().toLowerCase();
     const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
-    const usedOptions = state.recurring_payments.map((r) => r.payment_method).filter(Boolean);
-    recurringMethodOptions = [...new Set([...cardOptions, ...usedOptions])];
+    const cardBases = new Set(cardOptions.map(baseName));
+    const usedOptions = state.recurring_payments
+      .map((r) => (r.payment_method || "").trim())
+      .filter((o) => o && !cardBases.has(baseName(o))); // 카드탭 항목과 이름만 같고 뒷자리만 빠진 중복 제거
+    const seen = new Set();
+    recurringMethodOptions = [];
+    for (const o of [...cardOptions, ...usedOptions]) {
+      const key = o.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      recurringMethodOptions.push(o);
+    }
     methodInput.value = item ? (item.payment_method || "") : "";
     methodSuggest.classList.remove("open");
 

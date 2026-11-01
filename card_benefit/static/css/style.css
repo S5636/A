@@ -417,7 +417,17 @@ body { padding-bottom: 40px; }
 .modal small { color: var(--text-muted); font-size: 11px; font-weight: 400; }
 
 .suggest-wrap { position: relative; }
-.suggest-wrap input { width: 100%; }
+.suggest-wrap input { width: 100%; padding-right: 30px; }
+.suggest-wrap::after {
+  content: "▾";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+  font-size: 11px;
+}
 .suggest-list {
   display: none;
   position: absolute;
