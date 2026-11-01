@@ -568,13 +568,9 @@
           ${loan.payment_day ? `<div class="loan-day-badge" title="매월 상환일">${loan.payment_day}</div>` : ""}
           ${reorderHtml}
           <div class="card-title-row">
-            <span class="card-title">${escapeHtml(loan.name)}</span>
+            <span class="card-title-scroll"><span class="card-title">${escapeHtml(loan.name)}</span></span>
             ${loan.loan_type ? `<span class="loan-type-badge">${escapeHtml(loan.loan_type)}</span>` : ""}
           </div>
-        </div>
-        <div class="card-actions">
-          <button class="icon-btn edit-loan" data-id="${loan.id}" title="대출 수정">✏️</button>
-          <button class="icon-btn delete-loan" data-id="${loan.id}" title="대출 삭제">🗑️</button>
         </div>
       </div>
       <div class="benefit-top">
@@ -593,6 +589,8 @@
         <div class="benefit-buttons">
           <button class="icon-btn add-loan-payment" data-id="${loan.id}" title="상환 기록">➕</button>
           <button class="btn small toggle-loan-log" data-id="${loan.id}">내역</button>
+          <button class="icon-btn edit-loan" data-id="${loan.id}" title="대출 수정">✏️</button>
+          <button class="icon-btn delete-loan" data-id="${loan.id}" title="대출 삭제">🗑️</button>
         </div>
       </div>
       <div class="log-list ${logsOpen ? "open" : ""}" data-log-for="${logKey}">${logsHtml}</div>
@@ -741,7 +739,6 @@
     const total = state.recurring_payments.filter((r) => r.active).reduce((sum, r) => sum + (r.amount || 0), 0);
     const loanTotal = state.loans.filter((l) => l.due_this_month).reduce((sum, l) => sum + (l.monthly_payment || 0), 0);
     document.getElementById("recurring-total-value").textContent = `₩${fmt(total)}`;
-    document.getElementById("recurring-loan-total-value").textContent = `₩${fmt(loanTotal)}`;
     document.getElementById("recurring-grand-total-value").textContent = `₩${fmt(total + loanTotal)}`;
 
     state.recurring_payments.forEach((item) => {
@@ -759,13 +756,9 @@
     return `
       <div class="card-head">
         <div class="card-title-row">
-          <span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.name)}</span>
+          <span class="card-title-scroll"><span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.name)}</span></span>
           ${item.category ? `<span class="loan-type-badge">${escapeHtml(item.category)}</span>` : ""}
           ${item.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">중단</span>`}
-        </div>
-        <div class="card-actions">
-          <button class="icon-btn edit-recurring" data-id="${item.id}" title="수정">✏️</button>
-          <button class="icon-btn delete-recurring" data-id="${item.id}" title="삭제">🗑️</button>
         </div>
       </div>
       <div class="benefit-top">
@@ -774,6 +767,12 @@
       </div>
       <div class="perf-row-sub">${item.payment_method ? escapeHtml(item.payment_method) : "결제수단 미입력"}</div>
       ${memoToggleTemplate(`recurring-${item.id}`, item.memo)}
+      <div class="benefit-sub">
+        <div class="benefit-buttons">
+          <button class="icon-btn edit-recurring" data-id="${item.id}" title="수정">✏️</button>
+          <button class="icon-btn delete-recurring" data-id="${item.id}" title="삭제">🗑️</button>
+        </div>
+      </div>
     `;
   }
 
