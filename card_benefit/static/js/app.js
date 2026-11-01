@@ -552,7 +552,9 @@
     ].filter(Boolean).join(" · ");
     const dueText = loan.due_this_month
       ? (loan.monthly_payment ? fmt(loan.monthly_payment) + "원" : "미입력")
-      : "이번 달 해당 없음";
+      : "당월 해당 없음";
+    const quarterMonths = (loan.payment_months || "").split(",").map((m) => m.trim()).filter(Boolean);
+    const isMaturingSoon = loan.days_left != null && loan.days_left <= 30;
 
     const logsHtml = loan.payments.length
       ? loan.payments.map((p) => `
@@ -576,18 +578,19 @@
           ${loan.payment_day ? `<div class="loan-day-badge" title="매월 상환일">${loan.payment_day}</div>` : ""}
           ${reorderHtml}
           <div class="card-title-row">
-            <span class="card-title-scroll"><span class="card-title">${escapeHtml(loan.name)}</span></span>
+            <span class="card-title-scroll"><span class="card-title" style="${isMaturingSoon ? "color:var(--critical);" : ""}">${escapeHtml(loan.name)}</span></span>
             ${loan.loan_type ? `<span class="loan-type-badge">${escapeHtml(loan.loan_type)}</span>` : ""}
+            ${quarterMonths.length ? `<span class="loan-type-badge" style="color:var(--accent-purple);background:rgba(179,71,255,0.14);">분기납(${quarterMonths.join(",")}월)</span>` : ""}
           </div>
         </div>
       </div>
       <div class="benefit-top">
-        <span class="benefit-name">이번 달 낼 금액</span>
+        <span class="benefit-name">당월 낼 금액</span>
         <span class="benefit-remaining amount-accent">${dueText}</span>
       </div>
       <div class="benefit-top">
         <span class="benefit-name">현재 잔액</span>
-        <span class="benefit-remaining amount-accent">${fmt(loan.current_balance)}원</span>
+        <span class="benefit-remaining">${fmt(loan.current_balance)}원</span>
       </div>
       ${(!isBullet && loan.principal > 0) ? `<div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>` : ""}
       <div class="perf-row-sub">${infoLine}</div>
@@ -838,7 +841,14 @@
     document.getElementById("recurring-name").value = item ? item.name : "";
     document.getElementById("recurring-category").value = item ? item.category : "";
     document.getElementById("recurring-amount").value = item ? item.amount : "";
-    document.getElementById("recurring-method").value = item ? item.payment_method : "";
+
+    const methodSelect = document.getElementById("recurring-method");
+    const current = item ? (item.payment_method || "") : "";
+    const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(...${c.last4})` : ""}`);
+    const allOptions = cardOptions.includes(current) || !current ? cardOptions : [current, ...cardOptions];
+    methodSelect.innerHTML = allOptions.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("");
+    methodSelect.value = current || (cardOptions[0] || "");
+
     document.getElementById("recurring-day").value = item && item.payment_day ? item.payment_day : "";
     document.getElementById("recurring-active").checked = item ? !!item.active : true;
     document.getElementById("recurring-memo").value = item ? item.memo : "";

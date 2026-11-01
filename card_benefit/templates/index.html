@@ -86,7 +86,7 @@
           <div class="summary-value" id="loan-total-balance-value">0원</div>
         </div>
         <div class="summary-box summary-cashback">
-          <div class="summary-label">이번 달 낼 금액 합계</div>
+          <div class="summary-label">당월 낼 금액 합계</div>
           <div class="summary-value" id="loan-total-monthly-value">0원</div>
         </div>
       </div>
@@ -114,7 +114,7 @@
           <div class="summary-value" id="recurring-total-value">0원</div>
         </div>
         <div class="summary-box summary-cashback">
-          <div class="summary-label">이번 달 낼 금액 합계</div>
+          <div class="summary-label">당월 낼 금액 합계</div>
           <div class="summary-value" id="recurring-grand-total-value">0원</div>
         </div>
       </div>
@@ -438,6 +438,7 @@
         <option value="교통/차량">교통/차량</option>
         <option value="교육비">교육비</option>
         <option value="마귀">마귀</option>
+        <option value="저축/적금">저축/적금</option>
         <option value="회비/멤버십">회비/멤버십</option>
         <option value="기타">기타</option>
       </select>
@@ -446,7 +447,7 @@
       <input type="number" id="recurring-amount" min="0" step="1" placeholder="예: 17000">
     </label>
     <label>결제수단
-      <input type="text" id="recurring-method" placeholder="예: 신한카드 더모아, 현금, 국민은행 계좌">
+      <select id="recurring-method"></select>
     </label>
     <label>매월 결제일 (선택)
       <input type="number" id="recurring-day" min="0" max="31" placeholder="예: 5">
