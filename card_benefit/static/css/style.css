@@ -61,11 +61,12 @@ body { padding-bottom: 40px; }
 }
 .app-title { display: flex; align-items: baseline; gap: 10px; }
 .app-title h1 { font-size: 19px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+.app-subtitle { font-size: 11px; color: var(--text-muted); }
 
 .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ---------- 탭(카드/대출) ---------- */
-.view-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+.view-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
 .view-tab {
   background: var(--surface);
   border: 1px solid var(--border-strong);
