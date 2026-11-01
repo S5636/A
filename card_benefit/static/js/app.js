@@ -262,7 +262,7 @@
       <div class="card-head">
         <div class="card-title-row">
           <span class="card-title">${escapeHtml(shortCardName(card.name))}</span>
-          ${card.last4 ? `<span class="loan-type-badge">...${escapeHtml(card.last4)}</span>` : ""}
+          ${card.last4 ? `<span class="loan-type-badge">${escapeHtml(card.last4)}</span>` : ""}
           ${card.perf_threshold ? `<span class="perf-badge ${card.perf_met ? "met" : "unmet"}">${card.perf_met ? "실적 충족" : "실적 부족"}</span>` : ""}
         </div>
         <div class="card-actions">
@@ -585,7 +585,7 @@
         </div>
       </div>
       <div class="benefit-top">
-        <span class="benefit-name">당월 낼 금액</span>
+        <span class="benefit-name">당월 상환 금액</span>
         <span class="benefit-remaining amount-accent">${dueText}</span>
       </div>
       <div class="benefit-top">
@@ -844,7 +844,7 @@
 
     const methodSelect = document.getElementById("recurring-method");
     const current = item ? (item.payment_method || "") : "";
-    const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(...${c.last4})` : ""}`);
+    const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
     const allOptions = cardOptions.includes(current) || !current ? cardOptions : [current, ...cardOptions];
     methodSelect.innerHTML = allOptions.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("");
     methodSelect.value = current || (cardOptions[0] || "");
