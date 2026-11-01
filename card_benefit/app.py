@@ -150,9 +150,17 @@ def serialize_full():
             "inbox": serialize_inbox(conn),
             "no_benefit": serialize_no_benefit(conn),
             "loans": serialize_loans(conn),
+            "recurring_payments": serialize_recurring_payments(conn),
         }
     finally:
         conn.close()
+
+
+def serialize_recurring_payments(conn):
+    rows = conn.execute(
+        "SELECT * FROM recurring_payments ORDER BY payment_day ASC, sort_order ASC, id ASC"
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def serialize_loans(conn):
@@ -667,6 +675,98 @@ def delete_loan_payment(payment_id):
                 principal_row = conn.execute("SELECT principal FROM loans WHERE id = ?", (loan_id,)).fetchone()
                 new_balance = principal_row["principal"] if principal_row else 0
             conn.execute("UPDATE loans SET current_balance = ? WHERE id = ?", (new_balance, loan_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+# ---- 고정지출(구독/자동이체) ----
+
+
+@app.route("/api/recurring", methods=["POST"])
+def create_recurring_payment():
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "이름을 입력하세요."}), 400
+    try:
+        amount = float(data.get("amount") or 0)
+    except (TypeError, ValueError):
+        amount = 0
+    try:
+        payment_day = int(data.get("payment_day") or 0)
+    except (TypeError, ValueError):
+        payment_day = 0
+
+    conn = get_conn()
+    try:
+        max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM recurring_payments").fetchone()["m"]
+        conn.execute(
+            """INSERT INTO recurring_payments (name, category, amount, payment_method, payment_day, active, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                name,
+                (data.get("category") or "").strip(),
+                amount,
+                (data.get("payment_method") or "").strip(),
+                payment_day,
+                1 if data.get("active", True) else 0,
+                (data.get("memo") or "").strip(),
+                max_order + 1,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/recurring/<int:item_id>", methods=["PUT"])
+def update_recurring_payment(item_id):
+    data = request.get_json(force=True) or {}
+    conn = get_conn()
+    try:
+        item = conn.execute("SELECT * FROM recurring_payments WHERE id = ?", (item_id,)).fetchone()
+        if not item:
+            return jsonify({"error": "항목을 찾을 수 없습니다."}), 404
+
+        name = (data.get("name") or item["name"]).strip()
+        try:
+            amount = float(data.get("amount", item["amount"]))
+        except (TypeError, ValueError):
+            amount = item["amount"]
+        try:
+            payment_day = int(data.get("payment_day", item["payment_day"]))
+        except (TypeError, ValueError):
+            payment_day = item["payment_day"]
+        active = 1 if data.get("active", bool(item["active"])) else 0
+
+        conn.execute(
+            """UPDATE recurring_payments SET name=?, category=?, amount=?, payment_method=?,
+               payment_day=?, active=?, memo=? WHERE id=?""",
+            (
+                name,
+                (data.get("category", item["category"]) or "").strip(),
+                amount,
+                (data.get("payment_method", item["payment_method"]) or "").strip(),
+                payment_day,
+                active,
+                (data.get("memo", item["memo"]) or "").strip(),
+                item_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/recurring/<int:item_id>", methods=["DELETE"])
+def delete_recurring_payment(item_id):
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM recurring_payments WHERE id = ?", (item_id,))
         conn.commit()
     finally:
         conn.close()

@@ -116,6 +116,21 @@ CREATE TABLE IF NOT EXISTS loan_payments (
     memo TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+-- 구독/자동이체 등 매달 고정으로 나가는 지출. 대출처럼 잔액 추적이 필요 없고
+-- "뭐가, 얼마씩, 뭘로, 며칠에 나가는지"만 등록해두고 한 달 합계를 보는 용도.
+CREATE TABLE IF NOT EXISTS recurring_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    category TEXT DEFAULT '',           -- 구독/자동이체/기타 등 자유 입력
+    amount REAL NOT NULL DEFAULT 0,
+    payment_method TEXT DEFAULT '',     -- 예: '신한카드 더모아', '현금', '국민은행 자동이체'
+    payment_day INTEGER NOT NULL DEFAULT 0,  -- 매월 며칠(1~31, 0=미정)
+    active INTEGER NOT NULL DEFAULT 1,  -- 0이면 해지/중단했지만 기록은 남겨둔 것
+    memo TEXT DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
 """
 
 

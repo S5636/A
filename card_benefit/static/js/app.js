@@ -10,7 +10,7 @@
 
   const CARD_COLORS = ["#a78bfa", "#ec4899", "#fab219", "#22c55e", "#3987e5", "#f97316"];
 
-  let state = { cards: [], inbox: [], no_benefit: [], loans: [] };
+  let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [] };
   let noBenefitOpen = false;
   const openLogPanels = new Set(); // benefit id 목록 - 펼쳐진 사용내역 기억
   const openMemoPanels = new Set(); // "card-1", "benefit-3" 같은 키 - 펼쳐진 설명 기억
@@ -96,19 +96,24 @@
     renderCards();
     renderMonthlySummary();
     renderLoans();
+    renderRecurring();
     requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
   }
 
-  // ---- 탭(카드/대출) ----
+  // ---- 탭(카드/대출/고정지출) ----
+  const VIEW_NAMES = ["card", "loan", "recurring"];
   let activeView = "card";
+  function applyActiveView() {
+    document.querySelectorAll(".view-tab").forEach((b) => b.classList.toggle("active", b.dataset.view === activeView));
+    VIEW_NAMES.forEach((v) => {
+      document.getElementById(`${v}-view`).style.display = activeView === v ? "" : "none";
+      document.querySelectorAll(`.view-only-${v}`).forEach((el) => el.style.display = activeView === v ? "" : "none");
+    });
+  }
   document.querySelectorAll(".view-tab").forEach((btn) =>
     btn.addEventListener("click", () => {
       activeView = btn.dataset.view;
-      document.querySelectorAll(".view-tab").forEach((b) => b.classList.toggle("active", b === btn));
-      document.getElementById("card-view").style.display = activeView === "card" ? "" : "none";
-      document.getElementById("loan-view").style.display = activeView === "loan" ? "" : "none";
-      document.querySelectorAll(".view-only-card").forEach((el) => el.style.display = activeView === "card" ? "" : "none");
-      document.querySelectorAll(".view-only-loan").forEach((el) => el.style.display = activeView === "loan" ? "" : "none");
+      applyActiveView();
     })
   );
 
@@ -640,6 +645,106 @@
     render();
   });
 
+  // ---- 고정지출(구독/자동이체) 목록 ----
+  function renderRecurring() {
+    const list = document.getElementById("recurring-list");
+    const emptyHint = document.getElementById("empty-recurring-hint");
+    list.querySelectorAll(".card").forEach((el) => el.remove());
+    emptyHint.style.display = state.recurring_payments.length ? "none" : "block";
+
+    const total = state.recurring_payments.filter((r) => r.active).reduce((sum, r) => sum + (r.amount || 0), 0);
+    document.getElementById("recurring-total-value").textContent = `${fmt(total)}원`;
+
+    state.recurring_payments.forEach((item) => {
+      const el = document.createElement("div");
+      el.className = "card";
+      el.id = `recurring-${item.id}`;
+      el.innerHTML = recurringTemplate(item);
+      list.appendChild(el);
+      wireRecurring(el, item);
+    });
+  }
+
+  function recurringTemplate(item) {
+    const dayText = item.payment_day ? `매월 ${item.payment_day}일` : "결제일 미정";
+    return `
+      <div class="card-head">
+        <div class="card-title-row">
+          <span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.name)}</span>
+          ${item.category ? `<span class="loan-type-badge">${escapeHtml(item.category)}</span>` : ""}
+          ${item.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">중단</span>`}
+        </div>
+        <div class="card-actions">
+          <button class="icon-btn edit-recurring" data-id="${item.id}" title="수정">✏️</button>
+          <button class="icon-btn delete-recurring" data-id="${item.id}" title="삭제">🗑️</button>
+        </div>
+      </div>
+      <div class="benefit-top">
+        <span class="benefit-name">${dayText}</span>
+        <span class="benefit-remaining">${fmt(item.amount)}원</span>
+      </div>
+      <div class="perf-row-sub">${item.payment_method ? escapeHtml(item.payment_method) : "결제수단 미입력"}</div>
+      ${memoToggleTemplate(`recurring-${item.id}`, item.memo)}
+    `;
+  }
+
+  function wireRecurring(el, item) {
+    el.querySelector(".edit-recurring").addEventListener("click", () => openRecurringModal(item));
+    el.querySelector(".delete-recurring").addEventListener("click", async () => {
+      if (!confirm(`"${item.name}"을(를) 삭제할까요?`)) return;
+      state = await api(`/api/recurring/${item.id}`, { method: "DELETE" });
+      render();
+    });
+    el.querySelectorAll(".memo-toggle").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.memoKey;
+        if (openMemoPanels.has(key)) openMemoPanels.delete(key);
+        else openMemoPanels.add(key);
+        render();
+      })
+    );
+  }
+
+  // ---- 고정지출 추가/수정 모달 ----
+  const recurringModal = document.getElementById("recurring-modal");
+  let editingRecurringId = null;
+
+  function openRecurringModal(item) {
+    editingRecurringId = item ? item.id : null;
+    document.getElementById("recurring-modal-title").textContent = item ? "고정지출 수정" : "고정지출 추가";
+    document.getElementById("recurring-name").value = item ? item.name : "";
+    document.getElementById("recurring-category").value = item ? item.category : "";
+    document.getElementById("recurring-amount").value = item ? item.amount : "";
+    document.getElementById("recurring-method").value = item ? item.payment_method : "";
+    document.getElementById("recurring-day").value = item && item.payment_day ? item.payment_day : "";
+    document.getElementById("recurring-active").checked = item ? !!item.active : true;
+    document.getElementById("recurring-memo").value = item ? item.memo : "";
+    recurringModal.classList.add("open");
+  }
+  document.getElementById("btn-add-recurring").addEventListener("click", () => openRecurringModal(null));
+  document.getElementById("recurring-cancel").addEventListener("click", () => recurringModal.classList.remove("open"));
+  document.getElementById("recurring-save").addEventListener("click", async () => {
+    const payload = {
+      name: document.getElementById("recurring-name").value.trim(),
+      category: document.getElementById("recurring-category").value.trim(),
+      amount: document.getElementById("recurring-amount").value || 0,
+      payment_method: document.getElementById("recurring-method").value.trim(),
+      payment_day: document.getElementById("recurring-day").value || 0,
+      active: document.getElementById("recurring-active").checked,
+      memo: document.getElementById("recurring-memo").value.trim(),
+    };
+    if (!payload.name) { alert("이름을 입력하세요."); return; }
+    const url = editingRecurringId ? `/api/recurring/${editingRecurringId}` : "/api/recurring";
+    const method = editingRecurringId ? "PUT" : "POST";
+    state = await api(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    recurringModal.classList.remove("open");
+    render();
+  });
+
   // ---- 카드 모달 ----
   const cardModal = document.getElementById("card-modal");
   let editingCardId = null;
@@ -1136,7 +1241,7 @@
     importFile.value = "";
   });
 
-  [cardModal, benefitModal, useModal, assignModal, webhookModal, perfModal, loanModal, loanPaymentModal].forEach((modal) => {
+  [cardModal, benefitModal, useModal, assignModal, webhookModal, perfModal, loanModal, loanPaymentModal, recurringModal].forEach((modal) => {
     modal.addEventListener("click", (e) => {
       if (e.target === modal) modal.classList.remove("open");
     });
