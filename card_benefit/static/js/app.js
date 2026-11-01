@@ -515,6 +515,8 @@
       `₩${fmt(state.loans.reduce((sum, l) => sum + (l.current_balance || 0), 0))}`;
     document.getElementById("loan-total-monthly-value").textContent =
       `₩${fmt(state.loans.filter((l) => l.due_this_month).reduce((sum, l) => sum + (l.monthly_payment || 0), 0))}`;
+    document.getElementById("loan-unpaid-total").textContent =
+      `미체크 ₩${fmt(state.loans.filter((l) => l.due_this_month && !l.paid_this_month).reduce((sum, l) => sum + (l.monthly_payment || 0), 0))}`;
 
     const loans = sortedLoans();
     loans.forEach((loan, idx) => {
@@ -583,7 +585,10 @@
         </div>
       </div>
       <div class="benefit-top">
-        <span class="benefit-name">당월 상환 금액</span>
+        <span class="benefit-name">
+          ${loan.due_this_month ? `<input type="checkbox" class="loan-paid-check" data-id="${loan.id}" ${loan.paid_this_month ? "checked" : ""}>` : ""}
+          당월 상환 금액
+        </span>
         <span class="benefit-remaining amount-accent">${dueText}</span>
       </div>
       <div class="benefit-top">
@@ -615,6 +620,17 @@
       render();
     });
     el.querySelector(".add-loan-payment").addEventListener("click", () => openLoanPaymentModal(loan));
+    const paidCheck = el.querySelector(".loan-paid-check");
+    if (paidCheck) {
+      paidCheck.addEventListener("change", async () => {
+        state = await api(`/api/loans/${loan.id}/paid-check`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ checked: paidCheck.checked }),
+        });
+        render();
+      });
+    }
     el.querySelector(".toggle-loan-log").addEventListener("click", () => {
       const key = `loan-${loan.id}`;
       if (openLogPanels.has(key)) openLogPanels.delete(key);

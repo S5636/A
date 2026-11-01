@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS loans (
     monthly_payment REAL NOT NULL DEFAULT 0,  -- 상환 시 실제로 내는 금액(원금+이자, 직접 입력 - 상환방식별 자동계산은 안 함)
     payment_months TEXT DEFAULT '',  -- 매달이 아니라 특정 달에만 내면 '1,4,7,10'처럼 쉼표구분 월 목록. 비어있으면 매달.
     withdrawal_account TEXT DEFAULT '',  -- 대출금이 빠져나가는 계좌/카드 (뒤 4자리 포함해서 표기)
+    paid_check_month TEXT DEFAULT '',  -- 이번 달 상환 체크한 'YYYY-MM' (매달 자동으로 초기화됨)
     memo TEXT DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -174,6 +175,7 @@ def init_db():
         _ensure_column(conn, "loans", "monthly_payment", "monthly_payment REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "loans", "payment_months", "payment_months TEXT DEFAULT ''")
         _ensure_column(conn, "loans", "withdrawal_account", "withdrawal_account TEXT DEFAULT ''")
+        _ensure_column(conn, "loans", "paid_check_month", "paid_check_month TEXT DEFAULT ''")
         conn.commit()
     finally:
         conn.close()

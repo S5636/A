@@ -189,6 +189,8 @@ def serialize_loans(conn):
         # payment_months에 그 달들이 들어있다. 비어있으면 매달 내는 걸로 본다.
         payment_months = [m.strip() for m in (loan["payment_months"] or "").split(",") if m.strip()]
         due_this_month = (not payment_months) or (str(date.today().month) in payment_months)
+        current_ym = date.today().strftime("%Y-%m")
+        paid_this_month = loan["paid_check_month"] == current_ym
 
         result.append({
             "id": loan["id"],
@@ -205,6 +207,7 @@ def serialize_loans(conn):
             "payment_months": loan["payment_months"],
             "due_this_month": due_this_month,
             "withdrawal_account": loan["withdrawal_account"],
+            "paid_this_month": paid_this_month,
             "memo": loan["memo"],
             "percent_paid": percent_paid,
             "days_left": days_left,
@@ -630,6 +633,21 @@ def update_loan(loan_id):
                 loan_id,
             ),
         )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/loans/<int:loan_id>/paid-check", methods=["PUT"])
+def toggle_loan_paid_check(loan_id):
+    """이번 달 상환했는지 체크/해제. 월이 바뀌면 자동으로 다시 미체크 상태가 된다."""
+    data = request.get_json(force=True) or {}
+    checked = bool(data.get("checked"))
+    conn = get_conn()
+    try:
+        value = date.today().strftime("%Y-%m") if checked else ""
+        conn.execute("UPDATE loans SET paid_check_month=? WHERE id=?", (value, loan_id))
         conn.commit()
     finally:
         conn.close()
