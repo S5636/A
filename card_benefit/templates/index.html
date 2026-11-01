@@ -108,9 +108,17 @@
   <div id="recurring-view" style="display:none;">
     <section class="monthly-summary">
       <div class="summary-boxes">
-        <div class="summary-box summary-rate">
-          <div class="summary-label">매달 고정지출 합계</div>
+        <div class="summary-box summary-earn">
+          <div class="summary-label">구독/자동이체 합계</div>
           <div class="summary-value" id="recurring-total-value">0원</div>
+        </div>
+        <div class="summary-box summary-cashback">
+          <div class="summary-label">대출상환 합계</div>
+          <div class="summary-value" id="recurring-loan-total-value">0원</div>
+        </div>
+        <div class="summary-box summary-rate">
+          <div class="summary-label">이번 달 총 고정지출</div>
+          <div class="summary-value" id="recurring-grand-total-value">0원</div>
         </div>
       </div>
     </section>
@@ -409,8 +417,17 @@
     <label>이름
       <input type="text" id="recurring-name" placeholder="예: 넷플릭스, 아파트관리비">
     </label>
-    <label>종류 (선택)
-      <input type="text" id="recurring-category" placeholder="예: 구독, 자동이체">
+    <label>카테고리
+      <select id="recurring-category">
+        <option value="">카테고리 선택</option>
+        <option value="주거/관리비">주거/관리비</option>
+        <option value="통신비">통신비</option>
+        <option value="보험료">보험료</option>
+        <option value="구독서비스">구독서비스</option>
+        <option value="교육비">교육비</option>
+        <option value="회비/멤버십">회비/멤버십</option>
+        <option value="기타">기타</option>
+      </select>
     </label>
     <label>금액 (원)
       <input type="number" id="recurring-amount" min="0" step="1" placeholder="예: 17000">

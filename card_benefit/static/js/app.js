@@ -718,7 +718,10 @@
     emptyHint.style.display = state.recurring_payments.length ? "none" : "block";
 
     const total = state.recurring_payments.filter((r) => r.active).reduce((sum, r) => sum + (r.amount || 0), 0);
+    const loanTotal = state.loans.reduce((sum, l) => sum + (l.monthly_payment || 0), 0);
     document.getElementById("recurring-total-value").textContent = `${fmt(total)}원`;
+    document.getElementById("recurring-loan-total-value").textContent = `${fmt(loanTotal)}원`;
+    document.getElementById("recurring-grand-total-value").textContent = `${fmt(total + loanTotal)}원`;
 
     state.recurring_payments.forEach((item) => {
       const el = document.createElement("div");
