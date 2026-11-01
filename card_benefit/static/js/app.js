@@ -540,13 +540,13 @@
     const ddayText = loan.days_left != null
       ? (loan.days_left >= 0 ? ` (D-${loan.days_left})` : ` (${fmt(Math.abs(loan.days_left))}일 지남)`)
       : "";
-    const infoLine = [
-      `원금 ${fmt(loan.principal)}원`,
+    const balanceLine = [
       (!isBullet && loan.principal > 0) ? `${percent}% 상환` : "",
+      `${fmt(loan.current_balance)}/${fmt(loan.principal)}원`,
+    ].filter(Boolean).join(" · ");
+    const infoLine = [
       loan.interest_rate ? `금리 ${loan.interest_rate}%` : "",
       loan.repayment_type ? escapeHtml(shortRepayType(loan.repayment_type)) : "",
-    ].filter(Boolean).join(" · ");
-    const infoLine2 = [
       loan.end_date ? `만기 ${loan.end_date}${ddayText}` : "",
       loan.withdrawal_account ? `출금 ${escapeHtml(loan.withdrawal_account)}` : "",
     ].filter(Boolean).join(" · ");
@@ -588,13 +588,9 @@
         <span class="benefit-name">당월 상환 금액</span>
         <span class="benefit-remaining amount-accent">${dueText}</span>
       </div>
-      <div class="benefit-top">
-        <span class="benefit-name">현재 잔액</span>
-        <span class="benefit-remaining">${fmt(loan.current_balance)}원</span>
-      </div>
+      <div class="perf-row-sub">${balanceLine}</div>
       ${(!isBullet && loan.principal > 0) ? `<div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>` : ""}
       <div class="perf-row-sub">${infoLine}</div>
-      ${infoLine2 ? `<div class="perf-row-sub">${infoLine2}</div>` : ""}
       ${memoToggleTemplate(logKey, loan.memo)}
       <div class="benefit-sub">
         <div class="benefit-buttons">
