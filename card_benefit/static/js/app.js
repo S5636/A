@@ -858,10 +858,17 @@
   }
   function buildMethodOptions() {
     const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
-    const cardBases = new Set(cardOptions.map(methodBaseName));
+    const cardBases = cardOptions.map(methodBaseName);
     const usedOptions = state.recurring_payments
       .map((r) => (r.payment_method || "").trim())
-      .filter((o) => o && !cardBases.has(methodBaseName(o))); // 카드탭 항목과 이름만 같고 뒷자리만 빠진 중복 제거
+      .filter((o) => {
+        if (!o) return false;
+        const ob = methodBaseName(o);
+        if (ob.length < 2) return true;
+        // 카드탭 항목과 "신한" 접두어 유무, 뒷자리 유무만 다르고 실질적으로 같은 카드를
+        // 가리키는 값은(부분 문자열로 포함되면) 중복으로 보고 제외
+        return !cardBases.some((cb) => cb.includes(ob) || ob.includes(cb));
+      });
     const seen = new Set();
     const result = [];
     for (const o of [...cardOptions, ...usedOptions]) {
