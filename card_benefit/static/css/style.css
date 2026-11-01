@@ -416,41 +416,6 @@ body { padding-bottom: 40px; }
 
 .modal small { color: var(--text-muted); font-size: 11px; font-weight: 400; }
 
-.suggest-wrap { position: relative; }
-.suggest-wrap input { width: 100%; padding-right: 30px; }
-.suggest-wrap::after {
-  content: "▾";
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-muted);
-  pointer-events: none;
-  font-size: 11px;
-}
-.suggest-list {
-  display: none;
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 0;
-  right: 0;
-  max-height: 180px;
-  overflow-y: auto;
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  z-index: 50;
-}
-.suggest-list.open { display: block; }
-.suggest-item {
-  padding: 9px 11px;
-  font-size: 13.5px;
-  font-weight: 400;
-  color: var(--text-primary);
-  cursor: pointer;
-}
-.suggest-item:active, .suggest-item.active { background: var(--surface-3); }
-
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 
 .assign-raw-text {

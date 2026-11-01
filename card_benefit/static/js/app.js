@@ -834,42 +834,44 @@
   // ---- 고정지출 추가/수정 모달 ----
   const recurringModal = document.getElementById("recurring-modal");
   let editingRecurringId = null;
-  let recurringMethodOptions = [];
 
+  const methodSelect = document.getElementById("recurring-method-select");
   const methodInput = document.getElementById("recurring-method");
-  const methodSuggest = document.getElementById("recurring-method-suggest");
+  const CUSTOM_METHOD = "__custom__";
 
-  function renderMethodSuggestions() {
-    const typed = methodInput.value.trim().toLowerCase();
-    const matches = recurringMethodOptions.filter((o) => !typed || o.toLowerCase().includes(typed));
-    if (!matches.length) {
-      methodSuggest.classList.remove("open");
-      methodSuggest.innerHTML = "";
-      return;
+  methodSelect.addEventListener("change", () => {
+    if (methodSelect.value === CUSTOM_METHOD) {
+      methodInput.style.display = "";
+      methodInput.value = "";
+      methodInput.focus();
+    } else {
+      methodInput.style.display = "none";
+      methodInput.value = "";
     }
-    methodSuggest.innerHTML = matches.map((o) => `<div class="suggest-item">${escapeHtml(o)}</div>`).join("");
-    methodSuggest.classList.add("open");
+  });
+
+  function normMethod(s) {
+    return (s || "").replace(/\s+/g, " ").trim().toLowerCase();
   }
-  let suppressFocusReopen = false;
-  methodInput.addEventListener("focus", () => {
-    if (suppressFocusReopen) return;
-    renderMethodSuggestions();
-  });
-  methodInput.addEventListener("input", renderMethodSuggestions);
-  methodSuggest.addEventListener("click", (e) => {
-    const item = e.target.closest(".suggest-item");
-    if (!item) return;
-    methodInput.value = item.textContent;
-    methodSuggest.classList.remove("open");
-    // 선택 직후 터치 기기에서 input이 다시 focus되면서 목록이 바로 재오픈되는 것을 방지
-    suppressFocusReopen = true;
-    setTimeout(() => { suppressFocusReopen = false; }, 400);
-  });
-  document.addEventListener("click", (e) => {
-    if (e.target !== methodInput && !methodSuggest.contains(e.target)) {
-      methodSuggest.classList.remove("open");
+  function methodBaseName(s) {
+    return normMethod((s || "").replace(/\([^)]*\)\s*$/, ""));
+  }
+  function buildMethodOptions() {
+    const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
+    const cardBases = new Set(cardOptions.map(methodBaseName));
+    const usedOptions = state.recurring_payments
+      .map((r) => (r.payment_method || "").trim())
+      .filter((o) => o && !cardBases.has(methodBaseName(o))); // 카드탭 항목과 이름만 같고 뒷자리만 빠진 중복 제거
+    const seen = new Set();
+    const result = [];
+    for (const o of [...cardOptions, ...usedOptions]) {
+      const key = normMethod(o);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(o);
     }
-  });
+    return result;
+  }
 
   function openRecurringModal(item) {
     editingRecurringId = item ? item.id : null;
@@ -878,22 +880,23 @@
     document.getElementById("recurring-category").value = item ? item.category : "";
     document.getElementById("recurring-amount").value = item ? item.amount : "";
 
-    const baseName = (s) => s.replace(/\([^)]*\)\s*$/, "").trim().toLowerCase();
-    const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
-    const cardBases = new Set(cardOptions.map(baseName));
-    const usedOptions = state.recurring_payments
-      .map((r) => (r.payment_method || "").trim())
-      .filter((o) => o && !cardBases.has(baseName(o))); // 카드탭 항목과 이름만 같고 뒷자리만 빠진 중복 제거
-    const seen = new Set();
-    recurringMethodOptions = [];
-    for (const o of [...cardOptions, ...usedOptions]) {
-      const key = o.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      recurringMethodOptions.push(o);
+    const options = buildMethodOptions();
+    const current = item ? (item.payment_method || "") : "";
+    const matched = options.find((o) => normMethod(o) === normMethod(current));
+    methodSelect.innerHTML = [
+      `<option value="">선택 안 함</option>`,
+      ...options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`),
+      `<option value="${CUSTOM_METHOD}">직접 입력</option>`,
+    ].join("");
+    if (current && !matched) {
+      methodSelect.value = CUSTOM_METHOD;
+      methodInput.style.display = "";
+      methodInput.value = current;
+    } else {
+      methodSelect.value = matched || "";
+      methodInput.style.display = "none";
+      methodInput.value = "";
     }
-    methodInput.value = item ? (item.payment_method || "") : "";
-    methodSuggest.classList.remove("open");
 
     document.getElementById("recurring-day").value = item && item.payment_day ? item.payment_day : "";
     document.getElementById("recurring-active").checked = item ? !!item.active : true;
@@ -907,7 +910,7 @@
       name: document.getElementById("recurring-name").value.trim(),
       category: document.getElementById("recurring-category").value.trim(),
       amount: document.getElementById("recurring-amount").value || 0,
-      payment_method: document.getElementById("recurring-method").value.trim(),
+      payment_method: methodSelect.value === CUSTOM_METHOD ? methodInput.value.trim() : methodSelect.value,
       payment_day: document.getElementById("recurring-day").value || 0,
       active: document.getElementById("recurring-active").checked,
       memo: document.getElementById("recurring-memo").value.trim(),
