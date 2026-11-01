@@ -797,18 +797,24 @@
       <div class="card-head">
         <div class="card-head-left">
           ${item.payment_day ? `<div class="loan-day-badge" title="매월 결제일">${item.payment_day}</div>` : ""}
-          <span class="card-title-scroll"><span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.name)}</span></span>
+          <div class="card-text-stack">
+            <div class="card-text-row">
+              <span class="card-title-scroll"><span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.name)}</span></span>
+              <span class="benefit-remaining amount-accent">${amountText}원</span>
+            </div>
+            <div class="card-text-row">
+              <span class="card-method-dim">${item.payment_method ? escapeHtml(item.payment_method) : "결제수단 미입력"}</span>
+              ${item.category ? `<span class="loan-type-badge">${escapeHtml(item.category)}</span>` : ""}
+              ${item.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">중단</span>`}
+            </div>
+          </div>
         </div>
-        <div class="card-head-right">
-          ${item.category ? `<span class="loan-type-badge">${escapeHtml(item.category)}</span>` : ""}
-          ${item.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">중단</span>`}
+      </div>
+      <div class="benefit-sub" style="justify-content:flex-end;">
+        <div class="benefit-buttons">
           <button class="icon-btn edit-recurring" data-id="${item.id}" title="수정">✏️</button>
           <button class="icon-btn delete-recurring" data-id="${item.id}" title="삭제">🗑️</button>
         </div>
-      </div>
-      <div class="benefit-top">
-        <span class="benefit-name">${item.payment_method ? escapeHtml(item.payment_method) : "결제수단 미입력"}</span>
-        <span class="benefit-remaining amount-accent">${amountText}원</span>
       </div>
       ${memoToggleTemplate(`recurring-${item.id}`, item.memo)}
     `;
