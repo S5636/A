@@ -481,8 +481,8 @@
     const loans = state.loans.slice();
     if (loanSort === "balance") {
       loans.sort((a, b) => (b.current_balance || 0) - (a.current_balance || 0));
-    } else if (loanSort === "name") {
-      loans.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    } else if (loanSort === "rate") {
+      loans.sort((a, b) => (b.interest_rate || 0) - (a.interest_rate || 0));
     } else if (loanSort === "manual") {
       loans.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
     } else {
@@ -531,7 +531,6 @@
       loan.end_date ? `만기 ${loan.end_date}${ddayText}` : "",
       loan.payment_day ? `매월 ${loan.payment_day}일 상환` : "",
     ].filter(Boolean).join(" · ");
-    const monthlyText = loan.monthly_payment ? `이번 달 낼 금액 ${fmt(loan.monthly_payment)}원` : "";
 
     const logsHtml = loan.payments.length
       ? loan.payments.map((p) => `
@@ -565,12 +564,15 @@
         <span class="benefit-name">현재 잔액</span>
         <span class="benefit-remaining">${fmt(loan.current_balance)}원</span>
       </div>
+      <div class="benefit-top">
+        <span class="benefit-name">이번 달 상환 예정</span>
+        <span class="benefit-remaining">${loan.monthly_payment ? fmt(loan.monthly_payment) + "원" : "미입력"}</span>
+      </div>
       ${loan.principal > 0 ? `<div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>` : ""}
       <div class="perf-row-sub">
         원금 ${fmt(loan.principal)}원${loan.principal > 0 ? ` · ${percent}% 상환` : ""}${loan.interest_rate ? ` · 금리 ${loan.interest_rate}%` : ""}${loan.repayment_type ? ` · ${escapeHtml(loan.repayment_type)}` : ""}
       </div>
       ${infoLine2 ? `<div class="perf-row-sub">${infoLine2}</div>` : ""}
-      ${monthlyText ? `<div class="perf-row-sub">${monthlyText}</div>` : ""}
       ${memoToggleTemplate(logKey, loan.memo)}
       <div class="benefit-sub">
         <div class="benefit-buttons">
