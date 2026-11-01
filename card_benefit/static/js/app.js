@@ -470,23 +470,57 @@
   }
 
   // ---- 대출 목록 ----
+  let loanSort = "maturity";
+  const loanSortSelect = document.getElementById("loan-sort-select");
+  loanSortSelect.addEventListener("change", () => {
+    loanSort = loanSortSelect.value;
+    render();
+  });
+
+  function sortedLoans() {
+    const loans = state.loans.slice();
+    if (loanSort === "balance") {
+      loans.sort((a, b) => (b.current_balance || 0) - (a.current_balance || 0));
+    } else if (loanSort === "name") {
+      loans.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    } else if (loanSort === "manual") {
+      loans.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    } else {
+      // 만기임박순(기본): 만기일 없는 건 맨 뒤로
+      loans.sort((a, b) => {
+        if (!a.end_date && !b.end_date) return 0;
+        if (!a.end_date) return 1;
+        if (!b.end_date) return -1;
+        return a.end_date.localeCompare(b.end_date);
+      });
+    }
+    return loans;
+  }
+
   function renderLoans() {
     const loanList = document.getElementById("loan-list");
     const emptyLoanHint = document.getElementById("empty-loan-hint");
     loanList.querySelectorAll(".card").forEach((el) => el.remove());
     emptyLoanHint.style.display = state.loans.length ? "none" : "block";
 
-    state.loans.forEach((loan) => {
+    document.getElementById("loan-total-balance-value").textContent =
+      `${fmt(state.loans.reduce((sum, l) => sum + (l.current_balance || 0), 0))}원`;
+    document.getElementById("loan-total-monthly-value").textContent =
+      `${fmt(state.loans.reduce((sum, l) => sum + (l.monthly_payment || 0), 0))}원`;
+
+    const loans = sortedLoans();
+    loans.forEach((loan, idx) => {
       const el = document.createElement("div");
       el.className = "card";
       el.id = `loan-${loan.id}`;
-      el.innerHTML = loanTemplate(loan);
+      const isManual = loanSort === "manual";
+      el.innerHTML = loanTemplate(loan, isManual, idx === 0, idx === loans.length - 1);
       loanList.appendChild(el);
-      wireLoan(el, loan);
+      wireLoan(el, loan, isManual ? loans : null, idx);
     });
   }
 
-  function loanTemplate(loan) {
+  function loanTemplate(loan, showReorder, isFirst, isLast) {
     const logKey = `loan-${loan.id}`;
     const logsOpen = openLogPanels.has(logKey);
     const percent = loan.percent_paid != null ? loan.percent_paid : 0;
@@ -497,6 +531,7 @@
       loan.end_date ? `만기 ${loan.end_date}${ddayText}` : "",
       loan.payment_day ? `매월 ${loan.payment_day}일 상환` : "",
     ].filter(Boolean).join(" · ");
+    const monthlyText = loan.monthly_payment ? `이번 달 낼 금액 ${fmt(loan.monthly_payment)}원` : "";
 
     const logsHtml = loan.payments.length
       ? loan.payments.map((p) => `
@@ -507,8 +542,16 @@
         `).join("")
       : `<div class="log-item"><span>상환 기록 없음</span></div>`;
 
+    const reorderHtml = showReorder ? `
+      <div class="reorder-buttons">
+        <button class="move-loan-up" data-id="${loan.id}" ${isFirst ? "disabled" : ""} title="위로">▲</button>
+        <button class="move-loan-down" data-id="${loan.id}" ${isLast ? "disabled" : ""} title="아래로">▼</button>
+      </div>
+    ` : "";
+
     return `
       <div class="card-head">
+        ${reorderHtml}
         <div class="card-title-row">
           <span class="card-title">${escapeHtml(loan.name)}</span>
           ${loan.loan_type ? `<span class="loan-type-badge">${escapeHtml(loan.loan_type)}</span>` : ""}
@@ -527,6 +570,7 @@
         원금 ${fmt(loan.principal)}원${loan.principal > 0 ? ` · ${percent}% 상환` : ""}${loan.interest_rate ? ` · 금리 ${loan.interest_rate}%` : ""}${loan.repayment_type ? ` · ${escapeHtml(loan.repayment_type)}` : ""}
       </div>
       ${infoLine2 ? `<div class="perf-row-sub">${infoLine2}</div>` : ""}
+      ${monthlyText ? `<div class="perf-row-sub">${monthlyText}</div>` : ""}
       ${memoToggleTemplate(logKey, loan.memo)}
       <div class="benefit-sub">
         <div class="benefit-buttons">
@@ -538,7 +582,7 @@
     `;
   }
 
-  function wireLoan(el, loan) {
+  function wireLoan(el, loan, manualOrderList, idx) {
     el.querySelector(".edit-loan").addEventListener("click", () => openLoanModal(loan));
     el.querySelector(".delete-loan").addEventListener("click", async () => {
       if (!confirm(`"${loan.name}" 대출을 삭제할까요? 상환 기록도 모두 삭제됩니다.`)) return;
@@ -567,6 +611,25 @@
         render();
       })
     );
+    if (manualOrderList) {
+      const swapWith = async (otherIdx) => {
+        const other = manualOrderList[otherIdx];
+        const a = loan.sort_order, b = other.sort_order;
+        state = await api(`/api/loans/${loan.id}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sort_order: b }),
+        });
+        state = await api(`/api/loans/${other.id}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sort_order: a }),
+        });
+        render();
+      };
+      const upBtn = el.querySelector(".move-loan-up");
+      if (upBtn && !upBtn.disabled) upBtn.addEventListener("click", () => swapWith(idx - 1));
+      const downBtn = el.querySelector(".move-loan-down");
+      if (downBtn && !downBtn.disabled) downBtn.addEventListener("click", () => swapWith(idx + 1));
+    }
   }
 
   // ---- 대출 추가/수정 모달 ----
@@ -585,6 +648,7 @@
     document.getElementById("loan-start-date").value = loan ? loan.start_date : "";
     document.getElementById("loan-end-date").value = loan ? loan.end_date : "";
     document.getElementById("loan-payment-day").value = loan && loan.payment_day ? loan.payment_day : "";
+    document.getElementById("loan-monthly-payment").value = loan && loan.monthly_payment ? loan.monthly_payment : "";
     document.getElementById("loan-memo").value = loan ? loan.memo : "";
     loanModal.classList.add("open");
   }
@@ -601,6 +665,7 @@
       start_date: document.getElementById("loan-start-date").value,
       end_date: document.getElementById("loan-end-date").value,
       payment_day: document.getElementById("loan-payment-day").value || 0,
+      monthly_payment: document.getElementById("loan-monthly-payment").value || 0,
       memo: document.getElementById("loan-memo").value.trim(),
     };
     if (!payload.name) { alert("대출 이름을 입력하세요."); return; }

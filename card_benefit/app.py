@@ -196,9 +196,11 @@ def serialize_loans(conn):
             "start_date": loan["start_date"],
             "end_date": loan["end_date"],
             "payment_day": loan["payment_day"],
+            "monthly_payment": loan["monthly_payment"],
             "memo": loan["memo"],
             "percent_paid": percent_paid,
             "days_left": days_left,
+            "sort_order": loan["sort_order"],
             "payments": [dict(p) for p in payments],
         })
     return result
@@ -527,14 +529,18 @@ def create_loan():
         payment_day = int(data.get("payment_day") or 0)
     except (TypeError, ValueError):
         payment_day = 0
+    try:
+        monthly_payment = float(data.get("monthly_payment") or 0)
+    except (TypeError, ValueError):
+        monthly_payment = 0
 
     conn = get_conn()
     try:
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM loans").fetchone()["m"]
         conn.execute(
             """INSERT INTO loans (name, loan_type, principal, current_balance, interest_rate,
-               repayment_type, start_date, end_date, payment_day, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               repayment_type, start_date, end_date, payment_day, monthly_payment, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (data.get("loan_type") or "").strip(),
@@ -545,6 +551,7 @@ def create_loan():
                 (data.get("start_date") or "").strip(),
                 (data.get("end_date") or "").strip(),
                 payment_day,
+                monthly_payment,
                 (data.get("memo") or "").strip(),
                 max_order + 1,
             ),
@@ -581,10 +588,19 @@ def update_loan(loan_id):
             payment_day = int(data.get("payment_day", loan["payment_day"]))
         except (TypeError, ValueError):
             payment_day = loan["payment_day"]
+        try:
+            monthly_payment = float(data.get("monthly_payment", loan["monthly_payment"]))
+        except (TypeError, ValueError):
+            monthly_payment = loan["monthly_payment"]
+        try:
+            sort_order = int(data.get("sort_order", loan["sort_order"]))
+        except (TypeError, ValueError):
+            sort_order = loan["sort_order"]
 
         conn.execute(
             """UPDATE loans SET name=?, loan_type=?, principal=?, current_balance=?, interest_rate=?,
-               repayment_type=?, start_date=?, end_date=?, payment_day=?, memo=? WHERE id=?""",
+               repayment_type=?, start_date=?, end_date=?, payment_day=?, monthly_payment=?, memo=?,
+               sort_order=? WHERE id=?""",
             (
                 name,
                 (data.get("loan_type", loan["loan_type"]) or "").strip(),
@@ -595,7 +611,9 @@ def update_loan(loan_id):
                 (data.get("start_date", loan["start_date"]) or "").strip(),
                 (data.get("end_date", loan["end_date"]) or "").strip(),
                 payment_day,
+                monthly_payment,
                 (data.get("memo", loan["memo"]) or "").strip(),
+                sort_order,
                 loan_id,
             ),
         )

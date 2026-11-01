@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS loans (
     start_date TEXT DEFAULT '',
     end_date TEXT DEFAULT '',           -- 만기일
     payment_day INTEGER NOT NULL DEFAULT 0,  -- 매월 상환일(1~31, 0=없음)
+    monthly_payment REAL NOT NULL DEFAULT 0,  -- 매월 실제로 내는 금액(원금+이자, 직접 입력 - 상환방식별 자동계산은 안 함)
     memo TEXT DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -168,6 +169,7 @@ def init_db():
         _ensure_column(conn, "inbox_items", "approval_no", "approval_no TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "usage_type", "usage_type TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "source", "source TEXT DEFAULT ''")
+        _ensure_column(conn, "loans", "monthly_payment", "monthly_payment REAL NOT NULL DEFAULT 0")
         conn.commit()
     finally:
         conn.close()

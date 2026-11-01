@@ -79,6 +79,27 @@
   </div>
 
   <div id="loan-view" style="display:none;">
+    <section class="monthly-summary">
+      <div class="summary-boxes">
+        <div class="summary-box summary-earn">
+          <div class="summary-label">전체 대출잔액 합계</div>
+          <div class="summary-value" id="loan-total-balance-value">0원</div>
+        </div>
+        <div class="summary-box summary-cashback">
+          <div class="summary-label">이번 달 낼 금액 합계</div>
+          <div class="summary-value" id="loan-total-monthly-value">0원</div>
+        </div>
+      </div>
+    </section>
+    <div class="sort-row">
+      <label for="loan-sort-select">정렬</label>
+      <select id="loan-sort-select">
+        <option value="maturity">만기임박순</option>
+        <option value="balance">잔액 많은순</option>
+        <option value="name">이름순</option>
+        <option value="manual">직접 정한 순서</option>
+      </select>
+    </div>
     <main id="loan-list" class="card-list">
       <p class="empty-hint" id="empty-loan-hint">아직 등록된 대출이 없습니다. "대출 추가"를 눌러 시작하세요.</p>
     </main>
@@ -344,6 +365,10 @@
     </label>
     <label>매월 상환일 (선택)
       <input type="number" id="loan-payment-day" min="0" max="31" placeholder="예: 25">
+    </label>
+    <label>매월 실제로 내는 금액 (선택)
+      <input type="number" id="loan-monthly-payment" min="0" step="1" placeholder="예: 110000">
+      <small>원금+이자 합쳐서 매달 실제로 빠져나가는 금액. 상환방식별 자동계산은 안 하니, 은행 앱에 나온 숫자를 그대로 입력하세요.</small>
     </label>
     <label>메모 (선택)
       <textarea id="loan-memo" rows="2" placeholder="대출 특이사항 등"></textarea>
