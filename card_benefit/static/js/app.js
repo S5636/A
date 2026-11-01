@@ -587,10 +587,10 @@
         <span class="benefit-remaining amount-accent">${dueText}</span>
       </div>
       <div class="benefit-top">
-        <span class="benefit-name">${balancePercentLabel}</span>
+        <span class="benefit-name" style="${balancePercentLabel ? "color:var(--neon-green);" : ""}">${balancePercentLabel}</span>
         <span class="benefit-remaining">${balanceValue}</span>
       </div>
-      ${(!isBullet && loan.principal > 0) ? `<div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>` : ""}
+      ${(!isBullet && loan.principal > 0) ? `<div class="progress-track"><div class="progress-fill" style="width:${percent}%;background:var(--neon-green);"></div></div>` : ""}
       <div class="perf-row-sub">${infoLine}</div>
       ${memoToggleTemplate(logKey, loan.memo)}
       <div class="benefit-sub">
@@ -805,14 +805,12 @@
             </div>
             <div class="card-text-row">
               <span class="card-method-dim">${item.payment_method ? escapeHtml(item.payment_method) : "결제수단 미입력"}</span>
+              <span class="card-head-right">
+                <button class="icon-btn edit-recurring" data-id="${item.id}" title="수정">✏️</button>
+                <button class="icon-btn delete-recurring" data-id="${item.id}" title="삭제">🗑️</button>
+              </span>
             </div>
           </div>
-        </div>
-      </div>
-      <div class="benefit-sub" style="justify-content:flex-end;">
-        <div class="benefit-buttons">
-          <button class="icon-btn edit-recurring" data-id="${item.id}" title="수정">✏️</button>
-          <button class="icon-btn delete-recurring" data-id="${item.id}" title="삭제">🗑️</button>
         </div>
       </div>
       ${memoToggleTemplate(`recurring-${item.id}`, item.memo)}
