@@ -540,16 +540,14 @@
     const ddayText = loan.days_left != null
       ? (loan.days_left >= 0 ? ` (D-${loan.days_left})` : ` (${fmt(Math.abs(loan.days_left))}일 지남)`)
       : "";
-    const balanceLine = [
-      (!isBullet && loan.principal > 0) ? `${percent}% 상환` : "",
-      `${fmt(loan.current_balance)}/${fmt(loan.principal)}원`,
-    ].filter(Boolean).join(" · ");
+    const balancePercentLabel = (!isBullet && loan.principal > 0) ? `${percent}% 상환` : "";
+    const balanceValue = `${fmt(loan.current_balance)}/${fmt(loan.principal)}원`;
     const infoLine = [
-      loan.interest_rate ? `금리 ${loan.interest_rate}%` : "",
+      loan.interest_rate ? `${loan.interest_rate}%` : "",
       loan.repayment_type ? escapeHtml(shortRepayType(loan.repayment_type)) : "",
       loan.end_date ? `만기 ${loan.end_date}${ddayText}` : "",
-      loan.withdrawal_account ? `출금 ${escapeHtml(loan.withdrawal_account)}` : "",
-    ].filter(Boolean).join(" · ");
+      loan.withdrawal_account ? escapeHtml(loan.withdrawal_account) : "",
+    ].filter(Boolean).join(" - ");
     const dueText = loan.due_this_month
       ? (loan.monthly_payment ? fmt(loan.monthly_payment) + "원" : "미입력")
       : "당월 해당 없음";
@@ -588,7 +586,10 @@
         <span class="benefit-name">당월 상환 금액</span>
         <span class="benefit-remaining amount-accent">${dueText}</span>
       </div>
-      <div class="perf-row-sub">${balanceLine}</div>
+      <div class="benefit-top">
+        <span class="benefit-name">${balancePercentLabel}</span>
+        <span class="benefit-remaining">${balanceValue}</span>
+      </div>
       ${(!isBullet && loan.principal > 0) ? `<div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>` : ""}
       <div class="perf-row-sub">${infoLine}</div>
       ${memoToggleTemplate(logKey, loan.memo)}
@@ -796,12 +797,14 @@
           <div class="card-text-stack">
             <div class="card-text-row">
               <span class="card-title-scroll"><span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.name)}</span></span>
-              <span class="benefit-remaining amount-accent">${amountText}원</span>
+              <span class="card-head-right">
+                ${item.category ? `<span class="loan-type-badge">${escapeHtml(item.category)}</span>` : ""}
+                ${item.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">중단</span>`}
+                <span class="benefit-remaining amount-accent">${amountText}원</span>
+              </span>
             </div>
             <div class="card-text-row">
               <span class="card-method-dim">${item.payment_method ? escapeHtml(item.payment_method) : "결제수단 미입력"}</span>
-              ${item.category ? `<span class="loan-type-badge">${escapeHtml(item.category)}</span>` : ""}
-              ${item.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">중단</span>`}
             </div>
           </div>
         </div>
