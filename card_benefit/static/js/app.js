@@ -547,7 +547,7 @@
       loan.repayment_type ? escapeHtml(shortRepayType(loan.repayment_type)) : "",
       loan.end_date ? `만기 ${loan.end_date}${ddayText}` : "",
       loan.withdrawal_account ? escapeHtml(loan.withdrawal_account) : "",
-    ].filter(Boolean).join(" - ");
+    ].filter(Boolean).join(" / ");
     const dueText = loan.due_this_month
       ? (loan.monthly_payment ? fmt(loan.monthly_payment) + "원" : "미입력")
       : "당월 해당 없음";
