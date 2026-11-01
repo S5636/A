@@ -447,8 +447,10 @@
       <input type="number" id="recurring-amount" min="0" step="1" placeholder="예: 17000">
     </label>
     <label>결제수단
-      <input type="text" id="recurring-method" list="recurring-method-list" placeholder="예: 신한카드 더모아, 현금, 계좌이체">
-      <datalist id="recurring-method-list"></datalist>
+      <div class="suggest-wrap">
+        <input type="text" id="recurring-method" placeholder="예: 신한카드 더모아, 현금, 계좌이체" autocomplete="off">
+        <div class="suggest-list" id="recurring-method-suggest"></div>
+      </div>
     </label>
     <label>매월 결제일 (선택)
       <input type="number" id="recurring-day" min="0" max="31" placeholder="예: 5">

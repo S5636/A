@@ -834,6 +834,34 @@
   // ---- 고정지출 추가/수정 모달 ----
   const recurringModal = document.getElementById("recurring-modal");
   let editingRecurringId = null;
+  let recurringMethodOptions = [];
+
+  const methodInput = document.getElementById("recurring-method");
+  const methodSuggest = document.getElementById("recurring-method-suggest");
+
+  function renderMethodSuggestions() {
+    const typed = methodInput.value.trim().toLowerCase();
+    const matches = recurringMethodOptions.filter((o) => !typed || o.toLowerCase().includes(typed));
+    if (!matches.length) {
+      methodSuggest.classList.remove("open");
+      methodSuggest.innerHTML = "";
+      return;
+    }
+    methodSuggest.innerHTML = matches.map((o) => `<div class="suggest-item">${escapeHtml(o)}</div>`).join("");
+    methodSuggest.classList.add("open");
+  }
+  methodInput.addEventListener("focus", renderMethodSuggestions);
+  methodInput.addEventListener("input", renderMethodSuggestions);
+  methodInput.addEventListener("blur", () => {
+    setTimeout(() => methodSuggest.classList.remove("open"), 150);
+  });
+  methodSuggest.addEventListener("mousedown", (e) => {
+    const item = e.target.closest(".suggest-item");
+    if (!item) return;
+    e.preventDefault();
+    methodInput.value = item.textContent;
+    methodSuggest.classList.remove("open");
+  });
 
   function openRecurringModal(item) {
     editingRecurringId = item ? item.id : null;
@@ -842,11 +870,9 @@
     document.getElementById("recurring-category").value = item ? item.category : "";
     document.getElementById("recurring-amount").value = item ? item.amount : "";
 
-    const methodInput = document.getElementById("recurring-method");
-    const methodList = document.getElementById("recurring-method-list");
-    const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
-    methodList.innerHTML = cardOptions.map((o) => `<option value="${escapeHtml(o)}"></option>`).join("");
+    recurringMethodOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
     methodInput.value = item ? (item.payment_method || "") : "";
+    methodSuggest.classList.remove("open");
 
     document.getElementById("recurring-day").value = item && item.payment_day ? item.payment_day : "";
     document.getElementById("recurring-active").checked = item ? !!item.active : true;
