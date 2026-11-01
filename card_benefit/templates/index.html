@@ -376,7 +376,14 @@
     </label>
     <label>매월 실제로 내는 금액 (선택)
       <input type="number" id="loan-monthly-payment" min="0" step="1" placeholder="예: 110000">
-      <small>원금+이자 합쳐서 매달 실제로 빠져나가는 금액. 상환방식별 자동계산은 안 하니, 은행 앱에 나온 숫자를 그대로 입력하세요.</small>
+      <small>원금+이자 합쳐서 상환일에 실제로 빠져나가는 금액. 상환방식별 자동계산은 안 하니, 은행 앱에 나온 숫자를 그대로 입력하세요.</small>
+    </label>
+    <label>내는 달 (선택, 매달이면 비워두세요)
+      <input type="text" id="loan-payment-months" placeholder="예: 1,4,7,10 (분기납이면)">
+      <small>매달이 아니라 특정 달에만 내면 쉼표로 구분해서 월을 적으세요. 비워두면 매달로 봅니다.</small>
+    </label>
+    <label>출금계좌/카드 (선택)
+      <input type="text" id="loan-withdrawal-account" placeholder="예: 카카오뱅크(...2246)">
     </label>
     <label>메모 (선택)
       <textarea id="loan-memo" rows="2" placeholder="대출 특이사항 등"></textarea>
@@ -424,7 +431,9 @@
         <option value="통신비">통신비</option>
         <option value="보험료">보험료</option>
         <option value="구독서비스">구독서비스</option>
+        <option value="교통/차량">교통/차량</option>
         <option value="교육비">교육비</option>
+        <option value="마귀">마귀</option>
         <option value="회비/멤버십">회비/멤버십</option>
         <option value="기타">기타</option>
       </select>

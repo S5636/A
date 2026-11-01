@@ -504,9 +504,9 @@
     emptyLoanHint.style.display = state.loans.length ? "none" : "block";
 
     document.getElementById("loan-total-balance-value").textContent =
-      `${fmt(state.loans.reduce((sum, l) => sum + (l.current_balance || 0), 0))}원`;
+      `₩${fmt(state.loans.reduce((sum, l) => sum + (l.current_balance || 0), 0))}`;
     document.getElementById("loan-total-monthly-value").textContent =
-      `${fmt(state.loans.reduce((sum, l) => sum + (l.monthly_payment || 0), 0))}원`;
+      `₩${fmt(state.loans.filter((l) => l.due_this_month).reduce((sum, l) => sum + (l.monthly_payment || 0), 0))}`;
 
     const loans = sortedLoans();
     loans.forEach((loan, idx) => {
@@ -520,17 +520,31 @@
     });
   }
 
+  function shortRepayType(t) {
+    return t ? t.replace(/상환$/, "") : t;
+  }
+
   function loanTemplate(loan, showReorder, isFirst, isLast) {
     const logKey = `loan-${loan.id}`;
     const logsOpen = openLogPanels.has(logKey);
     const percent = loan.percent_paid != null ? loan.percent_paid : 0;
+    const isBullet = (loan.repayment_type || "").includes("만기일시");
     const ddayText = loan.days_left != null
       ? (loan.days_left >= 0 ? ` (D-${loan.days_left})` : ` (${fmt(Math.abs(loan.days_left))}일 지남)`)
       : "";
+    const infoLine = [
+      `원금 ${fmt(loan.principal)}원`,
+      (!isBullet && loan.principal > 0) ? `${percent}% 상환` : "",
+      loan.interest_rate ? `금리 ${loan.interest_rate}%` : "",
+      loan.repayment_type ? escapeHtml(shortRepayType(loan.repayment_type)) : "",
+    ].filter(Boolean).join(" · ");
     const infoLine2 = [
       loan.end_date ? `만기 ${loan.end_date}${ddayText}` : "",
-      loan.payment_day ? `매월 ${loan.payment_day}일 상환` : "",
+      loan.withdrawal_account ? `출금 ${escapeHtml(loan.withdrawal_account)}` : "",
     ].filter(Boolean).join(" · ");
+    const dueText = loan.due_this_month
+      ? (loan.monthly_payment ? fmt(loan.monthly_payment) + "원" : "미입력")
+      : "이번 달 해당 없음";
 
     const logsHtml = loan.payments.length
       ? loan.payments.map((p) => `
@@ -550,10 +564,13 @@
 
     return `
       <div class="card-head">
-        ${reorderHtml}
-        <div class="card-title-row">
-          <span class="card-title">${escapeHtml(loan.name)}</span>
-          ${loan.loan_type ? `<span class="loan-type-badge">${escapeHtml(loan.loan_type)}</span>` : ""}
+        <div class="card-head-left">
+          ${loan.payment_day ? `<div class="loan-day-badge" title="매월 상환일">${loan.payment_day}</div>` : ""}
+          ${reorderHtml}
+          <div class="card-title-row">
+            <span class="card-title">${escapeHtml(loan.name)}</span>
+            ${loan.loan_type ? `<span class="loan-type-badge">${escapeHtml(loan.loan_type)}</span>` : ""}
+          </div>
         </div>
         <div class="card-actions">
           <button class="icon-btn edit-loan" data-id="${loan.id}" title="대출 수정">✏️</button>
@@ -561,17 +578,15 @@
         </div>
       </div>
       <div class="benefit-top">
+        <span class="benefit-name">이번 달 상환 예정</span>
+        <span class="benefit-remaining remaining-warn">${dueText}</span>
+      </div>
+      <div class="benefit-top">
         <span class="benefit-name">현재 잔액</span>
         <span class="benefit-remaining">${fmt(loan.current_balance)}원</span>
       </div>
-      <div class="benefit-top">
-        <span class="benefit-name">이번 달 상환 예정</span>
-        <span class="benefit-remaining">${loan.monthly_payment ? fmt(loan.monthly_payment) + "원" : "미입력"}</span>
-      </div>
-      ${loan.principal > 0 ? `<div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>` : ""}
-      <div class="perf-row-sub">
-        원금 ${fmt(loan.principal)}원${loan.principal > 0 ? ` · ${percent}% 상환` : ""}${loan.interest_rate ? ` · 금리 ${loan.interest_rate}%` : ""}${loan.repayment_type ? ` · ${escapeHtml(loan.repayment_type)}` : ""}
-      </div>
+      ${(!isBullet && loan.principal > 0) ? `<div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>` : ""}
+      <div class="perf-row-sub">${infoLine}</div>
       ${infoLine2 ? `<div class="perf-row-sub">${infoLine2}</div>` : ""}
       ${memoToggleTemplate(logKey, loan.memo)}
       <div class="benefit-sub">
@@ -651,6 +666,8 @@
     document.getElementById("loan-end-date").value = loan ? loan.end_date : "";
     document.getElementById("loan-payment-day").value = loan && loan.payment_day ? loan.payment_day : "";
     document.getElementById("loan-monthly-payment").value = loan && loan.monthly_payment ? loan.monthly_payment : "";
+    document.getElementById("loan-payment-months").value = loan ? loan.payment_months : "";
+    document.getElementById("loan-withdrawal-account").value = loan ? loan.withdrawal_account : "";
     document.getElementById("loan-memo").value = loan ? loan.memo : "";
     loanModal.classList.add("open");
   }
@@ -668,6 +685,8 @@
       end_date: document.getElementById("loan-end-date").value,
       payment_day: document.getElementById("loan-payment-day").value || 0,
       monthly_payment: document.getElementById("loan-monthly-payment").value || 0,
+      payment_months: document.getElementById("loan-payment-months").value.trim(),
+      withdrawal_account: document.getElementById("loan-withdrawal-account").value.trim(),
       memo: document.getElementById("loan-memo").value.trim(),
     };
     if (!payload.name) { alert("대출 이름을 입력하세요."); return; }
@@ -720,10 +739,10 @@
     emptyHint.style.display = state.recurring_payments.length ? "none" : "block";
 
     const total = state.recurring_payments.filter((r) => r.active).reduce((sum, r) => sum + (r.amount || 0), 0);
-    const loanTotal = state.loans.reduce((sum, l) => sum + (l.monthly_payment || 0), 0);
-    document.getElementById("recurring-total-value").textContent = `${fmt(total)}원`;
-    document.getElementById("recurring-loan-total-value").textContent = `${fmt(loanTotal)}원`;
-    document.getElementById("recurring-grand-total-value").textContent = `${fmt(total + loanTotal)}원`;
+    const loanTotal = state.loans.filter((l) => l.due_this_month).reduce((sum, l) => sum + (l.monthly_payment || 0), 0);
+    document.getElementById("recurring-total-value").textContent = `₩${fmt(total)}`;
+    document.getElementById("recurring-loan-total-value").textContent = `₩${fmt(loanTotal)}`;
+    document.getElementById("recurring-grand-total-value").textContent = `₩${fmt(total + loanTotal)}`;
 
     state.recurring_payments.forEach((item) => {
       const el = document.createElement("div");

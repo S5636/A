@@ -185,6 +185,11 @@ def serialize_loans(conn):
             except ValueError:
                 days_left = None
 
+        # 매달이 아니라 특정 달에만 내는 대출(예: 분기납 1,4,7,10월)은
+        # payment_months에 그 달들이 들어있다. 비어있으면 매달 내는 걸로 본다.
+        payment_months = [m.strip() for m in (loan["payment_months"] or "").split(",") if m.strip()]
+        due_this_month = (not payment_months) or (str(date.today().month) in payment_months)
+
         result.append({
             "id": loan["id"],
             "name": loan["name"],
@@ -197,6 +202,9 @@ def serialize_loans(conn):
             "end_date": loan["end_date"],
             "payment_day": loan["payment_day"],
             "monthly_payment": loan["monthly_payment"],
+            "payment_months": loan["payment_months"],
+            "due_this_month": due_this_month,
+            "withdrawal_account": loan["withdrawal_account"],
             "memo": loan["memo"],
             "percent_paid": percent_paid,
             "days_left": days_left,
@@ -539,8 +547,9 @@ def create_loan():
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM loans").fetchone()["m"]
         conn.execute(
             """INSERT INTO loans (name, loan_type, principal, current_balance, interest_rate,
-               repayment_type, start_date, end_date, payment_day, monthly_payment, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               repayment_type, start_date, end_date, payment_day, monthly_payment, payment_months,
+               withdrawal_account, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (data.get("loan_type") or "").strip(),
@@ -552,6 +561,8 @@ def create_loan():
                 (data.get("end_date") or "").strip(),
                 payment_day,
                 monthly_payment,
+                (data.get("payment_months") or "").strip(),
+                (data.get("withdrawal_account") or "").strip(),
                 (data.get("memo") or "").strip(),
                 max_order + 1,
             ),
@@ -599,8 +610,8 @@ def update_loan(loan_id):
 
         conn.execute(
             """UPDATE loans SET name=?, loan_type=?, principal=?, current_balance=?, interest_rate=?,
-               repayment_type=?, start_date=?, end_date=?, payment_day=?, monthly_payment=?, memo=?,
-               sort_order=? WHERE id=?""",
+               repayment_type=?, start_date=?, end_date=?, payment_day=?, monthly_payment=?,
+               payment_months=?, withdrawal_account=?, memo=?, sort_order=? WHERE id=?""",
             (
                 name,
                 (data.get("loan_type", loan["loan_type"]) or "").strip(),
@@ -612,6 +623,8 @@ def update_loan(loan_id):
                 (data.get("end_date", loan["end_date"]) or "").strip(),
                 payment_day,
                 monthly_payment,
+                (data.get("payment_months", loan["payment_months"]) or "").strip(),
+                (data.get("withdrawal_account", loan["withdrawal_account"]) or "").strip(),
                 (data.get("memo", loan["memo"]) or "").strip(),
                 sort_order,
                 loan_id,
