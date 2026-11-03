@@ -36,6 +36,7 @@ html, body {
   color: var(--text-primary);
   font-family: var(--font);
   font-size: 14px;
+  line-height: 1.25;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -201,7 +202,7 @@ body { padding-bottom: 40px; }
   scroll-margin-top: 84px; /* 상단 고정 헤더에 카드 제목이 가려지지 않게 */
 }
 
-.card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 2px; }
 .card-head-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 .card-head-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .card-text-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -252,7 +253,7 @@ body { padding-bottom: 40px; }
 
 .memo-toggle {
   display: inline-block;
-  margin-top: 5px;
+  margin-top: 3px;
   background: none;
   border: none;
   color: var(--series-1);
@@ -294,7 +295,7 @@ body { padding-bottom: 40px; }
 .remaining-warn { color: var(--warning); }
 .remaining-bad { color: var(--critical); }
 
-.progress-track { background: var(--surface-3); border-radius: 999px; height: 8px; margin-top: 9px; overflow: hidden; }
+.progress-track { background: var(--surface-3); border-radius: 999px; height: 8px; margin-top: 5px; overflow: hidden; }
 .progress-fill { height: 100%; border-radius: 999px; background: var(--good); transition: width .2s ease; }
 .progress-fill.warn { background: var(--warning); }
 .progress-fill.bad { background: var(--critical); }
@@ -320,7 +321,7 @@ body { padding-bottom: 40px; }
   margin-left: 2px;
 }
 
-.benefit-sub { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: 11.5px; color: var(--text-muted); }
+.benefit-sub { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 3px; font-size: 11.5px; color: var(--text-muted); }
 .benefit-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .add-benefit-row { margin-top: 12px; }
