@@ -677,6 +677,33 @@
   const loanModal = document.getElementById("loan-modal");
   let editingLoanId = null;
 
+  const withdrawalSelect = document.getElementById("loan-withdrawal-account-select");
+  const withdrawalInput = document.getElementById("loan-withdrawal-account");
+  const CUSTOM_WITHDRAWAL = "__custom__";
+
+  withdrawalSelect.addEventListener("change", () => {
+    if (withdrawalSelect.value === CUSTOM_WITHDRAWAL) {
+      withdrawalInput.style.display = "";
+      withdrawalInput.value = "";
+      withdrawalInput.focus();
+    } else {
+      withdrawalInput.style.display = "none";
+      withdrawalInput.value = "";
+    }
+  });
+
+  function buildWithdrawalOptions() {
+    const seen = new Set();
+    const result = [];
+    for (const l of state.loans) {
+      const v = (l.withdrawal_account || "").trim();
+      if (!v || seen.has(v)) continue;
+      seen.add(v);
+      result.push(v);
+    }
+    return result;
+  }
+
   function openLoanModal(loan) {
     editingLoanId = loan ? loan.id : null;
     document.getElementById("loan-modal-title").textContent = loan ? "대출 수정" : "대출 추가";
@@ -691,7 +718,24 @@
     document.getElementById("loan-payment-day").value = loan && loan.payment_day ? loan.payment_day : "";
     document.getElementById("loan-monthly-payment").value = loan && loan.monthly_payment ? loan.monthly_payment : "";
     document.getElementById("loan-payment-months").value = loan ? loan.payment_months : "";
-    document.getElementById("loan-withdrawal-account").value = loan ? loan.withdrawal_account : "";
+
+    const withdrawalOptions = buildWithdrawalOptions();
+    const currentWithdrawal = loan ? (loan.withdrawal_account || "") : "";
+    withdrawalSelect.innerHTML = [
+      `<option value="">선택 안 함</option>`,
+      ...withdrawalOptions.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`),
+      `<option value="${CUSTOM_WITHDRAWAL}">직접 입력</option>`,
+    ].join("");
+    if (currentWithdrawal && !withdrawalOptions.includes(currentWithdrawal)) {
+      withdrawalSelect.value = CUSTOM_WITHDRAWAL;
+      withdrawalInput.style.display = "";
+      withdrawalInput.value = currentWithdrawal;
+    } else {
+      withdrawalSelect.value = currentWithdrawal;
+      withdrawalInput.style.display = "none";
+      withdrawalInput.value = "";
+    }
+
     document.getElementById("loan-memo").value = loan ? loan.memo : "";
     loanModal.classList.add("open");
   }
@@ -710,7 +754,7 @@
       payment_day: document.getElementById("loan-payment-day").value || 0,
       monthly_payment: document.getElementById("loan-monthly-payment").value || 0,
       payment_months: document.getElementById("loan-payment-months").value.trim(),
-      withdrawal_account: document.getElementById("loan-withdrawal-account").value.trim(),
+      withdrawal_account: withdrawalSelect.value === CUSTOM_WITHDRAWAL ? withdrawalInput.value.trim() : withdrawalSelect.value,
       memo: document.getElementById("loan-memo").value.trim(),
     };
     if (!payload.name) { alert("대출 이름을 입력하세요."); return; }

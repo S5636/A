@@ -395,7 +395,8 @@
       <small>매달이 아니라 특정 달에만 내면 쉼표로 구분해서 월을 적으세요. 비워두면 매달로 봅니다.</small>
     </label>
     <label>출금계좌/카드 (선택)
-      <input type="text" id="loan-withdrawal-account" placeholder="예: 카카오뱅크(2246)">
+      <select id="loan-withdrawal-account-select"></select>
+      <input type="text" id="loan-withdrawal-account" placeholder="예: 카카오뱅크" style="display:none; margin-top:6px;">
     </label>
     <label>메모 (선택)
       <textarea id="loan-memo" rows="2" placeholder="대출 특이사항 등"></textarea>
