@@ -408,10 +408,10 @@
     `;
   }
 
-  function wireCard(el, card, cardList, idx) {
+  function wireCard(el, card, allCards, idx) {
     el.querySelector(".edit-card").addEventListener("click", () => openCardModal(card));
     const swapCardWith = async (otherIdx) => {
-      const other = cardList[otherIdx];
+      const other = allCards[otherIdx];
       const a = card.sort_order, b = other.sort_order;
       state = await api(`/api/cards/${card.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
