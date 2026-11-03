@@ -265,7 +265,7 @@
             <button class="move-card-up" data-id="${card.id}" ${isFirst ? "disabled" : ""} title="위로">▲</button>
             <button class="move-card-down" data-id="${card.id}" ${isLast ? "disabled" : ""} title="아래로">▼</button>
           </div>
-          <span class="card-title">${escapeHtml(shortCardName(card.name))}</span>
+          <span class="card-title-scroll"><span class="card-title">${escapeHtml(shortCardName(card.name))}</span></span>
           ${card.last4 ? `<span class="loan-type-badge">${escapeHtml(card.last4)}</span>` : ""}
           ${card.perf_threshold ? `<span class="perf-badge ${card.perf_met ? "met" : "unmet"}">${card.perf_met ? "실적 충족" : "실적 부족"}</span>` : ""}
         </div>
