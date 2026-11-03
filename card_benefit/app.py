@@ -428,6 +428,7 @@ def _serialize_cards(conn):
             "cycle_end": (end - timedelta(days=1)).isoformat(),
             "days_left": days_left,
             "benefits": benefit_list,
+            "sort_order": card["sort_order"],
         })
     return result
 
@@ -507,10 +508,14 @@ def update_card(card_id):
             perf_threshold = float(data.get("perf_threshold", card["perf_threshold"]))
         except (TypeError, ValueError):
             perf_threshold = card["perf_threshold"]
+        try:
+            sort_order = int(data.get("sort_order", card["sort_order"]))
+        except (TypeError, ValueError):
+            sort_order = card["sort_order"]
 
         conn.execute(
-            """UPDATE cards SET name = ?, issuer = ?, last4 = ?, reset_day = ?, perf_threshold = ?, memo = ?
-               WHERE id = ?""",
+            """UPDATE cards SET name = ?, issuer = ?, last4 = ?, reset_day = ?, perf_threshold = ?, memo = ?,
+               sort_order = ? WHERE id = ?""",
             (
                 name,
                 (data.get("issuer", card["issuer"]) or "").strip(),
@@ -518,6 +523,7 @@ def update_card(card_id):
                 reset_day,
                 perf_threshold,
                 (data.get("memo", card["memo"]) or "").strip(),
+                sort_order,
                 card_id,
             ),
         )

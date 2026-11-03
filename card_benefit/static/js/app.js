@@ -232,14 +232,14 @@
       const el = document.createElement("div");
       el.className = "card";
       el.id = `card-${card.id}`;
-      el.innerHTML = cardTemplate(card);
+      el.innerHTML = cardTemplate(card, idx === 0, idx === state.cards.length - 1);
       el.querySelector(".card-title").style.color = CARD_COLORS[idx % CARD_COLORS.length];
       cardList.appendChild(el);
-      wireCard(el, card);
+      wireCard(el, card, state.cards, idx);
     });
   }
 
-  function cardTemplate(card) {
+  function cardTemplate(card, isFirst, isLast) {
     const mainBenefits = card.benefits.filter((b) => b.limit_type !== "count");
     const compactBenefits = card.benefits.filter((b) => b.limit_type === "count");
 
@@ -261,6 +261,10 @@
     return `
       <div class="card-head">
         <div class="card-title-row">
+          <div class="reorder-buttons">
+            <button class="move-card-up" data-id="${card.id}" ${isFirst ? "disabled" : ""} title="위로">▲</button>
+            <button class="move-card-down" data-id="${card.id}" ${isLast ? "disabled" : ""} title="아래로">▼</button>
+          </div>
           <span class="card-title">${escapeHtml(shortCardName(card.name))}</span>
           ${card.last4 ? `<span class="loan-type-badge">${escapeHtml(card.last4)}</span>` : ""}
           ${card.perf_threshold ? `<span class="perf-badge ${card.perf_met ? "met" : "unmet"}">${card.perf_met ? "실적 충족" : "실적 부족"}</span>` : ""}
@@ -403,8 +407,25 @@
     `;
   }
 
-  function wireCard(el, card) {
+  function wireCard(el, card, cardList, idx) {
     el.querySelector(".edit-card").addEventListener("click", () => openCardModal(card));
+    const swapCardWith = async (otherIdx) => {
+      const other = cardList[otherIdx];
+      const a = card.sort_order, b = other.sort_order;
+      state = await api(`/api/cards/${card.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sort_order: b }),
+      });
+      state = await api(`/api/cards/${other.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sort_order: a }),
+      });
+      render();
+    };
+    const moveUpBtn = el.querySelector(".move-card-up");
+    if (moveUpBtn && !moveUpBtn.disabled) moveUpBtn.addEventListener("click", () => swapCardWith(idx - 1));
+    const moveDownBtn = el.querySelector(".move-card-down");
+    if (moveDownBtn && !moveDownBtn.disabled) moveDownBtn.addEventListener("click", () => swapCardWith(idx + 1));
     const perfEditBtn = el.querySelector(".perf-edit");
     if (perfEditBtn) {
       perfEditBtn.addEventListener("click", () => openPerfModal(card));
