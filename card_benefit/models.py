@@ -353,12 +353,15 @@ def match_benefit_keyword(merchant: str, merchant_keywords: str) -> bool:
 
 def match_rate_table(merchant: str, rate_table_json: str, default_percent: float = 0, default_cap: float = 0):
     """가맹점명과 rate_table(JSON [["라벨:키워드1,키워드2", 할인율], ...] 또는
-    [[..., 할인율, 건당한도], ...] 또는 [[..., 할인율, 건당한도, 일한도, 월한도], ...])을
-    받아서 해당 업종의 (할인율, 건당한도, 일 횟수한도, 월 횟수한도, 라벨)을 돌려준다.
-    첫 값에 "쇼핑:이마트,쿠팡"처럼 ":"로 라벨을 붙이면 그 라벨이 화면 표시/횟수한도
-    구분에 쓰이고, ":"가 없으면 키워드 문자열 자체가 라벨로 쓰인다.
-    Daily Plan/Monthly Plan처럼 하나의 혜택 안에서 업종별로 할인율(과 한도)이 다른
-    경우에 쓴다. 매칭 안 되면 (default_percent, default_cap, 0, 0, None).
+    [[..., 할인율, 건당한도], ...] 또는 [[..., 할인율, 건당한도, 일한도, 월한도], ...] 또는
+    [[..., 할인율, 건당한도, 일한도, 월한도, 업종별월적립한도], ...])을 받아서 해당 업종의
+    (할인율, 건당한도, 일 횟수한도, 월 횟수한도, 업종별 월 적립(포인트) 한도, 라벨)을 돌려준다.
+    첫 값에 "쇼핑:이마트,쿠팡"처럼 ":"로 라벨을 붙이면 그 라벨이 화면 표시/한도 구분에
+    쓰이고, ":"가 없으면 키워드 문자열 자체가 라벨로 쓰인다. Daily Plan/Monthly Plan처럼
+    하나의 혜택 안에서 업종별로 할인율(과 한도)이 다른 경우에 쓴다. 마지막 값(업종별 월
+    적립한도)은 "이 업종은 이번 달 최대 1만 포인트까지만 적립"처럼 횟수가 아니라 적립액
+    자체를 업종별로 깎는 카드(씨티 리워드 등)에 쓴다 - 횟수 한도와는 별개로 같이 걸 수 있다.
+    매칭 안 되면 (default_percent, default_cap, 0, 0, 0, None).
     """
     if rate_table_json and merchant:
         try:
@@ -368,7 +371,7 @@ def match_rate_table(merchant: str, rate_table_json: str, default_percent: float
         if isinstance(rows, list):
             merchant_lower = merchant.lower()
             for entry in rows:
-                if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3, 4, 5):
+                if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3, 4, 5, 6):
                     continue
                 raw_keywords = str(entry[0])
                 if ":" in raw_keywords:
@@ -379,17 +382,18 @@ def match_rate_table(merchant: str, rate_table_json: str, default_percent: float
                 cap = entry[2] if len(entry) >= 3 else default_cap
                 daily_limit = entry[3] if len(entry) >= 4 else 0
                 monthly_limit = entry[4] if len(entry) >= 5 else 0
+                monthly_point_cap = entry[5] if len(entry) >= 6 else 0
                 for kw in kw_part.split(","):
                     kw = kw.strip().lower()
                     if kw and kw in merchant_lower:
-                        return percent, cap, daily_limit, monthly_limit, label
-    return default_percent, default_cap, 0, 0, None
+                        return percent, cap, daily_limit, monthly_limit, monthly_point_cap, label
+    return default_percent, default_cap, 0, 0, 0, None
 
 
 def parse_rate_table_categories(rate_table_json: str):
     """rate_table JSON에 정의된 업종(카테고리) 전체를 [{"label","percent","daily_limit",
-    "monthly_limit"}, ...] 목록으로 돌려준다. 가맹점 매칭과 무관하게, 혜택 카드에
-    "쇼핑 2/5회 · 이동 1/5회"처럼 업종별 사용 현황을 보여줄 때 쓴다.
+    "monthly_limit","monthly_point_cap"}, ...] 목록으로 돌려준다. 가맹점 매칭과 무관하게,
+    혜택 카드에 "쇼핑 2/5회 · 이동 1/5회"처럼 업종별 사용 현황을 보여줄 때 쓴다.
     """
     if not rate_table_json:
         return []
@@ -402,7 +406,7 @@ def parse_rate_table_categories(rate_table_json: str):
 
     categories = []
     for entry in rows:
-        if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3, 4, 5):
+        if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3, 4, 5, 6):
             continue
         raw_keywords = str(entry[0])
         label = raw_keywords.split(":", 1)[0] if ":" in raw_keywords else raw_keywords
@@ -410,24 +414,26 @@ def parse_rate_table_categories(rate_table_json: str):
         cap = entry[2] if len(entry) >= 3 else 0
         daily_limit = entry[3] if len(entry) >= 4 else 0
         monthly_limit = entry[4] if len(entry) >= 5 else 0
+        monthly_point_cap = entry[5] if len(entry) >= 6 else 0
         categories.append({
             "label": label,
             "percent": percent,
             "cap": cap,
             "daily_limit": daily_limit,
             "monthly_limit": monthly_limit,
+            "monthly_point_cap": monthly_point_cap,
         })
     return categories
 
 
 def rate_table_entry_by_label(rate_table_json: str, label: str, default_percent: float = 0, default_cap: float = 0):
     """사용자가 가맹점 자동인식 대신 업종을 직접 골랐을 때 쓴다. label과 정확히
-    일치하는 rate_table 항목의 (할인율, 건당한도, 일한도, 월한도)를 돌려준다."""
+    일치하는 rate_table 항목의 (할인율, 건당한도, 일한도, 월한도, 업종별월적립한도)를 돌려준다."""
     for cat in parse_rate_table_categories(rate_table_json):
         if cat["label"] == label:
             cap = cat["cap"] or default_cap
-            return cat["percent"], cap, cat["daily_limit"], cat["monthly_limit"]
-    return default_percent, default_cap, 0, 0
+            return cat["percent"], cap, cat["daily_limit"], cat["monthly_limit"], cat["monthly_point_cap"]
+    return default_percent, default_cap, 0, 0, 0
 
 
 def annotate_merchant(name: str) -> str:

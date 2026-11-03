@@ -366,14 +366,18 @@ def _serialize_cards(conn):
                 categories = parse_rate_table_categories(b["rate_table"])
                 if categories:
                     today_str = date.today().isoformat()
+                    this_month_str = today_str[:7]
                     counts = {}
                     today_counts = {}
+                    month_earned = {}
                     for l in logs:
                         cat = l["rate_category"]
                         if cat:
                             counts[cat] = counts.get(cat, 0) + 1
                             if l["used_at"] == today_str:
                                 today_counts[cat] = today_counts.get(cat, 0) + 1
+                            if l["used_at"][:7] == this_month_str:
+                                month_earned[cat] = month_earned.get(cat, 0) + (l["used_value"] or 0)
                     category_usage = [
                         {
                             "label": c["label"],
@@ -381,6 +385,8 @@ def _serialize_cards(conn):
                             "today_count": today_counts.get(c["label"], 0),
                             "daily_limit": c["daily_limit"],
                             "monthly_limit": c["monthly_limit"],
+                            "monthly_point_cap": c["monthly_point_cap"],
+                            "month_earned": month_earned.get(c["label"], 0),
                         }
                         for c in categories
                     ]
@@ -998,8 +1004,9 @@ def _clean_tier_table(raw):
 
 def _clean_rate_table(raw):
     """[["키워드1,키워드2",할인율], ...] 또는 [["키워드",할인율,건당한도], ...] 또는
-    [["키워드",할인율,건당한도,일한도,월한도], ...] 형태인지 검증하고 정돈된 JSON
-    문자열(또는 '')을 돌려준다."""
+    [["키워드",할인율,건당한도,일한도,월한도], ...] 또는
+    [["키워드",할인율,건당한도,일한도,월한도,업종별월적립한도], ...] 형태인지 검증하고
+    정돈된 JSON 문자열(또는 '')을 돌려준다."""
     raw = (raw or "").strip()
     if not raw:
         return ""
@@ -1009,7 +1016,7 @@ def _clean_rate_table(raw):
             raise ValueError
         cleaned = []
         for r in rows:
-            if len(r) not in (2, 3, 4, 5):
+            if len(r) not in (2, 3, 4, 5, 6):
                 raise ValueError
             row = [str(r[0]), float(r[1])]
             for extra in r[2:]:
@@ -1019,8 +1026,8 @@ def _clean_rate_table(raw):
         raise ValueError(
             "업종별 할인율 형식이 올바르지 않습니다. "
             '예: [["쇼핑몰,백화점,이커머스",10],["버스,지하철,택시",5]] '
-            '(건당한도는 3번째 값, 일/월 횟수한도는 4·5번째 값으로 추가 가능: '
-            '[["쇼핑",10,50000,1,5]])'
+            '(건당한도는 3번째 값, 일/월 횟수한도는 4·5번째 값, 업종별 월 적립(포인트) '
+            '한도는 6번째 값으로 추가 가능: [["쇼핑",10,50000,1,5,10000]])'
         )
     return json.dumps(cleaned, ensure_ascii=False)
 
@@ -1190,6 +1197,18 @@ def _category_usage_count(conn, benefit_id, category, used_at, monthly=False):
     return row["c"]
 
 
+def _category_month_earned(conn, benefit_id, category, used_at):
+    """rate_table 업종(category)별로 이번 달 이미 적립된 금액(포인트) 합계를 돌려준다.
+    씨티 리워드처럼 "업종별 월 1만 포인트까지만"처럼 횟수가 아니라 적립액 자체를
+    업종별로 깎는 카드의 한도 체크에 쓴다."""
+    row = conn.execute(
+        """SELECT COALESCE(SUM(used_value), 0) AS total FROM usage_logs
+           WHERE benefit_id = ? AND rate_category = ? AND substr(used_at, 1, 7) = ?""",
+        (benefit_id, category, used_at[:7]),
+    ).fetchone()
+    return row["total"]
+
+
 def _perf_spend_for_card(conn, card):
     """카드의 "전월실적" 합계 (_serialize_cards와 같은 기준: 수동 입력이 있으면
     그걸 쓰고, 없으면 지난달 확인된 결제 알림 합계에서 실적 제외 항목을 뺀 자동
@@ -1239,22 +1258,34 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
 
     if benefit["calc_mode"] == "percent_discount":
         if category_override:
-            percent, cap, daily_limit, monthly_limit = rate_table_entry_by_label(
+            percent, cap, daily_limit, monthly_limit, monthly_point_cap = rate_table_entry_by_label(
                 benefit["rate_table"], category_override, benefit["discount_percent"], benefit["per_txn_cap"]
             )
             category = category_override
         else:
-            percent, cap, daily_limit, monthly_limit, category = match_rate_table(
+            percent, cap, daily_limit, monthly_limit, monthly_point_cap, category = match_rate_table(
                 merchant, benefit["rate_table"], benefit["discount_percent"], benefit["per_txn_cap"]
             )
+        capped_note = ""
         if category and used_at:
             if daily_limit and _category_usage_count(conn, benefit_id, category, used_at) >= daily_limit:
                 return None, None, None, f"이 업종은 하루 {daily_limit:g}회까지만 할인되는데, 오늘 이미 한도를 채워서 이 결제는 할인 대상이 아닙니다."
             if monthly_limit and _category_usage_count(conn, benefit_id, category, used_at, monthly=True) >= monthly_limit:
                 return None, None, None, f"이 업종은 이번 달 {monthly_limit:g}회까지만 할인되는데, 이미 한도를 채워서 이 결제는 할인 대상이 아닙니다."
+            if monthly_point_cap:
+                already = _category_month_earned(conn, benefit_id, category, used_at)
+                remaining = max(0, monthly_point_cap - already)
+                if remaining <= 0:
+                    return None, None, None, f"이 업종은 이번 달 적립 한도 {monthly_point_cap:,.0f}포인트를 이미 채워서 이 결제는 적립 대상이 아닙니다."
         earned = compute_percent_discount(raw_value, percent, cap)
+        if category and used_at and monthly_point_cap:
+            already = _category_month_earned(conn, benefit_id, category, used_at)
+            remaining = max(0, monthly_point_cap - already)
+            if earned > remaining:
+                earned = remaining
+                capped_note = f"(업종별 월한도 {monthly_point_cap:,.0f}P 초과분 제외)"
         category_label = f"{category} " if category else ""
-        parts = [f"결제 {raw_value:,.0f}원 → 할인 {earned:,.0f}원({category_label}{percent:g}%)"]
+        parts = [f"결제 {raw_value:,.0f}원 → 할인 {earned:,.0f}원({category_label}{percent:g}%){capped_note}"]
         if memo:
             parts.append(memo)
         return earned, " · ".join(parts), (category or ""), None

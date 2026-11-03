@@ -374,7 +374,8 @@
     const categoryUsageHtml = (b.category_usage && b.category_usage.length)
       ? `<div class="category-usage">${b.category_usage.map((c) => {
           let text;
-          if (c.monthly_limit) text = `${escapeHtml(c.label)} 월${fmt(c.count)}/${fmt(c.monthly_limit)}`;
+          if (c.monthly_point_cap) text = `${escapeHtml(c.label)} ₩${fmt(c.month_earned)}/${fmt(c.monthly_point_cap)}`;
+          else if (c.monthly_limit) text = `${escapeHtml(c.label)} 월${fmt(c.count)}/${fmt(c.monthly_limit)}`;
           else if (c.daily_limit) text = `${escapeHtml(c.label)} 일${fmt(c.today_count)}/${fmt(c.daily_limit)}`;
           else text = `${escapeHtml(c.label)} ${fmt(c.count)}`;
           return `<span class="category-usage-item">${text}</span>`;
@@ -1238,7 +1239,7 @@
     if (!Array.isArray(rows)) return [defaultPercent, defaultCap, ""];
     const merchantLower = merchant.toLowerCase();
     for (const entry of rows) {
-      if (!Array.isArray(entry) || entry.length < 2 || entry.length > 5) continue;
+      if (!Array.isArray(entry) || entry.length < 2 || entry.length > 6) continue;
       const rawKeywords = String(entry[0]);
       const colonIdx = rawKeywords.indexOf(":");
       const label = colonIdx >= 0 ? rawKeywords.slice(0, colonIdx) : rawKeywords;
@@ -1263,7 +1264,7 @@
     }
     if (!Array.isArray(rows)) return [defaultPercent, defaultCap];
     for (const entry of rows) {
-      if (!Array.isArray(entry) || entry.length < 2 || entry.length > 5) continue;
+      if (!Array.isArray(entry) || entry.length < 2 || entry.length > 6) continue;
       const rawKeywords = String(entry[0]);
       const colonIdx = rawKeywords.indexOf(":");
       const entryLabel = colonIdx >= 0 ? rawKeywords.slice(0, colonIdx) : rawKeywords;
