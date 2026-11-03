@@ -25,6 +25,7 @@
       <button id="btn-add-card" class="btn small view-only-card">+ 카드 추가</button>
       <button id="btn-add-loan" class="btn small view-only-loan" style="display:none;">+ 대출 추가</button>
       <button id="btn-add-recurring" class="btn small view-only-recurring" style="display:none;">+ 고정지출 추가</button>
+      <button id="btn-add-insurance" class="btn small view-only-insurance" style="display:none;">+ 보험 추가</button>
     </div>
   </header>
 
@@ -32,6 +33,7 @@
     <button class="view-tab active" data-view="card">💳 카드</button>
     <button class="view-tab" data-view="loan">🏦 대출</button>
     <button class="view-tab" data-view="recurring">🔁 고정지출</button>
+    <button class="view-tab" data-view="insurance">🏥 보험</button>
   </nav>
 
   <div id="card-view">
@@ -139,6 +141,35 @@
     <main id="recurring-list" class="card-list">
       <p class="empty-hint" id="empty-recurring-hint">아직 등록된 고정지출이 없습니다. "고정지출 추가"를 눌러 시작하세요.</p>
     </main>
+  </div>
+
+  <div id="insurance-view" style="display:none;">
+    <section class="monthly-summary">
+      <div class="summary-boxes">
+        <div class="summary-box summary-earn">
+          <div class="summary-label">매월 내는 보험료</div>
+          <div class="summary-value" id="insurance-total-value">0원</div>
+        </div>
+      </div>
+    </section>
+    <div class="sort-row">
+      <label for="insurance-sort-select">정렬</label>
+      <select id="insurance-sort-select">
+        <option value="day">일자순</option>
+        <option value="amount">보험료순</option>
+      </select>
+      <button class="btn small" id="btn-insurance-automatch">자동 매칭 시도</button>
+      <span id="insurance-unmatched-total" style="margin-left:auto; font-weight:700; color:var(--accent-purple);"></span>
+    </div>
+    <main id="insurance-list" class="card-list">
+      <p class="empty-hint" id="empty-insurance-hint">아직 등록된 보험이 없습니다. "보험 추가"를 눌러 시작하세요.</p>
+    </main>
+
+    <section id="medical-section" class="inbox-section" style="display:none;">
+      <h2><button class="memo-toggle" id="medical-toggle">🏥 병원비·약국 결제 내역 <span id="medical-count" class="inbox-count"></span> ▾</button></h2>
+      <p class="hint" id="medical-unclaimed-total"></p>
+      <div id="medical-list" class="inbox-list" style="display:none;"></div>
+    </section>
   </div>
 
 </div>
@@ -477,14 +508,59 @@
   </div>
 </div>
 
-<!-- 고정지출 - 받은 알림 매칭 확인 모달 -->
-<div class="modal-backdrop" id="recurring-match-modal">
+<!-- 보험 추가/수정 모달 -->
+<div class="modal-backdrop" id="insurance-modal">
   <div class="modal">
-    <h2 id="recurring-match-title">결제 확인</h2>
-    <p class="hint" id="recurring-match-current"></p>
-    <div id="recurring-match-list" style="display:flex; flex-direction:column; gap:6px; margin:10px 0; max-height:50vh; overflow-y:auto;"></div>
+    <h2 id="insurance-modal-title">보험 추가</h2>
+    <label>보험사
+      <input type="text" id="insurance-company" placeholder="예: 메리츠화재해상보험">
+    </label>
+    <label>상품명
+      <input type="text" id="insurance-product-name" placeholder="예: 무배당 닥터키즈보험0904">
+    </label>
+    <label>피보험자
+      <input type="text" id="insurance-insured-name" placeholder="본인" value="본인">
+    </label>
+    <label>월보험료 (원)
+      <input type="number" id="insurance-premium" min="0" step="1" placeholder="예: 63320">
+    </label>
+    <label>결제수단
+      <select id="insurance-method-select"></select>
+      <input type="text" id="insurance-method" placeholder="결제수단을 직접 입력하세요" style="display:none;">
+    </label>
+    <label>매월 결제일 (선택)
+      <input type="number" id="insurance-day" min="0" max="31" placeholder="예: 15">
+    </label>
+    <label>계약일 (선택)
+      <input type="text" id="insurance-start-date" placeholder="예: 2008-02-18">
+    </label>
+    <label>납입완료일 (선택)
+      <input type="text" id="insurance-payment-end-date" placeholder="예: 2028-02-18">
+    </label>
+    <label>보험만기일 (선택, 종신이면 "종신"이라고 입력)
+      <input type="text" id="insurance-maturity-date" placeholder="예: 2065-02-18 또는 종신">
+    </label>
+    <label class="checkbox-row">
+      <input type="checkbox" id="insurance-active" checked> 현재 유지 중 (해지했으면 체크 해제)
+    </label>
+    <label>보장내용/약관/기타 (선택)
+      <textarea id="insurance-memo" rows="4" placeholder="보장내용, 증권번호, 납입 진행상황 등"></textarea>
+    </label>
     <div class="modal-actions">
-      <button class="btn secondary" id="recurring-match-cancel">닫기</button>
+      <button class="btn secondary" id="insurance-cancel">취소</button>
+      <button class="btn" id="insurance-save">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 고정지출/보험 - 받은 알림 매칭 확인 모달(공용) -->
+<div class="modal-backdrop" id="match-modal">
+  <div class="modal">
+    <h2 id="match-modal-title">결제 확인</h2>
+    <p class="hint" id="match-modal-current"></p>
+    <div id="match-modal-list" style="display:flex; flex-direction:column; gap:6px; margin:10px 0; max-height:50vh; overflow-y:auto;"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="match-modal-cancel">닫기</button>
     </div>
   </div>
 </div>

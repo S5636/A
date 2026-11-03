@@ -28,6 +28,7 @@ from models import (
     get_setting,
     init_db,
     is_cancelled_status,
+    is_medical_merchant,
     is_performance_excluded,
     match_benefit_keyword,
     match_rate_table,
@@ -152,6 +153,8 @@ def serialize_full():
             "no_benefit": serialize_no_benefit(conn),
             "loans": serialize_loans(conn),
             "recurring_payments": serialize_recurring_payments(conn),
+            "insurances": serialize_insurances(conn),
+            "medical_expenses": serialize_medical_expenses(conn),
         }
     finally:
         conn.close()
@@ -161,13 +164,44 @@ def serialize_recurring_payments(conn):
     rows = conn.execute(
         "SELECT * FROM recurring_payments ORDER BY payment_day ASC, sort_order ASC, id ASC"
     ).fetchall()
+    return _attach_match_info(conn, rows, "recurring_id")
+
+
+def serialize_insurances(conn):
+    rows = conn.execute(
+        "SELECT * FROM insurances ORDER BY payment_day ASC, sort_order ASC, id ASC"
+    ).fetchall()
+    return _attach_match_info(conn, rows, "insurance_id")
+
+
+def serialize_medical_expenses(conn):
+    """받은 알림 중 가맹점명으로 봤을 때 병원/약국 등 의료기관 결제로 보이는 것들을
+    모아서, 실손 등으로 청구했는지(medical_claimed) 체크할 수 있게 보여준다."""
+    rows = conn.execute(
+        "SELECT * FROM inbox_items WHERE merchant != '' ORDER BY occurred_at DESC, id DESC"
+    ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "amount": r["amount"],
+            "merchant": r["merchant"],
+            "occurred_at": r["occurred_at"],
+            "claimed": bool(r["medical_claimed"]),
+        }
+        for r in rows
+        if is_medical_merchant(r["merchant"])
+    ]
+
+
+def _attach_match_info(conn, rows, fk_column):
+    """고정지출/보험 공용: 이번 달 받은 알림 중 이 항목과 매칭된 게 있는지 붙여준다."""
     current_ym = current_year_month()
     result = []
     for r in rows:
         item = dict(r)
         match = conn.execute(
-            """SELECT amount, merchant, occurred_at FROM inbox_items
-               WHERE recurring_id = ? AND substr(occurred_at, 1, 7) = ?
+            f"""SELECT amount, merchant, occurred_at FROM inbox_items
+               WHERE {fk_column} = ? AND substr(occurred_at, 1, 7) = ?
                ORDER BY occurred_at DESC LIMIT 1""",
             (r["id"], current_ym),
         ).fetchone()
@@ -180,32 +214,30 @@ def serialize_recurring_payments(conn):
 
 
 def _extract_method_last4(payment_method):
-    """고정지출의 결제수단 문자열 끝에 '(2087)'처럼 붙은 카드 뒷자리를 뽑는다.
+    """고정지출/보험의 결제수단 문자열 끝에 '(2087)'처럼 붙은 카드 뒷자리를 뽑는다.
     현금/계좌이체처럼 괄호가 없으면 빈 문자열(= 카드 뒷자리로는 거를 수 없음)."""
     m = re.search(r"\((\d{3,4})\)\s*$", payment_method or "")
     return m.group(1) if m else ""
 
 
-def _try_auto_match_recurring(conn, inbox_id):
+def _try_auto_match(conn, inbox_id, fk_column, candidate_sql):
     """받은 알림 하나를, 금액이 정확히 같고(결제수단에 카드 뒷자리가 있으면
-    그것까지 일치하는) 활성 고정지출이 '정확히 하나'일 때만 자동으로 묶는다.
-    후보가 없거나 여러 개면 애매한 거라 손대지 않고 사용자가 직접 고르게 둔다.
+    그것까지 일치하는) 활성 항목(고정지출 또는 보험)이 '정확히 하나'일 때만
+    자동으로 묶는다. 후보가 없거나 여러 개면 애매한 거라 손대지 않고 사용자가
+    직접 고르게 둔다.
 
-    주의: 여기선 inbox_items.status를 절대 바꾸지 않는다(recurring_id만 추가로
-    달아둠). status를 건드리면 "받은 알림" 혜택배정 큐에서 사라지고, 전월실적
+    주의: 여기선 inbox_items.status를 절대 바꾸지 않는다(recurring_id/insurance_id만
+    추가로 달아둠). status를 건드리면 "받은 알림" 혜택배정 큐에서 사라지고, 전월실적
     자동집계(status가 assigned/no_benefit인 것만 합산)에서도 빠지는 문제가
-    생기기 때문 - 카드로 결제한 고정지출도 전월실적엔 그대로 잡혀야 한다."""
+    생기기 때문 - 카드로 결제한 고정지출/보험료도 전월실적엔 그대로 잡혀야 한다."""
     item = conn.execute(
-        "SELECT * FROM inbox_items WHERE id = ? AND recurring_id IS NULL",
+        "SELECT * FROM inbox_items WHERE id = ? AND recurring_id IS NULL AND insurance_id IS NULL",
         (inbox_id,),
     ).fetchone()
     if not item or not item["amount"]:
         return False
 
-    candidates = conn.execute(
-        "SELECT * FROM recurring_payments WHERE active = 1 AND amount = ?",
-        (item["amount"],),
-    ).fetchall()
+    candidates = conn.execute(candidate_sql, (item["amount"],)).fetchall()
 
     matches = []
     for rp in candidates:
@@ -218,10 +250,24 @@ def _try_auto_match_recurring(conn, inbox_id):
         return False
 
     conn.execute(
-        "UPDATE inbox_items SET recurring_id = ? WHERE id = ?",
+        f"UPDATE inbox_items SET {fk_column} = ? WHERE id = ?",
         (matches[0]["id"], inbox_id),
     )
     return True
+
+
+def _try_auto_match_recurring(conn, inbox_id):
+    return _try_auto_match(
+        conn, inbox_id, "recurring_id",
+        "SELECT * FROM recurring_payments WHERE active = 1 AND amount = ?",
+    )
+
+
+def _try_auto_match_insurance(conn, inbox_id):
+    return _try_auto_match(
+        conn, inbox_id, "insurance_id",
+        "SELECT * FROM insurances WHERE active = 1 AND monthly_premium = ?",
+    )
 
 
 def serialize_loans(conn):
@@ -987,6 +1033,215 @@ def auto_match_all_recurring():
     return jsonify(result)
 
 
+@app.route("/api/insurances", methods=["POST"])
+def create_insurance():
+    data = request.get_json(force=True) or {}
+    company = (data.get("company") or "").strip()
+    product_name = (data.get("product_name") or "").strip()
+    if not product_name:
+        return jsonify({"error": "상품명을 입력하세요."}), 400
+    try:
+        monthly_premium = float(data.get("monthly_premium") or 0)
+    except (TypeError, ValueError):
+        monthly_premium = 0
+    try:
+        payment_day = int(data.get("payment_day") or 0)
+    except (TypeError, ValueError):
+        payment_day = 0
+
+    conn = get_conn()
+    try:
+        max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM insurances").fetchone()["m"]
+        conn.execute(
+            """INSERT INTO insurances (company, product_name, insured_name, monthly_premium,
+               payment_day, payment_method, start_date, payment_end_date, maturity_date,
+               active, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                company,
+                product_name,
+                (data.get("insured_name") or "본인").strip(),
+                monthly_premium,
+                payment_day,
+                (data.get("payment_method") or "").strip(),
+                (data.get("start_date") or "").strip(),
+                (data.get("payment_end_date") or "").strip(),
+                (data.get("maturity_date") or "").strip(),
+                1 if data.get("active", True) else 0,
+                (data.get("memo") or "").strip(),
+                max_order + 1,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/insurances/<int:item_id>", methods=["PUT"])
+def update_insurance(item_id):
+    data = request.get_json(force=True) or {}
+    conn = get_conn()
+    try:
+        item = conn.execute("SELECT * FROM insurances WHERE id = ?", (item_id,)).fetchone()
+        if not item:
+            return jsonify({"error": "항목을 찾을 수 없습니다."}), 404
+
+        product_name = (data.get("product_name") or item["product_name"]).strip()
+        try:
+            monthly_premium = float(data.get("monthly_premium", item["monthly_premium"]))
+        except (TypeError, ValueError):
+            monthly_premium = item["monthly_premium"]
+        try:
+            payment_day = int(data.get("payment_day", item["payment_day"]))
+        except (TypeError, ValueError):
+            payment_day = item["payment_day"]
+        try:
+            sort_order = int(data.get("sort_order", item["sort_order"]))
+        except (TypeError, ValueError):
+            sort_order = item["sort_order"]
+        active = 1 if data.get("active", bool(item["active"])) else 0
+
+        conn.execute(
+            """UPDATE insurances SET company=?, product_name=?, insured_name=?, monthly_premium=?,
+               payment_day=?, payment_method=?, start_date=?, payment_end_date=?, maturity_date=?,
+               active=?, memo=?, sort_order=? WHERE id=?""",
+            (
+                (data.get("company", item["company"]) or "").strip(),
+                product_name,
+                (data.get("insured_name", item["insured_name"]) or "본인").strip(),
+                monthly_premium,
+                payment_day,
+                (data.get("payment_method", item["payment_method"]) or "").strip(),
+                (data.get("start_date", item["start_date"]) or "").strip(),
+                (data.get("payment_end_date", item["payment_end_date"]) or "").strip(),
+                (data.get("maturity_date", item["maturity_date"]) or "").strip(),
+                active,
+                (data.get("memo", item["memo"]) or "").strip(),
+                sort_order,
+                item_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/insurances/<int:item_id>", methods=["DELETE"])
+def delete_insurance(item_id):
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM insurances WHERE id = ?", (item_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/insurances/<int:item_id>/match-candidates", methods=["GET"])
+def insurance_match_candidates(item_id):
+    """이번 달 결제 알림 중 아직 다른 보험/고정지출에 안 묶인 것들을 후보로 보여준다."""
+    conn = get_conn()
+    try:
+        current_ym = current_year_month()
+        rows = conn.execute(
+            """SELECT * FROM inbox_items
+               WHERE insurance_id IS NULL AND recurring_id IS NULL AND substr(occurred_at, 1, 7) = ?
+               ORDER BY occurred_at DESC""",
+            (current_ym,),
+        ).fetchall()
+        return jsonify([
+            {
+                "id": r["id"],
+                "amount": r["amount"],
+                "merchant": r["merchant"],
+                "last4": r["last4"],
+                "occurred_at": r["occurred_at"],
+                "status": r["status"],
+            }
+            for r in rows
+        ])
+    finally:
+        conn.close()
+
+
+@app.route("/api/insurances/<int:item_id>/confirm-match", methods=["POST"])
+def confirm_insurance_match(item_id):
+    data = request.get_json(force=True) or {}
+    try:
+        inbox_id = int(data.get("inbox_item_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "결제 내역을 선택하세요."}), 400
+
+    conn = get_conn()
+    try:
+        item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
+        if not item or item["insurance_id"] is not None:
+            return jsonify({"error": "이미 처리되었거나 존재하지 않는 내역입니다."}), 404
+        conn.execute(
+            "UPDATE inbox_items SET insurance_id = ? WHERE id = ?",
+            (item_id, inbox_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/insurances/<int:item_id>/unmatch", methods=["POST"])
+def unmatch_insurance(item_id):
+    conn = get_conn()
+    try:
+        current_ym = current_year_month()
+        conn.execute(
+            """UPDATE inbox_items SET insurance_id = NULL
+               WHERE insurance_id = ? AND substr(occurred_at, 1, 7) = ?""",
+            (item_id, current_ym),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/insurances/auto-match", methods=["POST"])
+def auto_match_all_insurances():
+    conn = get_conn()
+    try:
+        pending_ids = [
+            r["id"] for r in conn.execute(
+                "SELECT id FROM inbox_items WHERE insurance_id IS NULL AND recurring_id IS NULL"
+            )
+        ]
+        matched = 0
+        for iid in pending_ids:
+            if _try_auto_match_insurance(conn, iid):
+                matched += 1
+        conn.commit()
+    finally:
+        conn.close()
+    result = serialize_full()
+    result["auto_match_count"] = matched
+    return jsonify(result)
+
+
+@app.route("/api/medical-expenses/<int:item_id>/claim", methods=["POST"])
+def toggle_medical_claim(item_id):
+    """병원비/약국 결제 하나를 실손 등으로 청구했는지 체크/해제한다."""
+    data = request.get_json(force=True, silent=True) or {}
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE inbox_items SET medical_claimed = ? WHERE id = ?",
+            (1 if data.get("claimed") else 0, item_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
 def _clean_tier_table(raw):
     """[[기준금액,한도], ...] 형태인지 검증하고 정돈된 JSON 문자열(또는 '')을 돌려준다."""
     raw = (raw or "").strip()
@@ -1440,6 +1695,7 @@ def create_inbox_item():
                 (text, parsed["amount"], parsed["last4"], parsed["issuer"], parsed["merchant"], occurred_at),
             )
             _try_auto_match_recurring(conn, cur.lastrowid)
+            _try_auto_match_insurance(conn, cur.lastrowid)
         conn.commit()
     finally:
         conn.close()

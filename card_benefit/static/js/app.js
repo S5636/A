@@ -10,7 +10,7 @@
 
   const CARD_COLORS = ["#a78bfa", "#ec4899", "#fab219", "#22c55e", "#3987e5", "#f97316"];
 
-  let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [] };
+  let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [] };
   let noBenefitOpen = false;
   const openLogPanels = new Set(); // benefit id 목록 - 펼쳐진 사용내역 기억
   const openMemoPanels = new Set(); // "card-1", "benefit-3" 같은 키 - 펼쳐진 설명 기억
@@ -97,11 +97,13 @@
     renderMonthlySummary();
     renderLoans();
     renderRecurring();
+    renderInsurance();
+    renderMedical();
     requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
   }
 
-  // ---- 탭(카드/대출/고정지출) ----
-  const VIEW_NAMES = ["card", "loan", "recurring"];
+  // ---- 탭(카드/대출/고정지출/보험) ----
+  const VIEW_NAMES = ["card", "loan", "recurring", "insurance"];
   let activeView = "card";
   function applyActiveView() {
     document.querySelectorAll(".view-tab").forEach((b) => b.classList.toggle("active", b.dataset.view === activeView));
@@ -911,7 +913,7 @@
       render();
     });
     const matchBadge = el.querySelector(".match-badge");
-    if (matchBadge) matchBadge.addEventListener("click", () => openMatchModal(item));
+    if (matchBadge) matchBadge.addEventListener("click", () => openMatchModal("recurring", item, item.name));
     el.querySelectorAll(".memo-toggle").forEach((btn) =>
       btn.addEventListener("click", () => {
         const key = btn.dataset.memoKey;
@@ -922,10 +924,10 @@
     );
   }
 
-  // ---- 고정지출 - 받은 알림 매칭 확인 ----
-  const recurringMatchModal = document.getElementById("recurring-match-modal");
-  document.getElementById("recurring-match-cancel").addEventListener("click", () => {
-    recurringMatchModal.classList.remove("open");
+  // ---- 고정지출/보험 - 받은 알림 매칭 확인(공용) ----
+  const matchModal = document.getElementById("match-modal");
+  document.getElementById("match-modal-cancel").addEventListener("click", () => {
+    matchModal.classList.remove("open");
   });
   document.getElementById("btn-recurring-automatch").addEventListener("click", async () => {
     const result = await api("/api/recurring/auto-match", { method: "POST" });
@@ -934,19 +936,19 @@
     alert(`${result.auto_match_count || 0}건 자동 매칭됐습니다.`);
   });
 
-  async function openMatchModal(item) {
-    document.getElementById("recurring-match-title").textContent = `"${item.name}" 이번 달 결제 확인`;
-    const currentEl = document.getElementById("recurring-match-current");
-    const listEl = document.getElementById("recurring-match-list");
+  async function openMatchModal(entityType, item, label) {
+    document.getElementById("match-modal-title").textContent = `"${label}" 이번 달 결제 확인`;
+    const currentEl = document.getElementById("match-modal-current");
+    const listEl = document.getElementById("match-modal-list");
     listEl.innerHTML = "";
-    recurringMatchModal.classList.add("open");
+    matchModal.classList.add("open");
 
     if (item.matched_this_month) {
       currentEl.textContent = `${item.matched_merchant ? item.matched_merchant + " · " : ""}${fmt(item.matched_amount)}원 · ${item.matched_occurred_at || ""} 으로 확인됨`;
-      listEl.innerHTML = `<button class="btn secondary" id="recurring-match-undo">매칭 취소</button>`;
-      document.getElementById("recurring-match-undo").addEventListener("click", async () => {
-        state = await api(`/api/recurring/${item.id}/unmatch`, { method: "POST" });
-        recurringMatchModal.classList.remove("open");
+      listEl.innerHTML = `<button class="btn secondary" id="match-modal-undo">매칭 취소</button>`;
+      document.getElementById("match-modal-undo").addEventListener("click", async () => {
+        state = await api(`/api/${entityType}/${item.id}/unmatch`, { method: "POST" });
+        matchModal.classList.remove("open");
         render();
       });
       return;
@@ -954,7 +956,7 @@
 
     currentEl.textContent = "아직 이번 달 결제 확인 안 됨. 아래에서 해당하는 받은 알림을 고르세요.";
     listEl.innerHTML = `<p class="hint">불러오는 중...</p>`;
-    const candidates = await api(`/api/recurring/${item.id}/match-candidates`);
+    const candidates = await api(`/api/${entityType}/${item.id}/match-candidates`);
     if (!candidates.length) {
       listEl.innerHTML = `<p class="hint">이번 달 들어온 알림 중 후보가 없습니다.</p>`;
       return;
@@ -968,12 +970,12 @@
     `).join("");
     listEl.querySelectorAll(".match-candidate").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        state = await api(`/api/recurring/${item.id}/confirm-match`, {
+        state = await api(`/api/${entityType}/${item.id}/confirm-match`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ inbox_item_id: Number(btn.dataset.id) }),
         });
-        recurringMatchModal.classList.remove("open");
+        matchModal.classList.remove("open");
         render();
       });
     });
@@ -1004,10 +1006,10 @@
   function methodBaseName(s) {
     return normMethod((s || "").replace(/\([^)]*\)\s*$/, ""));
   }
-  function buildMethodOptions() {
+  function buildMethodOptions(sourceList) {
     const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
     const cardBases = cardOptions.map(methodBaseName);
-    const usedOptions = state.recurring_payments
+    const usedOptions = (sourceList || state.recurring_payments)
       .map((r) => (r.payment_method || "").trim())
       .filter((o) => {
         if (!o) return false;
@@ -1081,6 +1083,235 @@
     recurringModal.classList.remove("open");
     render();
   });
+
+  // ---- 보험 목록 ----
+  let insuranceSort = "day";
+  const insuranceSortSelect = document.getElementById("insurance-sort-select");
+  insuranceSortSelect.addEventListener("change", () => {
+    insuranceSort = insuranceSortSelect.value;
+    render();
+  });
+
+  function sortedInsurances() {
+    const items = state.insurances.slice();
+    if (insuranceSort === "amount") {
+      items.sort((a, b) => (b.monthly_premium || 0) - (a.monthly_premium || 0));
+    } else {
+      items.sort((a, b) => {
+        if (!a.payment_day && !b.payment_day) return 0;
+        if (!a.payment_day) return 1;
+        if (!b.payment_day) return -1;
+        return a.payment_day - b.payment_day;
+      });
+    }
+    return items;
+  }
+
+  function renderInsurance() {
+    const list = document.getElementById("insurance-list");
+    const emptyHint = document.getElementById("empty-insurance-hint");
+    list.querySelectorAll(".card").forEach((el) => el.remove());
+    emptyHint.style.display = state.insurances.length ? "none" : "block";
+
+    const total = state.insurances.filter((r) => r.active).reduce((sum, r) => sum + (r.monthly_premium || 0), 0);
+    document.getElementById("insurance-total-value").textContent = `₩${fmt(total)}`;
+
+    document.getElementById("insurance-unmatched-total").textContent =
+      `미확인 ₩${fmt(state.insurances.filter((r) => r.active && !r.matched_this_month).reduce((sum, r) => sum + (r.monthly_premium || 0), 0))}`;
+
+    sortedInsurances().forEach((item) => {
+      const el = document.createElement("div");
+      el.className = "card";
+      el.id = `insurance-${item.id}`;
+      el.innerHTML = insuranceTemplate(item);
+      list.appendChild(el);
+      wireInsurance(el, item);
+    });
+  }
+
+  function insuranceTemplate(item) {
+    const infoLine = [
+      item.insured_name && item.insured_name !== "본인" ? `피보험자 ${item.insured_name}` : "",
+      item.start_date ? `가입 ${item.start_date}` : "",
+      item.payment_end_date ? `납입완료 ${item.payment_end_date}` : "",
+      item.maturity_date ? `만기 ${item.maturity_date}` : "",
+    ].filter(Boolean).join(" / ");
+    return `
+      <div class="card-head">
+        <div class="card-head-left">
+          ${item.payment_day ? `<div class="loan-day-badge" title="매월 결제일">${item.payment_day}</div>` : ""}
+          <div class="card-text-stack">
+            <div class="card-text-row">
+              <span class="card-title-scroll"><span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.product_name)}</span></span>
+              <span class="card-head-right">
+                ${item.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">해지</span>`}
+                ${item.active ? `<span class="match-badge" data-id="${item.id}" title="${item.matched_this_month ? `확인됨: ${item.matched_merchant ? escapeHtml(item.matched_merchant) + " " : ""}${fmt(item.matched_amount)}원` : "이번 달 결제 확인 안 됨 - 눌러서 매칭"}">${item.matched_this_month ? "✅" : "❓"}</span>` : ""}
+                <span class="benefit-remaining amount-accent">${fmt(item.monthly_premium)}원</span>
+              </span>
+            </div>
+            <div class="card-text-row">
+              <span class="card-method-dim">${item.company ? escapeHtml(item.company) : "보험사 미입력"}</span>
+              <span class="card-head-right">
+                <button class="icon-btn edit-insurance" data-id="${item.id}" title="수정">✏️</button>
+                <button class="icon-btn delete-insurance" data-id="${item.id}" title="삭제">🗑️</button>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      ${infoLine ? `<div class="perf-row-sub">${escapeHtml(infoLine)}</div>` : ""}
+      ${memoToggleTemplate(`insurance-${item.id}`, item.memo)}
+    `;
+  }
+
+  function wireInsurance(el, item) {
+    el.querySelector(".edit-insurance").addEventListener("click", () => openInsuranceModal(item));
+    el.querySelector(".delete-insurance").addEventListener("click", async () => {
+      if (!confirm(`"${item.product_name}"을(를) 삭제할까요?`)) return;
+      state = await api(`/api/insurances/${item.id}`, { method: "DELETE" });
+      render();
+    });
+    const matchBadge = el.querySelector(".match-badge");
+    if (matchBadge) matchBadge.addEventListener("click", () => openMatchModal("insurances", item, item.product_name));
+    el.querySelectorAll(".memo-toggle").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.memoKey;
+        if (openMemoPanels.has(key)) openMemoPanels.delete(key);
+        else openMemoPanels.add(key);
+        render();
+      })
+    );
+  }
+
+  document.getElementById("btn-insurance-automatch").addEventListener("click", async () => {
+    const result = await api("/api/insurances/auto-match", { method: "POST" });
+    state = result;
+    render();
+    alert(`${result.auto_match_count || 0}건 자동 매칭됐습니다.`);
+  });
+
+  // ---- 보험 추가/수정 모달 ----
+  const insuranceModal = document.getElementById("insurance-modal");
+  let editingInsuranceId = null;
+
+  const insuranceMethodSelect = document.getElementById("insurance-method-select");
+  const insuranceMethodInput = document.getElementById("insurance-method");
+  const CUSTOM_METHOD_INS = "__custom__";
+
+  insuranceMethodSelect.addEventListener("change", () => {
+    if (insuranceMethodSelect.value === CUSTOM_METHOD_INS) {
+      insuranceMethodInput.style.display = "";
+      insuranceMethodInput.value = "";
+      insuranceMethodInput.focus();
+    } else {
+      insuranceMethodInput.style.display = "none";
+      insuranceMethodInput.value = "";
+    }
+  });
+
+  function openInsuranceModal(item) {
+    editingInsuranceId = item ? item.id : null;
+    document.getElementById("insurance-modal-title").textContent = item ? "보험 수정" : "보험 추가";
+    document.getElementById("insurance-company").value = item ? item.company : "";
+    document.getElementById("insurance-product-name").value = item ? item.product_name : "";
+    document.getElementById("insurance-insured-name").value = item ? item.insured_name : "본인";
+    document.getElementById("insurance-premium").value = item ? item.monthly_premium : "";
+
+    const options = buildMethodOptions(state.insurances);
+    const current = item ? (item.payment_method || "") : "";
+    const matched = options.find((o) => normMethod(o) === normMethod(current));
+    insuranceMethodSelect.innerHTML = [
+      `<option value="">선택 안 함</option>`,
+      ...options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`),
+      `<option value="${CUSTOM_METHOD_INS}">직접 입력</option>`,
+    ].join("");
+    if (current && !matched) {
+      insuranceMethodSelect.value = CUSTOM_METHOD_INS;
+      insuranceMethodInput.style.display = "";
+      insuranceMethodInput.value = current;
+    } else {
+      insuranceMethodSelect.value = matched || "";
+      insuranceMethodInput.style.display = "none";
+      insuranceMethodInput.value = "";
+    }
+
+    document.getElementById("insurance-day").value = item && item.payment_day ? item.payment_day : "";
+    document.getElementById("insurance-start-date").value = item ? item.start_date : "";
+    document.getElementById("insurance-payment-end-date").value = item ? item.payment_end_date : "";
+    document.getElementById("insurance-maturity-date").value = item ? item.maturity_date : "";
+    document.getElementById("insurance-active").checked = item ? !!item.active : true;
+    document.getElementById("insurance-memo").value = item ? item.memo : "";
+    insuranceModal.classList.add("open");
+  }
+  document.getElementById("btn-add-insurance").addEventListener("click", () => openInsuranceModal(null));
+  document.getElementById("insurance-cancel").addEventListener("click", () => insuranceModal.classList.remove("open"));
+  document.getElementById("insurance-save").addEventListener("click", async () => {
+    const payload = {
+      company: document.getElementById("insurance-company").value.trim(),
+      product_name: document.getElementById("insurance-product-name").value.trim(),
+      insured_name: document.getElementById("insurance-insured-name").value.trim() || "본인",
+      monthly_premium: document.getElementById("insurance-premium").value || 0,
+      payment_method: insuranceMethodSelect.value === CUSTOM_METHOD_INS ? insuranceMethodInput.value.trim() : insuranceMethodSelect.value,
+      payment_day: document.getElementById("insurance-day").value || 0,
+      start_date: document.getElementById("insurance-start-date").value.trim(),
+      payment_end_date: document.getElementById("insurance-payment-end-date").value.trim(),
+      maturity_date: document.getElementById("insurance-maturity-date").value.trim(),
+      active: document.getElementById("insurance-active").checked,
+      memo: document.getElementById("insurance-memo").value.trim(),
+    };
+    if (!payload.product_name) { alert("상품명을 입력하세요."); return; }
+    const url = editingInsuranceId ? `/api/insurances/${editingInsuranceId}` : "/api/insurances";
+    const method = editingInsuranceId ? "PUT" : "POST";
+    state = await api(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    insuranceModal.classList.remove("open");
+    render();
+  });
+
+  // ---- 병원비·약국 청구 체크 ----
+  const medicalSection = document.getElementById("medical-section");
+  const medicalList = document.getElementById("medical-list");
+  let medicalOpen = false;
+  document.getElementById("medical-toggle").addEventListener("click", () => {
+    medicalOpen = !medicalOpen;
+    render();
+  });
+
+  function renderMedical() {
+    const items = state.medical_expenses || [];
+    medicalSection.style.display = items.length ? "block" : "none";
+    document.getElementById("medical-count").textContent = items.length ? `${items.length}건` : "";
+    medicalList.style.display = medicalOpen ? "flex" : "none";
+
+    const unclaimedTotal = items.filter((m) => !m.claimed).reduce((sum, m) => sum + (m.amount || 0), 0);
+    document.getElementById("medical-unclaimed-total").textContent = `청구 안 한 병원비 합계 ₩${fmt(unclaimedTotal)}`;
+
+    medicalList.innerHTML = items.map((m) => `
+      <div class="inbox-item">
+        <div class="inbox-item-info">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" class="medical-claim-check" data-id="${m.id}" ${m.claimed ? "checked" : ""}>
+            <span class="inbox-item-amount">${fmt(m.amount)}원</span>
+            ${m.merchant ? " · " + escapeHtml(m.merchant) : ""}
+          </label>
+          <div class="inbox-item-sub">${m.occurred_at}${m.claimed ? " · 청구함" : ""}</div>
+        </div>
+      </div>
+    `).join("");
+    medicalList.querySelectorAll(".medical-claim-check").forEach((cb) => {
+      cb.addEventListener("change", async () => {
+        state = await api(`/api/medical-expenses/${cb.dataset.id}/claim`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ claimed: cb.checked }),
+        });
+        render();
+      });
+    });
+  }
 
   // ---- 카드 모달 ----
   const cardModal = document.getElementById("card-modal");

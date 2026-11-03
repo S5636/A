@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     card_id INTEGER REFERENCES cards(id) ON DELETE SET NULL,
     benefit_id INTEGER REFERENCES benefits(id) ON DELETE SET NULL,
     recurring_id INTEGER REFERENCES recurring_payments(id) ON DELETE SET NULL,  -- 고정지출과 매칭됐으면
+    insurance_id INTEGER REFERENCES insurances(id) ON DELETE SET NULL,  -- 보험료와 매칭됐으면
+    medical_claimed INTEGER NOT NULL DEFAULT 0,  -- 병원비/약국 결제를 실손 등으로 청구했는지
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -136,6 +138,25 @@ CREATE TABLE IF NOT EXISTS recurring_payments (
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+-- 보험(매달 내는 보험료 + 가입 내용). 고정지출과 구조는 비슷하지만 피보험자/계약일/
+-- 만기일처럼 보험 고유 정보가 있어서 별도 표로 관리한다.
+CREATE TABLE IF NOT EXISTS insurances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT NOT NULL DEFAULT '',        -- 보험사
+    product_name TEXT NOT NULL DEFAULT '',   -- 상품명
+    insured_name TEXT DEFAULT '본인',         -- 피보험자
+    monthly_premium REAL NOT NULL DEFAULT 0,
+    payment_day INTEGER NOT NULL DEFAULT 0,  -- 매월 며칠 출금(1~31, 0=미정)
+    payment_method TEXT DEFAULT '',          -- 카드결제 매칭용(예: '신한 더모아(1234)')
+    start_date TEXT DEFAULT '',              -- 계약일
+    payment_end_date TEXT DEFAULT '',        -- 납입완료일
+    maturity_date TEXT DEFAULT '',           -- 보험만기일(날짜 또는 '종신' 등 텍스트 그대로)
+    active INTEGER NOT NULL DEFAULT 1,       -- 0이면 해지
+    memo TEXT DEFAULT '',                    -- 보장내용/약관/증권번호 등 자유 기록
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
 """
 
 
@@ -178,6 +199,8 @@ def init_db():
         _ensure_column(conn, "loans", "withdrawal_account", "withdrawal_account TEXT DEFAULT ''")
         _ensure_column(conn, "loans", "paid_check_month", "paid_check_month TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "recurring_id", "recurring_id INTEGER DEFAULT NULL")
+        _ensure_column(conn, "inbox_items", "insurance_id", "insurance_id INTEGER DEFAULT NULL")
+        _ensure_column(conn, "inbox_items", "medical_claimed", "medical_claimed INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     finally:
         conn.close()
@@ -349,6 +372,23 @@ def match_benefit_keyword(merchant: str, merchant_keywords: str) -> bool:
     merchant_lower = merchant.lower()
     keywords = [k.strip().lower() for k in merchant_keywords.split(",") if k.strip()]
     return any(k in merchant_lower for k in keywords)
+
+
+_MEDICAL_KEYWORDS = [
+    "병원", "의원", "클리닉", "한의원", "한방", "치과", "약국", "정형외과",
+    "피부과", "이비인후과", "소아과", "산부인과", "안과", "내과", "외과",
+    "비뇨기과", "정신건강의학과", "신경과", "재활의학과", "성형외과",
+]
+
+
+def is_medical_merchant(merchant: str) -> bool:
+    """가맹점명으로 병원/약국 등 의료기관 결제인지 대략 판단한다(실손 청구 체크용).
+    완벽한 판별은 불가능하니 흔한 명칭 키워드로 넓게 잡고, 아니면 사용자가
+    목록에서 직접 걸러낸다."""
+    if not merchant:
+        return False
+    merchant_lower = merchant.lower()
+    return any(k in merchant for k in _MEDICAL_KEYWORDS) or "pharmacy" in merchant_lower
 
 
 def match_rate_table(merchant: str, rate_table_json: str, default_percent: float = 0, default_cap: float = 0):
