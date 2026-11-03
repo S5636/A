@@ -71,9 +71,10 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     issuer TEXT DEFAULT '',
     merchant TEXT DEFAULT '',
     occurred_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-    status TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'assigned'
+    status TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'assigned' | 'no_benefit' | 'recurring_matched'
     card_id INTEGER REFERENCES cards(id) ON DELETE SET NULL,
     benefit_id INTEGER REFERENCES benefits(id) ON DELETE SET NULL,
+    recurring_id INTEGER REFERENCES recurring_payments(id) ON DELETE SET NULL,  -- 고정지출과 매칭됐으면
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -176,6 +177,7 @@ def init_db():
         _ensure_column(conn, "loans", "payment_months", "payment_months TEXT DEFAULT ''")
         _ensure_column(conn, "loans", "withdrawal_account", "withdrawal_account TEXT DEFAULT ''")
         _ensure_column(conn, "loans", "paid_check_month", "paid_check_month TEXT DEFAULT ''")
+        _ensure_column(conn, "inbox_items", "recurring_id", "recurring_id INTEGER DEFAULT NULL")
         conn.commit()
     finally:
         conn.close()

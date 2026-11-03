@@ -837,6 +837,9 @@
     document.getElementById("recurring-total-value").textContent = `₩${fmt(total)}`;
     document.getElementById("recurring-grand-total-value").textContent = `₩${fmt(total + loanTotal)}`;
 
+    document.getElementById("recurring-unmatched-total").textContent =
+      `미확인 ₩${fmt(state.recurring_payments.filter((r) => r.active && !r.matched_this_month).reduce((sum, r) => sum + (r.amount || 0), 0))}`;
+
     sortedRecurring().forEach((item) => {
       const el = document.createElement("div");
       el.className = "card";
@@ -860,6 +863,7 @@
               <span class="card-head-right">
                 ${item.category ? `<span class="loan-type-badge">${escapeHtml(item.category)}</span>` : ""}
                 ${item.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">중단</span>`}
+                ${item.active ? `<span class="match-badge" data-id="${item.id}" title="${item.matched_this_month ? `확인됨: ${item.matched_merchant ? escapeHtml(item.matched_merchant) + " " : ""}${fmt(item.matched_amount)}원` : "이번 달 결제 확인 안 됨 - 눌러서 매칭"}">${item.matched_this_month ? "✅" : "❓"}</span>` : ""}
                 <span class="benefit-remaining amount-accent">${amountText}원</span>
               </span>
             </div>
@@ -884,6 +888,8 @@
       state = await api(`/api/recurring/${item.id}`, { method: "DELETE" });
       render();
     });
+    const matchBadge = el.querySelector(".match-badge");
+    if (matchBadge) matchBadge.addEventListener("click", () => openMatchModal(item));
     el.querySelectorAll(".memo-toggle").forEach((btn) =>
       btn.addEventListener("click", () => {
         const key = btn.dataset.memoKey;
@@ -892,6 +898,62 @@
         render();
       })
     );
+  }
+
+  // ---- 고정지출 - 받은 알림 매칭 확인 ----
+  const recurringMatchModal = document.getElementById("recurring-match-modal");
+  document.getElementById("recurring-match-cancel").addEventListener("click", () => {
+    recurringMatchModal.classList.remove("open");
+  });
+  document.getElementById("btn-recurring-automatch").addEventListener("click", async () => {
+    const result = await api("/api/recurring/auto-match", { method: "POST" });
+    state = result;
+    render();
+    alert(`${result.auto_match_count || 0}건 자동 매칭됐습니다.`);
+  });
+
+  async function openMatchModal(item) {
+    document.getElementById("recurring-match-title").textContent = `"${item.name}" 이번 달 결제 확인`;
+    const currentEl = document.getElementById("recurring-match-current");
+    const listEl = document.getElementById("recurring-match-list");
+    listEl.innerHTML = "";
+    recurringMatchModal.classList.add("open");
+
+    if (item.matched_this_month) {
+      currentEl.textContent = `${item.matched_merchant ? item.matched_merchant + " · " : ""}${fmt(item.matched_amount)}원 · ${item.matched_occurred_at || ""} 으로 확인됨`;
+      listEl.innerHTML = `<button class="btn secondary" id="recurring-match-undo">매칭 취소</button>`;
+      document.getElementById("recurring-match-undo").addEventListener("click", async () => {
+        state = await api(`/api/recurring/${item.id}/unmatch`, { method: "POST" });
+        recurringMatchModal.classList.remove("open");
+        render();
+      });
+      return;
+    }
+
+    currentEl.textContent = "아직 이번 달 결제 확인 안 됨. 아래에서 해당하는 받은 알림을 고르세요.";
+    listEl.innerHTML = `<p class="hint">불러오는 중...</p>`;
+    const candidates = await api(`/api/recurring/${item.id}/match-candidates`);
+    if (!candidates.length) {
+      listEl.innerHTML = `<p class="hint">이번 달 들어온 미분류 알림이 없습니다.</p>`;
+      return;
+    }
+    listEl.innerHTML = candidates.map((c) => `
+      <button class="btn secondary match-candidate" data-id="${c.id}">
+        ${fmt(c.amount)}원${c.merchant ? " · " + escapeHtml(c.merchant) : ""}${c.last4 ? " · " + escapeHtml(c.last4) : ""}<br>
+        <span style="font-size:11px;color:var(--text-muted);">${c.occurred_at}</span>
+      </button>
+    `).join("");
+    listEl.querySelectorAll(".match-candidate").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        state = await api(`/api/recurring/${item.id}/confirm-match`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inbox_item_id: Number(btn.dataset.id) }),
+        });
+        recurringMatchModal.classList.remove("open");
+        render();
+      });
+    });
   }
 
   // ---- 고정지출 추가/수정 모달 ----

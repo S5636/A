@@ -6,6 +6,7 @@
 """
 import json
 import os
+import re
 import secrets
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -160,7 +161,63 @@ def serialize_recurring_payments(conn):
     rows = conn.execute(
         "SELECT * FROM recurring_payments ORDER BY payment_day ASC, sort_order ASC, id ASC"
     ).fetchall()
-    return [dict(r) for r in rows]
+    current_ym = current_year_month()
+    result = []
+    for r in rows:
+        item = dict(r)
+        match = conn.execute(
+            """SELECT amount, merchant, occurred_at FROM inbox_items
+               WHERE recurring_id = ? AND substr(occurred_at, 1, 7) = ?
+               ORDER BY occurred_at DESC LIMIT 1""",
+            (r["id"], current_ym),
+        ).fetchone()
+        item["matched_this_month"] = bool(match)
+        item["matched_amount"] = match["amount"] if match else None
+        item["matched_merchant"] = match["merchant"] if match else None
+        item["matched_occurred_at"] = match["occurred_at"] if match else None
+        result.append(item)
+    return result
+
+
+def _extract_method_last4(payment_method):
+    """고정지출의 결제수단 문자열 끝에 '(2087)'처럼 붙은 카드 뒷자리를 뽑는다.
+    현금/계좌이체처럼 괄호가 없으면 빈 문자열(= 카드 뒷자리로는 거를 수 없음)."""
+    m = re.search(r"\((\d{3,4})\)\s*$", payment_method or "")
+    return m.group(1) if m else ""
+
+
+def _try_auto_match_recurring(conn, inbox_id):
+    """받은 알림 하나를, 금액이 정확히 같고(결제수단에 카드 뒷자리가 있으면
+    그것까지 일치하는) 활성 고정지출이 '정확히 하나'일 때만 자동으로 묶는다.
+    후보가 없거나 여러 개면 애매한 거라 손대지 않고 사용자가 직접 고르게 둔다."""
+    item = conn.execute(
+        "SELECT * FROM inbox_items WHERE id = ? AND status IN ('pending', 'no_benefit') "
+        "AND recurring_id IS NULL",
+        (inbox_id,),
+    ).fetchone()
+    if not item or not item["amount"]:
+        return False
+
+    candidates = conn.execute(
+        "SELECT * FROM recurring_payments WHERE active = 1 AND amount = ?",
+        (item["amount"],),
+    ).fetchall()
+
+    matches = []
+    for rp in candidates:
+        method_last4 = _extract_method_last4(rp["payment_method"])
+        if method_last4 and item["last4"] and not card_codes_match(method_last4, item["last4"]):
+            continue
+        matches.append(rp)
+
+    if len(matches) != 1:
+        return False
+
+    conn.execute(
+        "UPDATE inbox_items SET recurring_id = ?, status = 'recurring_matched' WHERE id = ?",
+        (matches[0]["id"], inbox_id),
+    )
+    return True
 
 
 def serialize_loans(conn):
@@ -822,6 +879,97 @@ def delete_recurring_payment(item_id):
     return jsonify(serialize_full())
 
 
+@app.route("/api/recurring/<int:item_id>/match-candidates", methods=["GET"])
+def recurring_match_candidates(item_id):
+    """이번 달 결제 알림 중 아직 어디에도 안 묶인 것들을 후보로 보여준다."""
+    conn = get_conn()
+    try:
+        current_ym = current_year_month()
+        rows = conn.execute(
+            """SELECT * FROM inbox_items
+               WHERE status IN ('pending', 'no_benefit') AND recurring_id IS NULL
+               AND substr(occurred_at, 1, 7) = ?
+               ORDER BY occurred_at DESC""",
+            (current_ym,),
+        ).fetchall()
+        return jsonify([
+            {
+                "id": r["id"],
+                "amount": r["amount"],
+                "merchant": r["merchant"],
+                "last4": r["last4"],
+                "occurred_at": r["occurred_at"],
+            }
+            for r in rows
+        ])
+    finally:
+        conn.close()
+
+
+@app.route("/api/recurring/<int:item_id>/confirm-match", methods=["POST"])
+def confirm_recurring_match(item_id):
+    data = request.get_json(force=True) or {}
+    try:
+        inbox_id = int(data.get("inbox_item_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "결제 내역을 선택하세요."}), 400
+
+    conn = get_conn()
+    try:
+        item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
+        if not item or item["recurring_id"] is not None:
+            return jsonify({"error": "이미 처리되었거나 존재하지 않는 내역입니다."}), 404
+        conn.execute(
+            "UPDATE inbox_items SET recurring_id = ?, status = 'recurring_matched' WHERE id = ?",
+            (item_id, inbox_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/recurring/<int:item_id>/unmatch", methods=["POST"])
+def unmatch_recurring(item_id):
+    """이번 달 매칭을 취소하고 알림을 다시 '받은 알림' 대기 상태로 되돌린다."""
+    conn = get_conn()
+    try:
+        current_ym = current_year_month()
+        conn.execute(
+            """UPDATE inbox_items SET recurring_id = NULL, status = 'pending'
+               WHERE recurring_id = ? AND substr(occurred_at, 1, 7) = ?""",
+            (item_id, current_ym),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/recurring/auto-match", methods=["POST"])
+def auto_match_all_recurring():
+    """쌓여있는 과거 알림까지 포함해서, 금액+결제수단(카드 뒷자리)이 애매하지
+    않게 정확히 일치하는 것만 한 번에 자동으로 매칭한다."""
+    conn = get_conn()
+    try:
+        pending_ids = [
+            r["id"] for r in conn.execute(
+                "SELECT id FROM inbox_items WHERE status IN ('pending', 'no_benefit') "
+                "AND recurring_id IS NULL"
+            )
+        ]
+        matched = 0
+        for iid in pending_ids:
+            if _try_auto_match_recurring(conn, iid):
+                matched += 1
+        conn.commit()
+    finally:
+        conn.close()
+    result = serialize_full()
+    result["auto_match_count"] = matched
+    return jsonify(result)
+
+
 def _clean_tier_table(raw):
     """[[기준금액,한도], ...] 형태인지 검증하고 정돈된 JSON 문자열(또는 '')을 돌려준다."""
     raw = (raw or "").strip()
@@ -1244,11 +1392,12 @@ def create_inbox_item():
             (text,),
         ).fetchone()
         if not recent_dup:
-            conn.execute(
+            cur = conn.execute(
                 """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at, source)
                    VALUES (?, ?, ?, ?, ?, ?, 'notification')""",
                 (text, parsed["amount"], parsed["last4"], parsed["issuer"], parsed["merchant"], occurred_at),
             )
+            _try_auto_match_recurring(conn, cur.lastrowid)
         conn.commit()
     finally:
         conn.close()

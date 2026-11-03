@@ -133,6 +133,8 @@
         <option value="day">일자순</option>
         <option value="amount">금액순</option>
       </select>
+      <button class="btn small" id="btn-recurring-automatch">자동 매칭 시도</button>
+      <span id="recurring-unmatched-total" style="margin-left:auto; font-weight:700; color:var(--accent-purple);"></span>
     </div>
     <main id="recurring-list" class="card-list">
       <p class="empty-hint" id="empty-recurring-hint">아직 등록된 고정지출이 없습니다. "고정지출 추가"를 눌러 시작하세요.</p>
@@ -471,6 +473,18 @@
     <div class="modal-actions">
       <button class="btn secondary" id="recurring-cancel">취소</button>
       <button class="btn" id="recurring-save">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 고정지출 - 받은 알림 매칭 확인 모달 -->
+<div class="modal-backdrop" id="recurring-match-modal">
+  <div class="modal">
+    <h2 id="recurring-match-title">결제 확인</h2>
+    <p class="hint" id="recurring-match-current"></p>
+    <div id="recurring-match-list" style="display:flex; flex-direction:column; gap:6px; margin:10px 0; max-height:50vh; overflow-y:auto;"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="recurring-match-cancel">닫기</button>
     </div>
   </div>
 </div>

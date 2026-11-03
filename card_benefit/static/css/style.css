@@ -449,3 +449,6 @@ body { padding-bottom: 40px; }
 .webhook-desc code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; color: var(--text-primary); }
 
 .hint { color: var(--text-muted); font-size: 11.5px; margin-top: 6px; line-height: 1.5; }
+
+.match-badge { cursor: pointer; font-size: 13px; }
+.match-candidate { display: block; width: 100%; }
