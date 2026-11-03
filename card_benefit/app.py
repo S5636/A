@@ -189,10 +189,14 @@ def _extract_method_last4(payment_method):
 def _try_auto_match_recurring(conn, inbox_id):
     """받은 알림 하나를, 금액이 정확히 같고(결제수단에 카드 뒷자리가 있으면
     그것까지 일치하는) 활성 고정지출이 '정확히 하나'일 때만 자동으로 묶는다.
-    후보가 없거나 여러 개면 애매한 거라 손대지 않고 사용자가 직접 고르게 둔다."""
+    후보가 없거나 여러 개면 애매한 거라 손대지 않고 사용자가 직접 고르게 둔다.
+
+    주의: 여기선 inbox_items.status를 절대 바꾸지 않는다(recurring_id만 추가로
+    달아둠). status를 건드리면 "받은 알림" 혜택배정 큐에서 사라지고, 전월실적
+    자동집계(status가 assigned/no_benefit인 것만 합산)에서도 빠지는 문제가
+    생기기 때문 - 카드로 결제한 고정지출도 전월실적엔 그대로 잡혀야 한다."""
     item = conn.execute(
-        "SELECT * FROM inbox_items WHERE id = ? AND status IN ('pending', 'no_benefit') "
-        "AND recurring_id IS NULL",
+        "SELECT * FROM inbox_items WHERE id = ? AND recurring_id IS NULL",
         (inbox_id,),
     ).fetchone()
     if not item or not item["amount"]:
@@ -214,7 +218,7 @@ def _try_auto_match_recurring(conn, inbox_id):
         return False
 
     conn.execute(
-        "UPDATE inbox_items SET recurring_id = ?, status = 'recurring_matched' WHERE id = ?",
+        "UPDATE inbox_items SET recurring_id = ? WHERE id = ?",
         (matches[0]["id"], inbox_id),
     )
     return True
@@ -881,14 +885,15 @@ def delete_recurring_payment(item_id):
 
 @app.route("/api/recurring/<int:item_id>/match-candidates", methods=["GET"])
 def recurring_match_candidates(item_id):
-    """이번 달 결제 알림 중 아직 어디에도 안 묶인 것들을 후보로 보여준다."""
+    """이번 달 결제 알림 중 아직 다른 고정지출에 안 묶인 것들을 후보로 보여준다.
+    혜택배정 큐(status)는 전혀 건드리지 않으므로, 이미 혜택에 배정됐거나
+    "혜택 없음" 처리된 알림도 후보에 포함된다(고정지출 확인은 별개 작업)."""
     conn = get_conn()
     try:
         current_ym = current_year_month()
         rows = conn.execute(
             """SELECT * FROM inbox_items
-               WHERE status IN ('pending', 'no_benefit') AND recurring_id IS NULL
-               AND substr(occurred_at, 1, 7) = ?
+               WHERE recurring_id IS NULL AND substr(occurred_at, 1, 7) = ?
                ORDER BY occurred_at DESC""",
             (current_ym,),
         ).fetchall()
@@ -899,6 +904,7 @@ def recurring_match_candidates(item_id):
                 "merchant": r["merchant"],
                 "last4": r["last4"],
                 "occurred_at": r["occurred_at"],
+                "status": r["status"],
             }
             for r in rows
         ])
@@ -920,7 +926,7 @@ def confirm_recurring_match(item_id):
         if not item or item["recurring_id"] is not None:
             return jsonify({"error": "이미 처리되었거나 존재하지 않는 내역입니다."}), 404
         conn.execute(
-            "UPDATE inbox_items SET recurring_id = ?, status = 'recurring_matched' WHERE id = ?",
+            "UPDATE inbox_items SET recurring_id = ? WHERE id = ?",
             (item_id, inbox_id),
         )
         conn.commit()
@@ -931,12 +937,12 @@ def confirm_recurring_match(item_id):
 
 @app.route("/api/recurring/<int:item_id>/unmatch", methods=["POST"])
 def unmatch_recurring(item_id):
-    """이번 달 매칭을 취소하고 알림을 다시 '받은 알림' 대기 상태로 되돌린다."""
+    """이번 달 매칭만 취소한다(알림의 status는 원래 손댄 적이 없으므로 그대로 둠)."""
     conn = get_conn()
     try:
         current_ym = current_year_month()
         conn.execute(
-            """UPDATE inbox_items SET recurring_id = NULL, status = 'pending'
+            """UPDATE inbox_items SET recurring_id = NULL
                WHERE recurring_id = ? AND substr(occurred_at, 1, 7) = ?""",
             (item_id, current_ym),
         )
@@ -954,8 +960,7 @@ def auto_match_all_recurring():
     try:
         pending_ids = [
             r["id"] for r in conn.execute(
-                "SELECT id FROM inbox_items WHERE status IN ('pending', 'no_benefit') "
-                "AND recurring_id IS NULL"
+                "SELECT id FROM inbox_items WHERE recurring_id IS NULL"
             )
         ]
         matched = 0

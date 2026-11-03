@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     issuer TEXT DEFAULT '',
     merchant TEXT DEFAULT '',
     occurred_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-    status TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'assigned' | 'no_benefit' | 'recurring_matched'
+    status TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'assigned' | 'no_benefit'
     card_id INTEGER REFERENCES cards(id) ON DELETE SET NULL,
     benefit_id INTEGER REFERENCES benefits(id) ON DELETE SET NULL,
     recurring_id INTEGER REFERENCES recurring_payments(id) ON DELETE SET NULL,  -- 고정지출과 매칭됐으면

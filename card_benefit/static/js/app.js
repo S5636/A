@@ -934,12 +934,13 @@
     listEl.innerHTML = `<p class="hint">불러오는 중...</p>`;
     const candidates = await api(`/api/recurring/${item.id}/match-candidates`);
     if (!candidates.length) {
-      listEl.innerHTML = `<p class="hint">이번 달 들어온 미분류 알림이 없습니다.</p>`;
+      listEl.innerHTML = `<p class="hint">이번 달 들어온 알림 중 후보가 없습니다.</p>`;
       return;
     }
+    const statusLabel = { pending: "", assigned: " (혜택배정됨)", no_benefit: " (혜택없음 처리)" };
     listEl.innerHTML = candidates.map((c) => `
       <button class="btn secondary match-candidate" data-id="${c.id}">
-        ${fmt(c.amount)}원${c.merchant ? " · " + escapeHtml(c.merchant) : ""}${c.last4 ? " · " + escapeHtml(c.last4) : ""}<br>
+        ${fmt(c.amount)}원${c.merchant ? " · " + escapeHtml(c.merchant) : ""}${c.last4 ? " · " + escapeHtml(c.last4) : ""}${statusLabel[c.status] || ""}<br>
         <span style="font-size:11px;color:var(--text-muted);">${c.occurred_at}</span>
       </button>
     `).join("");
