@@ -283,12 +283,18 @@ def _extract_method_last4(payment_method):
 _NAME_TOKEN_STOPWORDS = {"hl", "주식회사", "(주)"}
 
 
-def _name_tokens(name):
-    """고정지출/보험 이름에서 가맹점명 매칭에 쓸만한 의미있는 단어만 뽑는다
-    (너무 짧거나 흔한 접두어는 제외 - 도시가스/통신사처럼 공급사 이름이
-    앞에 붙는 경우가 많아서, 'HL 삼천리 도시가스'에서 'HL'은 걸러낸다)."""
+def _name_match_phrase(name):
+    """고정지출/보험 이름(또는 별칭)에서 흔한 접두어(HL/주식회사 등)만 떼어내고,
+    나머지는 공백도 다 붙여서 가맹점명 매칭에 쓸 '한 덩어리' 문구로 만든다.
+    예전엔 단어별로 쪼개서 아무 단어나 하나 겹치면 매칭했는데(ex: "카카오 골프"
+    의 "골프"만 보고 완전히 상관없는 "정발산 스크린골프존"까지 잘못 묶임),
+    그러면 "골프"/"보험"처럼 흔한 짧은 단어 하나로 엉뚱한 가맹점이 잡히는
+    문제가 있었다. 그래서 이름 전체가(접두어 뺀 나머지가) 가맹점명 안에
+    통째로 들어있을 때만 매칭되게 한다 - "삼천리도시가스"는 그대로 매칭되고,
+    "카카오골프"는 실제로 "카카오골프"라는 문구가 찍힌 알림에만 매칭된다."""
     tokens = re.split(r"[\s/()·\-]+", name or "")
-    return [t for t in tokens if len(t) >= 2 and t.lower() not in _NAME_TOKEN_STOPWORDS]
+    phrase = "".join(t for t in tokens if t.lower() not in _NAME_TOKEN_STOPWORDS)
+    return phrase if len(phrase) >= 3 else ""
 
 
 def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column):
@@ -346,12 +352,12 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
 
     if not item["merchant"]:
         return False
-    merchant_lower = item["merchant"].lower()
+    merchant_compact = re.sub(r"\s+", "", item["merchant"]).lower()
     name_matches = [
         rp for rp in active_rows
         if last4_ok(rp) and any(
-            tok.lower() in merchant_lower
-            for tok in _name_tokens(rp[name_column]) + _name_tokens(rp["billing_alias"])
+            phrase and phrase.lower() in merchant_compact
+            for phrase in (_name_match_phrase(rp[name_column]), _name_match_phrase(rp["billing_alias"]))
         )
     ]
     if len(name_matches) != 1:
