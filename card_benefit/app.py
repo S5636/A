@@ -220,11 +220,26 @@ def _extract_method_last4(payment_method):
     return m.group(1) if m else ""
 
 
-def _try_auto_match(conn, inbox_id, fk_column, candidate_sql):
-    """받은 알림 하나를, 금액이 정확히 같고(결제수단에 카드 뒷자리가 있으면
-    그것까지 일치하는) 활성 항목(고정지출 또는 보험)이 '정확히 하나'일 때만
-    자동으로 묶는다. 후보가 없거나 여러 개면 애매한 거라 손대지 않고 사용자가
-    직접 고르게 둔다.
+_NAME_TOKEN_STOPWORDS = {"hl", "주식회사", "(주)"}
+
+
+def _name_tokens(name):
+    """고정지출/보험 이름에서 가맹점명 매칭에 쓸만한 의미있는 단어만 뽑는다
+    (너무 짧거나 흔한 접두어는 제외 - 도시가스/통신사처럼 공급사 이름이
+    앞에 붙는 경우가 많아서, 'HL 삼천리 도시가스'에서 'HL'은 걸러낸다)."""
+    tokens = re.split(r"[\s/()·\-]+", name or "")
+    return [t for t in tokens if len(t) >= 2 and t.lower() not in _NAME_TOKEN_STOPWORDS]
+
+
+def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column):
+    """받은 알림 하나를 활성 항목(고정지출 또는 보험)에 자동으로 묶는다.
+
+    1차: 금액이 정확히 같고(결제수단에 카드 뒷자리가 있으면 그것까지 일치하는)
+    항목이 '정확히 하나'일 때 매칭 - 구독료처럼 매달 같은 금액인 경우.
+    2차(1차에서 금액이 맞는 후보가 하나도 없을 때만): 가맹점명에 항목 이름의
+    의미있는 단어가 포함되는 항목이 '정확히 하나'일 때 매칭 - 도시가스/전기세처럼
+    매달 청구 금액이 바뀌는 고정지출은 금액으로는 절대 못 잡으므로.
+    두 경우 다 후보가 여러 개면 애매한 거라 손대지 않고 사용자가 직접 고르게 둔다.
 
     주의: 여기선 inbox_items.status를 절대 바꾸지 않는다(recurring_id/insurance_id만
     추가로 달아둠). status를 건드리면 "받은 알림" 혜택배정 큐에서 사라지고, 전월실적
@@ -237,37 +252,39 @@ def _try_auto_match(conn, inbox_id, fk_column, candidate_sql):
     if not item or not item["amount"]:
         return False
 
-    candidates = conn.execute(candidate_sql, (item["amount"],)).fetchall()
+    active_rows = conn.execute(f"SELECT * FROM {table} WHERE active = 1").fetchall()
 
-    matches = []
-    for rp in candidates:
+    def last4_ok(rp):
         method_last4 = _extract_method_last4(rp["payment_method"])
-        if method_last4 and item["last4"] and not card_codes_match(method_last4, item["last4"]):
-            continue
-        matches.append(rp)
+        return not (method_last4 and item["last4"] and not card_codes_match(method_last4, item["last4"]))
 
-    if len(matches) != 1:
+    amount_matches = [rp for rp in active_rows if rp[amount_column] == item["amount"] and last4_ok(rp)]
+    if len(amount_matches) == 1:
+        conn.execute(f"UPDATE inbox_items SET {fk_column} = ? WHERE id = ?", (amount_matches[0]["id"], inbox_id))
+        return True
+    if amount_matches:
         return False
 
-    conn.execute(
-        f"UPDATE inbox_items SET {fk_column} = ? WHERE id = ?",
-        (matches[0]["id"], inbox_id),
-    )
+    if not item["merchant"]:
+        return False
+    merchant_lower = item["merchant"].lower()
+    name_matches = [
+        rp for rp in active_rows
+        if last4_ok(rp) and any(tok.lower() in merchant_lower for tok in _name_tokens(rp[name_column]))
+    ]
+    if len(name_matches) != 1:
+        return False
+
+    conn.execute(f"UPDATE inbox_items SET {fk_column} = ? WHERE id = ?", (name_matches[0]["id"], inbox_id))
     return True
 
 
 def _try_auto_match_recurring(conn, inbox_id):
-    return _try_auto_match(
-        conn, inbox_id, "recurring_id",
-        "SELECT * FROM recurring_payments WHERE active = 1 AND amount = ?",
-    )
+    return _try_auto_match(conn, inbox_id, "recurring_id", "recurring_payments", "amount", "name")
 
 
 def _try_auto_match_insurance(conn, inbox_id):
-    return _try_auto_match(
-        conn, inbox_id, "insurance_id",
-        "SELECT * FROM insurances WHERE active = 1 AND monthly_premium = ?",
-    )
+    return _try_auto_match(conn, inbox_id, "insurance_id", "insurances", "monthly_premium", "product_name")
 
 
 def serialize_loans(conn):
