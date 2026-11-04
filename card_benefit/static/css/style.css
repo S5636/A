@@ -474,3 +474,16 @@ body { padding-bottom: 40px; }
 
 .match-badge { cursor: pointer; font-size: 13px; }
 .match-candidate { display: block; width: 100%; }
+.match-candidate-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  cursor: pointer;
+}
+.match-candidate-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--series-1); margin-top: 2px; flex-shrink: 0; }

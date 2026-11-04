@@ -219,12 +219,11 @@ def _resolve_payment_method(conn, card_id, fallback_text):
     return fallback_text or ""
 
 
-def _attach_match_info(conn, rows, fk_column):
-    """고정지출/보험 공용: 이번 달 받은 알림 중 이 항목과 매칭된 게 있는지 붙여주고,
-    결제수단이 등록된 카드(card_id)면 카드탭 기준으로 실시간 표기를 만들어 넣는다.
-    과거 달 매칭 내역도 match_history로 전부 붙여서(몇 달치를 한 번에 엑셀로
-    올려도) "내역" 버튼으로 지난 달 것까지 다 보이게 한다."""
-    current_ym = current_year_month()
+def _card_label_matcher(conn):
+    """받은 알림의 last4(카드 뒷자리, 3~4자리 섞여 들어옴)를 보고 카드탭에
+    등록된 카드의 요약명을 찾아주는 함수를 만들어 돌려준다. 고정지출/보험의
+    "내역"이나 매칭 후보 목록처럼, 알림이 어느 카드로 결제된 건지 바로
+    보여줘야 하는 곳에서 공통으로 쓴다."""
     cards_with_code = conn.execute("SELECT name, last4, short_name FROM cards WHERE last4 != ''").fetchall()
 
     def card_label_for(last4):
@@ -234,6 +233,17 @@ def _attach_match_info(conn, rows, fk_column):
             if card_codes_match(c["last4"], last4):
                 return c["short_name"] or c["name"]
         return None
+
+    return card_label_for
+
+
+def _attach_match_info(conn, rows, fk_column):
+    """고정지출/보험 공용: 이번 달 받은 알림 중 이 항목과 매칭된 게 있는지 붙여주고,
+    결제수단이 등록된 카드(card_id)면 카드탭 기준으로 실시간 표기를 만들어 넣는다.
+    과거 달 매칭 내역도 match_history로 전부 붙여서(몇 달치를 한 번에 엑셀로
+    올려도) "내역" 버튼으로 지난 달 것까지 다 보이게 한다."""
+    current_ym = current_year_month()
+    card_label_for = _card_label_matcher(conn)
 
     result = []
     for r in rows:
@@ -1049,6 +1059,7 @@ def recurring_match_candidates(item_id):
     "혜택 없음" 처리된 알림도 후보에 포함된다(고정지출 확인은 별개 작업)."""
     conn = get_conn()
     try:
+        card_label_for = _card_label_matcher(conn)
         rows = conn.execute(
             """SELECT * FROM inbox_items
                WHERE recurring_id IS NULL AND insurance_id IS NULL
@@ -1060,6 +1071,7 @@ def recurring_match_candidates(item_id):
                 "amount": r["amount"],
                 "merchant": r["merchant"],
                 "last4": r["last4"],
+                "card_label": card_label_for(r["last4"]),
                 "occurred_at": r["occurred_at"],
                 "status": r["status"],
             }
@@ -1069,24 +1081,47 @@ def recurring_match_candidates(item_id):
         conn.close()
 
 
+def _parse_confirm_match_ids(data):
+    """confirm-match 요청에서 선택된 알림 id 목록을 뽑는다. 예전처럼
+    inbox_item_id 하나만 보내도 되고(단일 매칭, 하위호환), 여러 달치를
+    한 번에 고를 수 있게 새로 추가한 inbox_item_ids(배열)도 받는다."""
+    ids = []
+    if "inbox_item_ids" in data and isinstance(data["inbox_item_ids"], list):
+        for v in data["inbox_item_ids"]:
+            try:
+                ids.append(int(v))
+            except (TypeError, ValueError):
+                pass
+    elif "inbox_item_id" in data:
+        try:
+            ids.append(int(data["inbox_item_id"]))
+        except (TypeError, ValueError):
+            pass
+    return ids
+
+
 @app.route("/api/recurring/<int:item_id>/confirm-match", methods=["POST"])
 def confirm_recurring_match(item_id):
     data = request.get_json(force=True) or {}
-    try:
-        inbox_id = int(data.get("inbox_item_id"))
-    except (TypeError, ValueError):
+    inbox_ids = _parse_confirm_match_ids(data)
+    if not inbox_ids:
         return jsonify({"error": "결제 내역을 선택하세요."}), 400
 
     conn = get_conn()
     try:
-        item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
-        if not item or item["recurring_id"] is not None:
-            return jsonify({"error": "이미 처리되었거나 존재하지 않는 내역입니다."}), 404
-        conn.execute(
-            "UPDATE inbox_items SET recurring_id = ? WHERE id = ?",
-            (item_id, inbox_id),
-        )
+        matched = 0
+        for inbox_id in inbox_ids:
+            item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
+            if not item or item["recurring_id"] is not None:
+                continue
+            conn.execute(
+                "UPDATE inbox_items SET recurring_id = ? WHERE id = ?",
+                (item_id, inbox_id),
+            )
+            matched += 1
         conn.commit()
+        if not matched:
+            return jsonify({"error": "이미 처리되었거나 존재하지 않는 내역입니다."}), 404
     finally:
         conn.close()
     return jsonify(serialize_full())
@@ -1267,6 +1302,7 @@ def insurance_match_candidates(item_id):
     엑셀로 지난 달치를 올렸을 때도 후보로 고를 수 있어야 하므로."""
     conn = get_conn()
     try:
+        card_label_for = _card_label_matcher(conn)
         rows = conn.execute(
             """SELECT * FROM inbox_items
                WHERE insurance_id IS NULL AND recurring_id IS NULL
@@ -1278,6 +1314,7 @@ def insurance_match_candidates(item_id):
                 "amount": r["amount"],
                 "merchant": r["merchant"],
                 "last4": r["last4"],
+                "card_label": card_label_for(r["last4"]),
                 "occurred_at": r["occurred_at"],
                 "status": r["status"],
             }
@@ -1290,21 +1327,25 @@ def insurance_match_candidates(item_id):
 @app.route("/api/insurances/<int:item_id>/confirm-match", methods=["POST"])
 def confirm_insurance_match(item_id):
     data = request.get_json(force=True) or {}
-    try:
-        inbox_id = int(data.get("inbox_item_id"))
-    except (TypeError, ValueError):
+    inbox_ids = _parse_confirm_match_ids(data)
+    if not inbox_ids:
         return jsonify({"error": "결제 내역을 선택하세요."}), 400
 
     conn = get_conn()
     try:
-        item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
-        if not item or item["insurance_id"] is not None:
-            return jsonify({"error": "이미 처리되었거나 존재하지 않는 내역입니다."}), 404
-        conn.execute(
-            "UPDATE inbox_items SET insurance_id = ? WHERE id = ?",
-            (item_id, inbox_id),
-        )
+        matched = 0
+        for inbox_id in inbox_ids:
+            item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
+            if not item or item["insurance_id"] is not None:
+                continue
+            conn.execute(
+                "UPDATE inbox_items SET insurance_id = ? WHERE id = ?",
+                (item_id, inbox_id),
+            )
+            matched += 1
         conn.commit()
+        if not matched:
+            return jsonify({"error": "이미 처리되었거나 존재하지 않는 내역입니다."}), 404
     finally:
         conn.close()
     return jsonify(serialize_full())

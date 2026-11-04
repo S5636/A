@@ -1068,7 +1068,7 @@
       return;
     }
 
-    currentEl.textContent = "아직 이번 달 결제 확인 안 됨. 아래에서 해당하는 받은 알림을 고르세요(지난 달 것도 포함).";
+    currentEl.textContent = "아직 이번 달 결제 확인 안 됨. 여러 달 걸쳐 밀려있으면 아래서 전부 체크하고 한 번에 매칭할 수 있습니다(지난 달 것도 포함).";
     listEl.innerHTML = `<p class="hint">불러오는 중...</p>`;
     const candidates = await api(`/api/${entityType}/${item.id}/match-candidates`);
     if (!candidates.length) {
@@ -1077,21 +1077,33 @@
     }
     const statusLabel = { pending: "", assigned: " (혜택배정됨)", no_benefit: " (혜택없음 처리)" };
     listEl.innerHTML = candidates.map((c) => `
-      <button class="btn secondary match-candidate" data-id="${c.id}">
-        ${fmt(c.amount)}원${c.merchant ? " · " + escapeHtml(c.merchant) : ""}${c.last4 ? " · " + escapeHtml(c.last4) : ""}${statusLabel[c.status] || ""}<br>
-        <span style="font-size:11px;color:var(--text-muted);">${c.occurred_at}</span>
-      </button>
-    `).join("");
-    listEl.querySelectorAll(".match-candidate").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        state = await api(`/api/${entityType}/${item.id}/confirm-match`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inbox_item_id: Number(btn.dataset.id) }),
-        });
-        matchModal.classList.remove("open");
-        render();
+      <label class="match-candidate-row">
+        <input type="checkbox" class="match-candidate-check" data-id="${c.id}">
+        <span>
+          ${fmt(c.amount)}원${c.merchant ? " · " + escapeHtml(c.merchant) : ""}${c.card_label ? " · " + escapeHtml(c.card_label) : ""}${statusLabel[c.status] || ""}<br>
+          <span style="font-size:11px;color:var(--text-muted);">${c.occurred_at}</span>
+        </span>
+      </label>
+    `).join("") + `<button class="btn" id="match-modal-confirm-selected" disabled>선택한 항목 매칭 (0건)</button>`;
+
+    const checks = Array.from(listEl.querySelectorAll(".match-candidate-check"));
+    const confirmBtn = document.getElementById("match-modal-confirm-selected");
+    const updateConfirmBtn = () => {
+      const n = checks.filter((c) => c.checked).length;
+      confirmBtn.textContent = `선택한 항목 매칭 (${n}건)`;
+      confirmBtn.disabled = n === 0;
+    };
+    checks.forEach((c) => c.addEventListener("change", updateConfirmBtn));
+    confirmBtn.addEventListener("click", async () => {
+      const ids = checks.filter((c) => c.checked).map((c) => Number(c.dataset.id));
+      if (!ids.length) return;
+      state = await api(`/api/${entityType}/${item.id}/confirm-match`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inbox_item_ids: ids }),
       });
+      matchModal.classList.remove("open");
+      render();
     });
   }
 
