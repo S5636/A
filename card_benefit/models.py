@@ -21,6 +21,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
+    short_name TEXT DEFAULT '',   -- 상단 요약줄(점프 버튼)에 쓸 짧은 이름. 비어있으면 자동 생성
     issuer TEXT DEFAULT '',
     last4 TEXT DEFAULT '',
     reset_day INTEGER NOT NULL DEFAULT 1,
@@ -132,7 +133,10 @@ CREATE TABLE IF NOT EXISTS recurring_payments (
     name TEXT NOT NULL,
     category TEXT DEFAULT '',           -- 구독/자동이체/기타 등 자유 입력
     amount REAL NOT NULL DEFAULT 0,
-    payment_method TEXT DEFAULT '',     -- 예: '신한카드 더모아', '현금', '국민은행 자동이체'
+    payment_method TEXT DEFAULT '',     -- 카드가 아닌 결제수단('현금', '국민은행 자동이체' 등) 또는
+                                         -- card_id가 없는 옛날 데이터의 카드 표기(과거 호환용)
+    card_id INTEGER REFERENCES cards(id) ON DELETE SET NULL,  -- 등록된 카드로 낼 때는 여기로 연결
+                                         -- (카드탭에서 이름을 바꿔도 자동으로 같이 바뀜)
     payment_day INTEGER NOT NULL DEFAULT 0,  -- 매월 며칠(1~31, 0=미정)
     active INTEGER NOT NULL DEFAULT 1,  -- 0이면 해지/중단했지만 기록은 남겨둔 것
     memo TEXT DEFAULT '',
@@ -149,7 +153,8 @@ CREATE TABLE IF NOT EXISTS insurances (
     insured_name TEXT DEFAULT '본인',         -- 피보험자
     monthly_premium REAL NOT NULL DEFAULT 0,
     payment_day INTEGER NOT NULL DEFAULT 0,  -- 매월 며칠 출금(1~31, 0=미정)
-    payment_method TEXT DEFAULT '',          -- 카드결제 매칭용(예: '신한 더모아(1234)')
+    payment_method TEXT DEFAULT '',          -- 카드가 아닌 결제수단 또는 과거 호환용 표기
+    card_id INTEGER REFERENCES cards(id) ON DELETE SET NULL,  -- 등록된 카드로 낼 때는 여기로 연결
     start_date TEXT DEFAULT '',              -- 계약일
     payment_end_date TEXT DEFAULT '',        -- 납입완료일
     maturity_date TEXT DEFAULT '',           -- 보험만기일(날짜 또는 '종신' 등 텍스트 그대로)
@@ -178,6 +183,7 @@ def init_db():
     conn = get_conn()
     try:
         conn.executescript(SCHEMA)
+        _ensure_column(conn, "cards", "short_name", "short_name TEXT DEFAULT ''")
         _ensure_column(conn, "cards", "last4", "last4 TEXT DEFAULT ''")
         _ensure_column(conn, "cards", "perf_threshold", "perf_threshold REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "cards", "perf_excluded_keywords", "perf_excluded_keywords TEXT DEFAULT ''")
@@ -203,6 +209,8 @@ def init_db():
         _ensure_column(conn, "inbox_items", "insurance_id", "insurance_id INTEGER DEFAULT NULL")
         _ensure_column(conn, "inbox_items", "medical_claimed", "medical_claimed INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "inbox_items", "medical_excluded", "medical_excluded INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "recurring_payments", "card_id", "card_id INTEGER DEFAULT NULL")
+        _ensure_column(conn, "insurances", "card_id", "card_id INTEGER DEFAULT NULL")
         conn.commit()
     finally:
         conn.close()

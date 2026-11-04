@@ -45,11 +45,12 @@
     [/네이버/i, "네이버"],
   ];
 
-  function cardNickname(name) {
+  function cardNickname(card) {
+    if (card.short_name) return card.short_name;
     for (const [pattern, nick] of CARD_NICKNAMES) {
-      if (pattern.test(name || "")) return nick;
+      if (pattern.test(card.name || "")) return nick;
     }
-    return shortCardName(name);
+    return shortCardName(card.name);
   }
 
   function shortBenefitName(name) {
@@ -133,7 +134,7 @@
       });
     });
     const rate = totalSpend > 0 ? ((earn + cashback) / totalSpend * 100) : 0;
-    section.style.display = state.cards.length ? "block" : "none";
+    section.style.display = state.cards.length ? "flex" : "none";
     const monthLabel = `${new Date().getMonth() + 1}월`;
     document.getElementById("summary-earn-label").textContent = `${monthLabel} 적립`;
     document.getElementById("summary-cashback-label").textContent = `${monthLabel} 할인·캐시백`;
@@ -144,7 +145,7 @@
     const jumpRow = document.getElementById("summary-jump-row");
     jumpRow.innerHTML = state.cards.map((card, idx) => `
       <button class="jump-btn" data-card-id="${card.id}" style="border-color:${CARD_COLORS[idx % CARD_COLORS.length]};color:${CARD_COLORS[idx % CARD_COLORS.length]};">
-        ${escapeHtml(cardNickname(card.name))}
+        ${escapeHtml(cardNickname(card))}
       </button>
     `).join("");
     jumpRow.querySelectorAll(".jump-btn").forEach((btn) =>
@@ -1077,9 +1078,15 @@
   function methodBaseName(s) {
     return normMethod((s || "").replace(/\([^)]*\)\s*$/, ""));
   }
+  // 결제수단 선택지: 등록된 카드는 {value:"card:<id>", label:"이름(뒷자리)"}로 만들어서
+  // 카드탭의 카드를 그대로 가리키게 한다(카드탭에서 이름 바꾸면 자동으로 같이 바뀜).
+  // "현금"처럼 카드가 아닌 기존 입력값은 텍스트 그대로 옵션이 된다.
   function buildMethodOptions(sourceList) {
-    const cardOptions = state.cards.map((c) => `${c.name}${c.last4 ? `(${c.last4})` : ""}`);
-    const cardBases = cardOptions.map(methodBaseName);
+    const cardOptions = state.cards.map((c) => ({
+      value: `card:${c.id}`,
+      label: `${c.name}${c.last4 ? `(${c.last4})` : ""}`,
+    }));
+    const cardBases = cardOptions.map((o) => methodBaseName(o.label));
     const usedOptions = (sourceList || state.recurring_payments)
       .map((r) => (r.payment_method || "").trim())
       .filter((o) => {
@@ -1089,11 +1096,12 @@
         // 카드탭 항목과 "신한" 접두어 유무, 뒷자리 유무만 다르고 실질적으로 같은 카드를
         // 가리키는 값은(부분 문자열로 포함되면) 중복으로 보고 제외
         return !cardBases.some((cb) => cb.includes(ob) || ob.includes(cb));
-      });
+      })
+      .map((label) => ({ value: label, label }));
     const seen = new Set();
     const result = [];
     for (const o of [...cardOptions, ...usedOptions]) {
-      const key = normMethod(o);
+      const key = normMethod(o.label);
       if (seen.has(key)) continue;
       seen.add(key);
       result.push(o);
@@ -1110,10 +1118,12 @@
 
     const options = buildMethodOptions();
     const current = item ? (item.payment_method || "") : "";
-    const matched = options.find((o) => normMethod(o) === normMethod(current));
+    const cardOption = item && item.card_id ? options.find((o) => o.value === `card:${item.card_id}`) : null;
+    const textMatched = !cardOption && options.find((o) => o.value !== undefined && normMethod(o.label) === normMethod(current));
+    const matched = cardOption || textMatched;
     methodSelect.innerHTML = [
       `<option value="">선택 안 함</option>`,
-      ...options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`),
+      ...options.map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`),
       `<option value="${CUSTOM_METHOD}">직접 입력</option>`,
     ].join("");
     if (current && !matched) {
@@ -1121,7 +1131,7 @@
       methodInput.style.display = "";
       methodInput.value = current;
     } else {
-      methodSelect.value = matched || "";
+      methodSelect.value = matched ? matched.value : "";
       methodInput.style.display = "none";
       methodInput.value = "";
     }
@@ -1134,11 +1144,13 @@
   document.getElementById("btn-add-recurring").addEventListener("click", () => openRecurringModal(null));
   document.getElementById("recurring-cancel").addEventListener("click", () => recurringModal.classList.remove("open"));
   document.getElementById("recurring-save").addEventListener("click", async () => {
+    const isCardChoice = methodSelect.value.startsWith("card:");
     const payload = {
       name: document.getElementById("recurring-name").value.trim(),
       category: document.getElementById("recurring-category").value.trim(),
       amount: document.getElementById("recurring-amount").value || 0,
-      payment_method: methodSelect.value === CUSTOM_METHOD ? methodInput.value.trim() : methodSelect.value,
+      card_id: isCardChoice ? Number(methodSelect.value.slice(5)) : null,
+      payment_method: isCardChoice ? "" : (methodSelect.value === CUSTOM_METHOD ? methodInput.value.trim() : methodSelect.value),
       payment_day: document.getElementById("recurring-day").value || 0,
       active: document.getElementById("recurring-active").checked,
       memo: document.getElementById("recurring-memo").value.trim(),
@@ -1290,10 +1302,12 @@
 
     const options = buildMethodOptions(state.insurances);
     const current = item ? (item.payment_method || "") : "";
-    const matched = options.find((o) => normMethod(o) === normMethod(current));
+    const cardOption = item && item.card_id ? options.find((o) => o.value === `card:${item.card_id}`) : null;
+    const textMatched = !cardOption && options.find((o) => normMethod(o.label) === normMethod(current));
+    const matched = cardOption || textMatched;
     insuranceMethodSelect.innerHTML = [
       `<option value="">선택 안 함</option>`,
-      ...options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`),
+      ...options.map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`),
       `<option value="${CUSTOM_METHOD_INS}">직접 입력</option>`,
     ].join("");
     if (current && !matched) {
@@ -1301,7 +1315,7 @@
       insuranceMethodInput.style.display = "";
       insuranceMethodInput.value = current;
     } else {
-      insuranceMethodSelect.value = matched || "";
+      insuranceMethodSelect.value = matched ? matched.value : "";
       insuranceMethodInput.style.display = "none";
       insuranceMethodInput.value = "";
     }
@@ -1317,12 +1331,14 @@
   document.getElementById("btn-add-insurance").addEventListener("click", () => openInsuranceModal(null));
   document.getElementById("insurance-cancel").addEventListener("click", () => insuranceModal.classList.remove("open"));
   document.getElementById("insurance-save").addEventListener("click", async () => {
+    const isCardChoice = insuranceMethodSelect.value.startsWith("card:");
     const payload = {
       company: document.getElementById("insurance-company").value.trim(),
       product_name: document.getElementById("insurance-product-name").value.trim(),
       insured_name: document.getElementById("insurance-insured-name").value.trim() || "본인",
       monthly_premium: document.getElementById("insurance-premium").value || 0,
-      payment_method: insuranceMethodSelect.value === CUSTOM_METHOD_INS ? insuranceMethodInput.value.trim() : insuranceMethodSelect.value,
+      card_id: isCardChoice ? Number(insuranceMethodSelect.value.slice(5)) : null,
+      payment_method: isCardChoice ? "" : (insuranceMethodSelect.value === CUSTOM_METHOD_INS ? insuranceMethodInput.value.trim() : insuranceMethodSelect.value),
       payment_day: document.getElementById("insurance-day").value || 0,
       start_date: document.getElementById("insurance-start-date").value.trim(),
       payment_end_date: document.getElementById("insurance-payment-end-date").value.trim(),
@@ -1402,6 +1418,7 @@
     editingCardId = card ? card.id : null;
     document.getElementById("card-modal-title").textContent = card ? "카드 수정" : "카드 추가";
     document.getElementById("card-name").value = card ? card.name : "";
+    document.getElementById("card-short-name").value = card ? card.short_name : "";
     document.getElementById("card-issuer").value = card ? card.issuer : "";
     document.getElementById("card-last4").value = card ? card.last4 : "";
     document.getElementById("card-reset-day").value = card ? card.reset_day : 1;
@@ -1414,6 +1431,7 @@
   document.getElementById("card-save").addEventListener("click", async () => {
     const payload = {
       name: document.getElementById("card-name").value.trim(),
+      short_name: document.getElementById("card-short-name").value.trim(),
       issuer: document.getElementById("card-issuer").value.trim(),
       last4: document.getElementById("card-last4").value.trim(),
       reset_day: document.getElementById("card-reset-day").value,

@@ -195,12 +195,37 @@ def serialize_medical_expenses(conn):
     ]
 
 
+def _parse_card_id(value):
+    """결제수단으로 등록된 카드를 고른 경우 그 카드 id, 아니면 None(현금/계좌이체 등
+    자유입력이거나 선택 안 함)으로 정리한다."""
+    if value in (None, "", "null"):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_payment_method(conn, card_id, fallback_text):
+    """card_id가 있으면(등록된 카드를 결제수단으로 고른 경우) 카드탭의 현재
+    이름+뒷자리를 그 자리에서 조합해서 돌려준다 - 카드탭에서 이름을 바꾸면
+    고정지출/보험 쪽도 다음 조회 때 바로 반영되고, 따로 동기화할 필요가 없다.
+    card_id가 없으면(현금/계좌이체 등) 저장된 텍스트를 그대로 쓴다."""
+    if card_id:
+        card = conn.execute("SELECT name, last4 FROM cards WHERE id = ?", (card_id,)).fetchone()
+        if card:
+            return f"{card['name']}({card['last4']})" if card["last4"] else card["name"]
+    return fallback_text or ""
+
+
 def _attach_match_info(conn, rows, fk_column):
-    """고정지출/보험 공용: 이번 달 받은 알림 중 이 항목과 매칭된 게 있는지 붙여준다."""
+    """고정지출/보험 공용: 이번 달 받은 알림 중 이 항목과 매칭된 게 있는지 붙여주고,
+    결제수단이 등록된 카드(card_id)면 카드탭 기준으로 실시간 표기를 만들어 넣는다."""
     current_ym = current_year_month()
     result = []
     for r in rows:
         item = dict(r)
+        item["payment_method"] = _resolve_payment_method(conn, r["card_id"], r["payment_method"])
         match = conn.execute(
             f"""SELECT amount, merchant, occurred_at FROM inbox_items
                WHERE {fk_column} = ? AND substr(occurred_at, 1, 7) = ?
@@ -485,6 +510,7 @@ def _serialize_cards(conn):
         result.append({
             "id": card["id"],
             "name": card["name"],
+            "short_name": card["short_name"],
             "issuer": card["issuer"],
             "last4": card["last4"],
             "reset_day": card["reset_day"],
@@ -543,10 +569,11 @@ def create_card():
     try:
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM cards").fetchone()["m"]
         conn.execute(
-            """INSERT INTO cards (name, issuer, last4, reset_day, perf_threshold, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO cards (name, short_name, issuer, last4, reset_day, perf_threshold, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
+                (data.get("short_name") or "").strip(),
                 (data.get("issuer") or "").strip(),
                 (data.get("last4") or "").strip(),
                 reset_day,
@@ -585,10 +612,11 @@ def update_card(card_id):
             sort_order = card["sort_order"]
 
         conn.execute(
-            """UPDATE cards SET name = ?, issuer = ?, last4 = ?, reset_day = ?, perf_threshold = ?, memo = ?,
-               sort_order = ? WHERE id = ?""",
+            """UPDATE cards SET name = ?, short_name = ?, issuer = ?, last4 = ?, reset_day = ?,
+               perf_threshold = ?, memo = ?, sort_order = ? WHERE id = ?""",
             (
                 name,
+                (data.get("short_name", card["short_name"]) or "").strip(),
                 (data.get("issuer", card["issuer"]) or "").strip(),
                 (data.get("last4", card["last4"]) or "").strip(),
                 reset_day,
@@ -885,18 +913,21 @@ def create_recurring_payment():
         payment_day = int(data.get("payment_day") or 0)
     except (TypeError, ValueError):
         payment_day = 0
+    card_id = _parse_card_id(data.get("card_id"))
 
     conn = get_conn()
     try:
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM recurring_payments").fetchone()["m"]
         conn.execute(
-            """INSERT INTO recurring_payments (name, category, amount, payment_method, payment_day, active, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO recurring_payments (name, category, amount, payment_method, card_id,
+               payment_day, active, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (data.get("category") or "").strip(),
                 amount,
                 (data.get("payment_method") or "").strip(),
+                card_id,
                 payment_day,
                 1 if data.get("active", True) else 0,
                 (data.get("memo") or "").strip(),
@@ -928,15 +959,17 @@ def update_recurring_payment(item_id):
         except (TypeError, ValueError):
             payment_day = item["payment_day"]
         active = 1 if data.get("active", bool(item["active"])) else 0
+        card_id = _parse_card_id(data["card_id"]) if "card_id" in data else item["card_id"]
 
         conn.execute(
             """UPDATE recurring_payments SET name=?, category=?, amount=?, payment_method=?,
-               payment_day=?, active=?, memo=? WHERE id=?""",
+               card_id=?, payment_day=?, active=?, memo=? WHERE id=?""",
             (
                 name,
                 (data.get("category", item["category"]) or "").strip(),
                 amount,
                 (data.get("payment_method", item["payment_method"]) or "").strip(),
+                card_id,
                 payment_day,
                 active,
                 (data.get("memo", item["memo"]) or "").strip(),
@@ -1067,15 +1100,16 @@ def create_insurance():
         payment_day = int(data.get("payment_day") or 0)
     except (TypeError, ValueError):
         payment_day = 0
+    card_id = _parse_card_id(data.get("card_id"))
 
     conn = get_conn()
     try:
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM insurances").fetchone()["m"]
         conn.execute(
             """INSERT INTO insurances (company, product_name, insured_name, monthly_premium,
-               payment_day, payment_method, start_date, payment_end_date, maturity_date,
+               payment_day, payment_method, card_id, start_date, payment_end_date, maturity_date,
                active, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 company,
                 product_name,
@@ -1083,6 +1117,7 @@ def create_insurance():
                 monthly_premium,
                 payment_day,
                 (data.get("payment_method") or "").strip(),
+                card_id,
                 (data.get("start_date") or "").strip(),
                 (data.get("payment_end_date") or "").strip(),
                 (data.get("maturity_date") or "").strip(),
@@ -1120,11 +1155,12 @@ def update_insurance(item_id):
         except (TypeError, ValueError):
             sort_order = item["sort_order"]
         active = 1 if data.get("active", bool(item["active"])) else 0
+        card_id = _parse_card_id(data["card_id"]) if "card_id" in data else item["card_id"]
 
         conn.execute(
             """UPDATE insurances SET company=?, product_name=?, insured_name=?, monthly_premium=?,
-               payment_day=?, payment_method=?, start_date=?, payment_end_date=?, maturity_date=?,
-               active=?, memo=?, sort_order=? WHERE id=?""",
+               payment_day=?, payment_method=?, card_id=?, start_date=?, payment_end_date=?,
+               maturity_date=?, active=?, memo=?, sort_order=? WHERE id=?""",
             (
                 (data.get("company", item["company"]) or "").strip(),
                 product_name,
@@ -1132,6 +1168,7 @@ def update_insurance(item_id):
                 monthly_premium,
                 payment_day,
                 (data.get("payment_method", item["payment_method"]) or "").strip(),
+                card_id,
                 (data.get("start_date", item["start_date"]) or "").strip(),
                 (data.get("payment_end_date", item["payment_end_date"]) or "").strip(),
                 (data.get("maturity_date", item["maturity_date"]) or "").strip(),
