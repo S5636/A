@@ -164,6 +164,46 @@
     `;
   }
 
+  // 고정지출/보험 공용: 이번 달 것만 아니라 과거 달(엑셀로 몇 달치 한 번에
+  // 올린 것 포함) 매칭 내역까지 "내역" 버튼으로 펼쳐서 보여준다.
+  function matchHistoryTemplate(logKey, history) {
+    const logsOpen = openLogPanels.has(logKey);
+    const logsHtml = history.length
+      ? history.map((h) => `
+          <div class="log-item">
+            <span>${h.occurred_at} · ${h.merchant ? escapeHtml(h.merchant) + " " : ""}${fmt(h.amount)}원</span>
+            <button class="unlink-match" data-inbox-id="${h.id}">해제</button>
+          </div>
+        `).join("")
+      : `<div class="log-item"><span>매칭된 결제 내역 없음</span></div>`;
+    return `
+      <div class="benefit-sub">
+        <div class="benefit-buttons">
+          <button class="btn small toggle-match-log" data-log-key="${logKey}">내역${history.length ? ` (${history.length})` : ""}</button>
+        </div>
+      </div>
+      <div class="log-list ${logsOpen ? "open" : ""}" data-log-for="${logKey}">${logsHtml}</div>
+    `;
+  }
+
+  function wireMatchHistory(el, logKey) {
+    const toggleBtn = el.querySelector(`.toggle-match-log[data-log-key="${logKey}"]`);
+    if (toggleBtn) {
+      toggleBtn.addEventListener("click", () => {
+        if (openLogPanels.has(logKey)) openLogPanels.delete(logKey);
+        else openLogPanels.add(logKey);
+        render();
+      });
+    }
+    el.querySelectorAll(".unlink-match").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("이 매칭을 해제할까요?")) return;
+        state = await api(`/api/match/${btn.dataset.inboxId}/unlink`, { method: "POST" });
+        render();
+      })
+    );
+  }
+
   // ---- 받은 알림 ----
   // ---- 여러 건 한 번에 선택/삭제(제외) 공용 - 몇 년치 카드내역을 한 번에
   // 업로드했을 때 필요없는 알림을 리스트별로 한 번에 치울 수 있게 한다 ----
@@ -974,6 +1014,7 @@
         </div>
       </div>
       ${memoToggleTemplate(`recurring-${item.id}`, item.memo)}
+      ${matchHistoryTemplate(`recurring-${item.id}`, item.match_history)}
     `;
   }
 
@@ -986,6 +1027,7 @@
     });
     const matchBadge = el.querySelector(".match-badge");
     if (matchBadge) matchBadge.addEventListener("click", () => openMatchModal("recurring", item, item.name));
+    wireMatchHistory(el, `recurring-${item.id}`);
     el.querySelectorAll(".memo-toggle").forEach((btn) =>
       btn.addEventListener("click", () => {
         const key = btn.dataset.memoKey;
@@ -1244,6 +1286,7 @@
       </div>
       ${infoLine ? `<div class="perf-row-sub">${escapeHtml(infoLine)}</div>` : ""}
       ${memoToggleTemplate(`insurance-${item.id}`, item.memo)}
+      ${matchHistoryTemplate(`insurance-${item.id}`, item.match_history)}
     `;
   }
 
@@ -1256,6 +1299,7 @@
     });
     const matchBadge = el.querySelector(".match-badge");
     if (matchBadge) matchBadge.addEventListener("click", () => openMatchModal("insurances", item, item.product_name));
+    wireMatchHistory(el, `insurance-${item.id}`);
     el.querySelectorAll(".memo-toggle").forEach((btn) =>
       btn.addEventListener("click", () => {
         const key = btn.dataset.memoKey;

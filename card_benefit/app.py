@@ -220,18 +220,24 @@ def _resolve_payment_method(conn, card_id, fallback_text):
 
 def _attach_match_info(conn, rows, fk_column):
     """고정지출/보험 공용: 이번 달 받은 알림 중 이 항목과 매칭된 게 있는지 붙여주고,
-    결제수단이 등록된 카드(card_id)면 카드탭 기준으로 실시간 표기를 만들어 넣는다."""
+    결제수단이 등록된 카드(card_id)면 카드탭 기준으로 실시간 표기를 만들어 넣는다.
+    과거 달 매칭 내역도 match_history로 전부 붙여서(몇 달치를 한 번에 엑셀로
+    올려도) "내역" 버튼으로 지난 달 것까지 다 보이게 한다."""
     current_ym = current_year_month()
     result = []
     for r in rows:
         item = dict(r)
         item["payment_method"] = _resolve_payment_method(conn, r["card_id"], r["payment_method"])
-        match = conn.execute(
-            f"""SELECT amount, merchant, occurred_at FROM inbox_items
-               WHERE {fk_column} = ? AND substr(occurred_at, 1, 7) = ?
-               ORDER BY occurred_at DESC LIMIT 1""",
-            (r["id"], current_ym),
-        ).fetchone()
+        history = conn.execute(
+            f"""SELECT id, amount, merchant, occurred_at FROM inbox_items
+               WHERE {fk_column} = ? ORDER BY occurred_at DESC""",
+            (r["id"],),
+        ).fetchall()
+        item["match_history"] = [
+            {"id": h["id"], "amount": h["amount"], "merchant": h["merchant"], "occurred_at": h["occurred_at"]}
+            for h in history
+        ]
+        match = next((h for h in history if h["occurred_at"][:7] == current_ym), None)
         item["matched_this_month"] = bool(match)
         item["matched_amount"] = match["amount"] if match else None
         item["matched_merchant"] = match["merchant"] if match else None
@@ -1055,6 +1061,22 @@ def unmatch_recurring(item_id):
             """UPDATE inbox_items SET recurring_id = NULL
                WHERE recurring_id = ? AND substr(occurred_at, 1, 7) = ?""",
             (item_id, current_ym),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/match/<int:inbox_id>/unlink", methods=["POST"])
+def unlink_match(inbox_id):
+    """고정지출/보험 "내역" 패널에서 특정 건(이번 달이든 지난 달이든) 매칭만
+    하나 풀어준다. 알림 자체(inbox_items 행)나 status는 그대로 둔다."""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE inbox_items SET recurring_id = NULL, insurance_id = NULL WHERE id = ?",
+            (inbox_id,),
         )
         conn.commit()
     finally:
@@ -2173,7 +2195,7 @@ def _import_statement(ws, header_info):
             raw_parts = [p for p in [merchant, f"{amount:,.0f}원", used_at] if p]
             raw_text = " · ".join(raw_parts)
 
-            conn.execute(
+            cur = conn.execute(
                 """INSERT INTO inbox_items
                    (raw_text, amount, last4, issuer, merchant, occurred_at, approval_no, usage_type, source, status)
                    VALUES (?, ?, ?, '', ?, ?, ?, ?, 'excel', ?)""",
@@ -2184,6 +2206,12 @@ def _import_statement(ws, header_info):
                 cancelled += 1
             else:
                 queued += 1
+                # 폰 알림으로 실시간으로 들어올 때와 똑같이, 엑셀로 한번에
+                # 올린 지난 내역도 여기서 바로 고정지출/보험 자동매칭을
+                # 시도한다. 몇 달치를 한 번에 올려도 각 건이 해당하는 달에
+                # 바로 매칭되게 하려는 것.
+                _try_auto_match_recurring(conn, cur.lastrowid)
+                _try_auto_match_insurance(conn, cur.lastrowid)
         conn.commit()
     finally:
         conn.close()
