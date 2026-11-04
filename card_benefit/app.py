@@ -327,8 +327,20 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
 
     active_rows = conn.execute(f"SELECT * FROM {table} WHERE active = 1").fetchall()
 
+    def rp_last4(rp):
+        # card_id로 등록된 카드를 결제수단으로 고른 항목은 payment_method
+        # 텍스트가 비어있으므로(카드탭에서 실시간으로 끌어오는 방식이라),
+        # 거기서 뒷자리를 뽑던 예전 방식으로는 카드 구분이 전혀 안 됐다
+        # (last4_ok가 항상 "제한 없음"으로 통과돼서, 다른 카드로 결제된
+        # 알림까지 섞여 들어오는 문제가 있었다). card_id가 있으면 카드탭에서
+        # 직접 뒷자리를 찾는다.
+        if rp["card_id"]:
+            card = conn.execute("SELECT last4 FROM cards WHERE id = ?", (rp["card_id"],)).fetchone()
+            return (card["last4"] if card else "") or ""
+        return _extract_method_last4(rp["payment_method"])
+
     def last4_ok(rp):
-        method_last4 = _extract_method_last4(rp["payment_method"])
+        method_last4 = rp_last4(rp)
         return not (method_last4 and item["last4"] and not card_codes_match(method_last4, item["last4"]))
 
     def is_variable_amount(rp):
