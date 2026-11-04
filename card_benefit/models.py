@@ -211,6 +211,8 @@ def init_db():
         _ensure_column(conn, "inbox_items", "medical_excluded", "medical_excluded INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "recurring_payments", "card_id", "card_id INTEGER DEFAULT NULL")
         _ensure_column(conn, "insurances", "card_id", "card_id INTEGER DEFAULT NULL")
+        _ensure_column(conn, "recurring_payments", "billing_alias", "billing_alias TEXT DEFAULT ''")
+        _ensure_column(conn, "insurances", "billing_alias", "billing_alias TEXT DEFAULT ''")
         conn.commit()
     finally:
         conn.close()

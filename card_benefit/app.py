@@ -270,10 +270,14 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
 
     1차: 금액이 정확히 같고(결제수단에 카드 뒷자리가 있으면 그것까지 일치하는)
     항목이 '정확히 하나'일 때 매칭 - 구독료처럼 매달 같은 금액인 경우.
-    2차(1차에서 금액이 맞는 후보가 하나도 없을 때만): 가맹점명에 항목 이름의
-    의미있는 단어가 포함되는 항목이 '정확히 하나'일 때 매칭 - 도시가스/전기세처럼
-    매달 청구 금액이 바뀌는 고정지출은 금액으로는 절대 못 잡으므로.
-    두 경우 다 후보가 여러 개면 애매한 거라 손대지 않고 사용자가 직접 고르게 둔다.
+    2차(1차에서 금액이 맞는 후보가 하나도 없을 때만): 가맹점명에 항목
+    이름이나 등록된 별칭(billing_alias)의 의미있는 단어가 포함되는 항목이
+    '정확히 하나'일 때 매칭 - 도시가스/전기세처럼 매달 청구 금액이 바뀌는
+    고정지출은 금액으로는 절대 못 잡고, 보험료처럼 금액은 고정이어도 카드/
+    계좌 알림엔 상품명이 아니라 전혀 다른 이름(예: MG손해보험이 '예별손해보험'
+    으로 찍히는 경우)으로 찍히는 경우도 있어서 이름만으론 못 잡으므로 - 그래서
+    둘 다 같이 본다. 두 경우 다 후보가 여러 개면 애매한 거라 손대지 않고
+    사용자가 직접 고르게 둔다.
 
     주의: 여기선 inbox_items.status를 절대 바꾸지 않는다(recurring_id/insurance_id만
     추가로 달아둠). status를 건드리면 "받은 알림" 혜택배정 큐에서 사라지고, 전월실적
@@ -304,7 +308,10 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
     merchant_lower = item["merchant"].lower()
     name_matches = [
         rp for rp in active_rows
-        if last4_ok(rp) and any(tok.lower() in merchant_lower for tok in _name_tokens(rp[name_column]))
+        if last4_ok(rp) and any(
+            tok.lower() in merchant_lower
+            for tok in _name_tokens(rp[name_column]) + _name_tokens(rp["billing_alias"])
+        )
     ]
     if len(name_matches) != 1:
         return False
@@ -927,8 +934,8 @@ def create_recurring_payment():
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM recurring_payments").fetchone()["m"]
         conn.execute(
             """INSERT INTO recurring_payments (name, category, amount, payment_method, card_id,
-               payment_day, active, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               payment_day, active, memo, sort_order, billing_alias)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (data.get("category") or "").strip(),
@@ -939,6 +946,7 @@ def create_recurring_payment():
                 1 if data.get("active", True) else 0,
                 (data.get("memo") or "").strip(),
                 max_order + 1,
+                (data.get("billing_alias") or "").strip(),
             ),
         )
         conn.commit()
@@ -970,7 +978,7 @@ def update_recurring_payment(item_id):
 
         conn.execute(
             """UPDATE recurring_payments SET name=?, category=?, amount=?, payment_method=?,
-               card_id=?, payment_day=?, active=?, memo=? WHERE id=?""",
+               card_id=?, payment_day=?, active=?, memo=?, billing_alias=? WHERE id=?""",
             (
                 name,
                 (data.get("category", item["category"]) or "").strip(),
@@ -980,6 +988,7 @@ def update_recurring_payment(item_id):
                 payment_day,
                 active,
                 (data.get("memo", item["memo"]) or "").strip(),
+                (data.get("billing_alias", item["billing_alias"]) or "").strip(),
                 item_id,
             ),
         )
@@ -1131,8 +1140,8 @@ def create_insurance():
         conn.execute(
             """INSERT INTO insurances (company, product_name, insured_name, monthly_premium,
                payment_day, payment_method, card_id, start_date, payment_end_date, maturity_date,
-               active, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               active, memo, sort_order, billing_alias)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 company,
                 product_name,
@@ -1147,6 +1156,7 @@ def create_insurance():
                 1 if data.get("active", True) else 0,
                 (data.get("memo") or "").strip(),
                 max_order + 1,
+                (data.get("billing_alias") or "").strip(),
             ),
         )
         conn.commit()
@@ -1183,7 +1193,7 @@ def update_insurance(item_id):
         conn.execute(
             """UPDATE insurances SET company=?, product_name=?, insured_name=?, monthly_premium=?,
                payment_day=?, payment_method=?, card_id=?, start_date=?, payment_end_date=?,
-               maturity_date=?, active=?, memo=?, sort_order=? WHERE id=?""",
+               maturity_date=?, active=?, memo=?, sort_order=?, billing_alias=? WHERE id=?""",
             (
                 (data.get("company", item["company"]) or "").strip(),
                 product_name,
@@ -1198,6 +1208,7 @@ def update_insurance(item_id):
                 active,
                 (data.get("memo", item["memo"]) or "").strip(),
                 sort_order,
+                (data.get("billing_alias", item["billing_alias"]) or "").strip(),
                 item_id,
             ),
         )

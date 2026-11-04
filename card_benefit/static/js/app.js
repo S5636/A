@@ -1179,6 +1179,7 @@
     }
 
     document.getElementById("recurring-day").value = item && item.payment_day ? item.payment_day : "";
+    document.getElementById("recurring-billing-alias").value = item ? (item.billing_alias || "") : "";
     document.getElementById("recurring-active").checked = item ? !!item.active : true;
     document.getElementById("recurring-memo").value = item ? item.memo : "";
     recurringModal.classList.add("open");
@@ -1194,6 +1195,7 @@
       card_id: isCardChoice ? Number(methodSelect.value.slice(5)) : null,
       payment_method: isCardChoice ? "" : (methodSelect.value === CUSTOM_METHOD ? methodInput.value.trim() : methodSelect.value),
       payment_day: document.getElementById("recurring-day").value || 0,
+      billing_alias: document.getElementById("recurring-billing-alias").value.trim(),
       active: document.getElementById("recurring-active").checked,
       memo: document.getElementById("recurring-memo").value.trim(),
     };
@@ -1368,6 +1370,7 @@
     document.getElementById("insurance-start-date").value = item ? item.start_date : "";
     document.getElementById("insurance-payment-end-date").value = item ? item.payment_end_date : "";
     document.getElementById("insurance-maturity-date").value = item ? item.maturity_date : "";
+    document.getElementById("insurance-billing-alias").value = item ? (item.billing_alias || "") : "";
     document.getElementById("insurance-active").checked = item ? !!item.active : true;
     document.getElementById("insurance-memo").value = item ? item.memo : "";
     insuranceModal.classList.add("open");
@@ -1387,6 +1390,7 @@
       start_date: document.getElementById("insurance-start-date").value.trim(),
       payment_end_date: document.getElementById("insurance-payment-end-date").value.trim(),
       maturity_date: document.getElementById("insurance-maturity-date").value.trim(),
+      billing_alias: document.getElementById("insurance-billing-alias").value.trim(),
       active: document.getElementById("insurance-active").checked,
       memo: document.getElementById("insurance-memo").value.trim(),
     };
