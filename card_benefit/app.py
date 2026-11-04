@@ -8,6 +8,7 @@ import json
 import os
 import re
 import secrets
+import zipfile
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from io import BytesIO
@@ -2224,6 +2225,45 @@ def _import_statement(ws, header_info):
     return jsonify(result)
 
 
+def _repair_xlsx_styles(data):
+    """일부 카드사(삼성카드 등) 엑셀은 xl/styles.xml에 OOXML 스펙에 없는
+    오탈자 속성(applyNumberForm, 원래는 applyNumberFormat)이 들어있어서
+    openpyxl이 아예 못 읽는 경우가 있다. 셀 값 자체는 멀쩡하므로 그 오탈자만
+    고쳐서 다시 압축해 돌려준다. 이 문제가 아니면(styles.xml이 없거나 그
+    속성이 없으면) None을 돌려줘서, 호출한 쪽에서 원래 에러를 그대로 보여주게
+    한다."""
+    try:
+        with zipfile.ZipFile(BytesIO(data)) as zin:
+            names = zin.namelist()
+            if "xl/styles.xml" not in names:
+                return None
+            styles_text = zin.read("xl/styles.xml").decode("utf-8")
+            fixed_text = re.sub(r"applyNumberForm(?!at)", "applyNumberFormat", styles_text)
+            if fixed_text == styles_text:
+                return None
+            out = BytesIO()
+            with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+                for name in names:
+                    content = zin.read(name)
+                    if name == "xl/styles.xml":
+                        content = fixed_text.encode("utf-8")
+                    zout.writestr(name, content)
+            return out.getvalue()
+    except Exception:
+        return None
+
+
+def _load_workbook_resilient(file_storage):
+    data = file_storage.read()
+    try:
+        return load_workbook(BytesIO(data), data_only=True)
+    except Exception:
+        repaired = _repair_xlsx_styles(data)
+        if repaired is None:
+            raise
+        return load_workbook(BytesIO(repaired), data_only=True)
+
+
 @app.route("/api/import/usage", methods=["POST"])
 def import_usage():
     file = request.files.get("file")
@@ -2231,7 +2271,7 @@ def import_usage():
         return jsonify({"error": "파일을 선택하세요."}), 400
 
     try:
-        wb = load_workbook(file, data_only=True)
+        wb = _load_workbook_resilient(file)
     except Exception:
         return jsonify({"error": "엑셀 파일을 읽을 수 없습니다. .xlsx 파일인지 확인해주세요."}), 400
     ws = wb.active
