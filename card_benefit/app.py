@@ -1001,17 +1001,17 @@ def delete_recurring_payment(item_id):
 
 @app.route("/api/recurring/<int:item_id>/match-candidates", methods=["GET"])
 def recurring_match_candidates(item_id):
-    """이번 달 결제 알림 중 아직 다른 고정지출에 안 묶인 것들을 후보로 보여준다.
+    """아직 다른 고정지출/보험에 안 묶인 알림들을 후보로 보여준다. 이번 달로
+    제한하면 엑셀로 지난 달치를 올렸을 때 정작 고를 후보가 하나도 안 보이는
+    문제가 있어서, 달 상관없이 최근 것부터 보여준다(개수만 넉넉하게 제한).
     혜택배정 큐(status)는 전혀 건드리지 않으므로, 이미 혜택에 배정됐거나
     "혜택 없음" 처리된 알림도 후보에 포함된다(고정지출 확인은 별개 작업)."""
     conn = get_conn()
     try:
-        current_ym = current_year_month()
         rows = conn.execute(
             """SELECT * FROM inbox_items
-               WHERE recurring_id IS NULL AND substr(occurred_at, 1, 7) = ?
-               ORDER BY occurred_at DESC""",
-            (current_ym,),
+               WHERE recurring_id IS NULL AND insurance_id IS NULL
+               ORDER BY occurred_at DESC LIMIT 100"""
         ).fetchall()
         return jsonify([
             {
@@ -1219,15 +1219,15 @@ def delete_insurance(item_id):
 
 @app.route("/api/insurances/<int:item_id>/match-candidates", methods=["GET"])
 def insurance_match_candidates(item_id):
-    """이번 달 결제 알림 중 아직 다른 보험/고정지출에 안 묶인 것들을 후보로 보여준다."""
+    """아직 다른 보험/고정지출에 안 묶인 알림들을 후보로 보여준다. 이번 달로
+    제한하지 않고 달 상관없이 최근 것부터 보여준다(개수만 넉넉하게 제한) -
+    엑셀로 지난 달치를 올렸을 때도 후보로 고를 수 있어야 하므로."""
     conn = get_conn()
     try:
-        current_ym = current_year_month()
         rows = conn.execute(
             """SELECT * FROM inbox_items
-               WHERE insurance_id IS NULL AND recurring_id IS NULL AND substr(occurred_at, 1, 7) = ?
-               ORDER BY occurred_at DESC""",
-            (current_ym,),
+               WHERE insurance_id IS NULL AND recurring_id IS NULL
+               ORDER BY occurred_at DESC LIMIT 100"""
         ).fetchall()
         return jsonify([
             {

@@ -1051,7 +1051,7 @@
   });
 
   async function openMatchModal(entityType, item, label) {
-    document.getElementById("match-modal-title").textContent = `"${label}" 이번 달 결제 확인`;
+    document.getElementById("match-modal-title").textContent = `"${label}" 결제 확인`;
     const currentEl = document.getElementById("match-modal-current");
     const listEl = document.getElementById("match-modal-list");
     listEl.innerHTML = "";
@@ -1068,11 +1068,11 @@
       return;
     }
 
-    currentEl.textContent = "아직 이번 달 결제 확인 안 됨. 아래에서 해당하는 받은 알림을 고르세요.";
+    currentEl.textContent = "아직 이번 달 결제 확인 안 됨. 아래에서 해당하는 받은 알림을 고르세요(지난 달 것도 포함).";
     listEl.innerHTML = `<p class="hint">불러오는 중...</p>`;
     const candidates = await api(`/api/${entityType}/${item.id}/match-candidates`);
     if (!candidates.length) {
-      listEl.innerHTML = `<p class="hint">이번 달 들어온 알림 중 후보가 없습니다.</p>`;
+      listEl.innerHTML = `<p class="hint">아직 매칭 안 된 받은 알림이 없습니다.</p>`;
       return;
     }
     const statusLabel = { pending: "", assigned: " (혜택배정됨)", no_benefit: " (혜택없음 처리)" };
