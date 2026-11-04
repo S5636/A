@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     recurring_id INTEGER REFERENCES recurring_payments(id) ON DELETE SET NULL,  -- 고정지출과 매칭됐으면
     insurance_id INTEGER REFERENCES insurances(id) ON DELETE SET NULL,  -- 보험료와 매칭됐으면
     medical_claimed INTEGER NOT NULL DEFAULT 0,  -- 병원비/약국 결제를 실손 등으로 청구했는지
+    medical_excluded INTEGER NOT NULL DEFAULT 0,  -- 병원비 목록에서 "이건 아님" 처리한 건 다시 안 보여줌
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -201,6 +202,7 @@ def init_db():
         _ensure_column(conn, "inbox_items", "recurring_id", "recurring_id INTEGER DEFAULT NULL")
         _ensure_column(conn, "inbox_items", "insurance_id", "insurance_id INTEGER DEFAULT NULL")
         _ensure_column(conn, "inbox_items", "medical_claimed", "medical_claimed INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "inbox_items", "medical_excluded", "medical_excluded INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     finally:
         conn.close()

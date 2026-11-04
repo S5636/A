@@ -176,9 +176,11 @@ def serialize_insurances(conn):
 
 def serialize_medical_expenses(conn):
     """받은 알림 중 가맹점명으로 봤을 때 병원/약국 등 의료기관 결제로 보이는 것들을
-    모아서, 실손 등으로 청구했는지(medical_claimed) 체크할 수 있게 보여준다."""
+    모아서, 실손 등으로 청구했는지(medical_claimed) 체크할 수 있게 보여준다.
+    "이건 아님" 처리(medical_excluded)한 건 다시 안 보여준다."""
     rows = conn.execute(
-        "SELECT * FROM inbox_items WHERE merchant != '' ORDER BY occurred_at DESC, id DESC"
+        "SELECT * FROM inbox_items WHERE merchant != '' AND medical_excluded = 0 "
+        "ORDER BY occurred_at DESC, id DESC"
     ).fetchall()
     return [
         {
@@ -1259,6 +1261,32 @@ def toggle_medical_claim(item_id):
     return jsonify(serialize_full())
 
 
+@app.route("/api/medical-expenses/bulk-exclude", methods=["POST"])
+def bulk_exclude_medical_expenses():
+    """병원비 목록에서 여러 건을 한 번에 "이건 병원비 아님"으로 제외한다.
+    inbox_items 자체는 안 지우고 medical_excluded만 켜서, 이 목록에서만 다시
+    안 보이게 한다(혜택배정/고정지출·보험 매칭에는 영향 없음)."""
+    data = request.get_json(force=True) or {}
+    ids = data.get("ids") or []
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return jsonify({"error": "제외할 항목을 선택하세요."}), 400
+    if not ids:
+        return jsonify({"error": "제외할 항목을 선택하세요."}), 400
+
+    conn = get_conn()
+    try:
+        placeholders = ",".join("?" for _ in ids)
+        conn.execute(
+            f"UPDATE inbox_items SET medical_excluded = 1 WHERE id IN ({placeholders})", ids
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
 def _clean_tier_table(raw):
     """[[기준금액,한도], ...] 형태인지 검증하고 정돈된 JSON 문자열(또는 '')을 돌려준다."""
     raw = (raw or "").strip()
@@ -1825,6 +1853,30 @@ def discard_inbox_item(item_id):
     conn = get_conn()
     try:
         conn.execute("DELETE FROM inbox_items WHERE id = ?", (item_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/inbox/bulk-delete", methods=["POST"])
+def bulk_delete_inbox_items():
+    """받은 알림/혜택없음 처리 내역 리스트에서 여러 개를 한 번에 완전 삭제한다.
+    과거 카드내역을 몇 년치 업로드했을 때 필요없는 알림을 한 번에 치우는 용도 -
+    혜택 사용기록(usage_logs) 자체는 지우지 않는다(source_inbox_id만 비워짐)."""
+    data = request.get_json(force=True) or {}
+    ids = data.get("ids") or []
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return jsonify({"error": "삭제할 항목을 선택하세요."}), 400
+    if not ids:
+        return jsonify({"error": "삭제할 항목을 선택하세요."}), 400
+
+    conn = get_conn()
+    try:
+        placeholders = ",".join("?" for _ in ids)
+        conn.execute(f"DELETE FROM inbox_items WHERE id IN ({placeholders})", ids)
         conn.commit()
     finally:
         conn.close()
