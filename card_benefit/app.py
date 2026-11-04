@@ -2141,8 +2141,37 @@ def _import_statement(ws, header_info):
                     return "같은 카드·금액·날짜 내역이 이미 있어 중복으로 보고 건너뜀"
             return None
 
+        # 취소 거래는 카드사 엑셀에 원 결제 건과 같은 승인번호로 "취소" 행이
+        # 따로 한 줄 더 찍혀 나온다(금액은 음수로, 비고엔 "취소"로). 이걸 그냥
+        # "승인번호 중복"으로 보고 버리면, 정작 취소된 원 결제가 혜택배정
+        # 큐에 멀쩡한 결제인 것처럼 그대로 남아버린다. 그래서 취소로 보이는
+        # 행이 들어오면 먼저 같은 승인번호의 원 결제를 찾아서 그 행을
+        # status='cancelled'로 바꾸고(새 행은 또 만들지 않음), 취소가 아닐
+        # 때만 원래의 "중복인지" 판단으로 넘어간다.
+        approval_no_to_id = {}
+
+        def _resolve_cancellation(approval_no):
+            target_id = approval_no_to_id.get(approval_no)
+            if target_id is None:
+                row = conn.execute(
+                    "SELECT id FROM inbox_items WHERE approval_no = ? AND status != 'cancelled' "
+                    "ORDER BY id DESC LIMIT 1",
+                    (approval_no,),
+                ).fetchone()
+                target_id = row["id"] if row else None
+            if target_id is None:
+                return False
+            # 취소된 결제는 고정지출/보험 "이번 달 결제 확인"에서도 당연히
+            # 빠져야 하므로 매칭도 같이 풀어준다.
+            conn.execute(
+                "UPDATE inbox_items SET status = 'cancelled', recurring_id = NULL, insurance_id = NULL WHERE id = ?",
+                (target_id,),
+            )
+            return True
+
         queued = 0
         cancelled = 0
+        cancel_matched = 0
         skipped = []
         for i, row in enumerate(
             ws.iter_rows(min_row=header_info["header_row"] + 1, values_only=True),
@@ -2180,6 +2209,16 @@ def _import_statement(ws, header_info):
             if usage_type_col is not None and usage_type_col < len(row) and row[usage_type_col] not in (None, ""):
                 usage_type = str(row[usage_type_col]).strip()
 
+            status_col = header_info.get("status_col")
+            is_cancelled = is_refund or (
+                status_col is not None and status_col < len(row) and is_cancelled_status(row[status_col])
+            )
+
+            if is_cancelled and approval_no and _resolve_cancellation(approval_no):
+                skipped.append(f"{i}행: 취소 확인됨 - 같은 승인번호({approval_no})의 원 결제 내역을 취소 처리함")
+                cancel_matched += 1
+                continue
+
             dup_reason = _find_duplicate(last4, amount, occurred_at, approval_no)
             if dup_reason:
                 skipped.append(f"{i}행: {dup_reason}")
@@ -2187,11 +2226,6 @@ def _import_statement(ws, header_info):
             if approval_no:
                 seen_approval.add(approval_no)
             existing_by_amount[amount].append([last4, occurred_at, approval_no])
-
-            status_col = header_info.get("status_col")
-            is_cancelled = is_refund or (
-                status_col is not None and status_col < len(row) and is_cancelled_status(row[status_col])
-            )
 
             raw_parts = [p for p in [merchant, f"{amount:,.0f}원", used_at] if p]
             raw_text = " · ".join(raw_parts)
@@ -2203,6 +2237,8 @@ def _import_statement(ws, header_info):
                 (raw_text, amount, last4, merchant, occurred_at, approval_no, usage_type,
                  "cancelled" if is_cancelled else "pending"),
             )
+            if approval_no:
+                approval_no_to_id[approval_no] = cur.lastrowid
             if is_cancelled:
                 cancelled += 1
             else:
@@ -2219,6 +2255,8 @@ def _import_statement(ws, header_info):
 
     if cancelled:
         skipped.append(f"(참고) 취소/환불로 보이는 {cancelled}건은 DB에는 저장했지만 목록에는 안 띄웠습니다.")
+    if cancel_matched:
+        skipped.append(f"(참고) 같은 승인번호의 원 결제 {cancel_matched}건을 취소 처리했습니다.")
 
     result = serialize_full()
     result["import_result"] = {"mode": "statement", "queued": queued, "skipped": skipped}
