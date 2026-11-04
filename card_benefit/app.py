@@ -225,17 +225,33 @@ def _attach_match_info(conn, rows, fk_column):
     과거 달 매칭 내역도 match_history로 전부 붙여서(몇 달치를 한 번에 엑셀로
     올려도) "내역" 버튼으로 지난 달 것까지 다 보이게 한다."""
     current_ym = current_year_month()
+    cards_with_code = conn.execute("SELECT name, last4, short_name FROM cards WHERE last4 != ''").fetchall()
+
+    def card_label_for(last4):
+        if not last4:
+            return None
+        for c in cards_with_code:
+            if card_codes_match(c["last4"], last4):
+                return c["short_name"] or c["name"]
+        return None
+
     result = []
     for r in rows:
         item = dict(r)
         item["payment_method"] = _resolve_payment_method(conn, r["card_id"], r["payment_method"])
         history = conn.execute(
-            f"""SELECT id, amount, merchant, occurred_at FROM inbox_items
+            f"""SELECT id, amount, merchant, occurred_at, last4 FROM inbox_items
                WHERE {fk_column} = ? ORDER BY occurred_at DESC""",
             (r["id"],),
         ).fetchall()
         item["match_history"] = [
-            {"id": h["id"], "amount": h["amount"], "merchant": h["merchant"], "occurred_at": h["occurred_at"]}
+            {
+                "id": h["id"],
+                "amount": h["amount"],
+                "merchant": h["merchant"],
+                "occurred_at": h["occurred_at"],
+                "card_label": card_label_for(h["last4"]),
+            }
             for h in history
         ]
         match = next((h for h in history if h["occurred_at"][:7] == current_ym), None)
@@ -296,7 +312,22 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         method_last4 = _extract_method_last4(rp["payment_method"])
         return not (method_last4 and item["last4"] and not card_codes_match(method_last4, item["last4"]))
 
-    amount_matches = [rp for rp in active_rows if rp[amount_column] == item["amount"] and last4_ok(rp)]
+    def is_variable_amount(rp):
+        # 도시가스/전기세처럼 매달 청구 금액이 바뀌는 고정지출(카테고리
+        # "주거/관리비")은 등록된 amount가 그냥 마지막으로 확인한 예시값일
+        # 뿐이라, 그 숫자와 우연히 같은 아무 결제(예: 주유소 3,000원)가
+        # 금액만 보고 잘못 묶이면 안 된다. 그래서 이런 항목은 금액 매칭
+        # 후보에서 아예 빼고 이름/별칭 매칭만 쓴다. (insurances 테이블에는
+        # category 컬럼이 없으므로 보험료는 이 예외 대상이 아니다.)
+        try:
+            return rp["category"] == "주거/관리비"
+        except (IndexError, KeyError):
+            return False
+
+    amount_matches = [
+        rp for rp in active_rows
+        if not is_variable_amount(rp) and rp[amount_column] == item["amount"] and last4_ok(rp)
+    ]
     if len(amount_matches) == 1:
         conn.execute(f"UPDATE inbox_items SET {fk_column} = ? WHERE id = ?", (amount_matches[0]["id"], inbox_id))
         return True
