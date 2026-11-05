@@ -2382,8 +2382,14 @@ def _import_statement(ws, header_info):
             existing_by_amount[r["amount"]].append([r["last4"] or "", r["occurred_at"] or "", r["approval_no"] or ""])
 
         def _last4_compatible(a, b):
+            # 카드번호가 한쪽에라도 없으면(예: 일부 카드사 알림은 마스킹이
+            # "(0*0*)"처럼 실제 숫자가 하나도 안 보이는 형식이라 뒷자리를 아예
+            # 못 뽑는 경우가 있음) 카드로는 비교할 방법이 없으니, 다른 조건
+            # (금액·시간)만으로 판단하게 "맞을 수도 있다"로 통과시킨다. 여기서
+            # 막혀버리면 같은 결제가 알림으로 먼저 들어오고 나중에 엑셀로 또
+            # 들어왔을 때(또는 그 반대) 중복으로 못 잡아서 그대로 두 번 쌓인다.
             if not a or not b:
-                return a == b
+                return True
             return card_codes_match(a, b)
 
         def _parse_ts(s):
