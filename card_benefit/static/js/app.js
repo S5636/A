@@ -12,8 +12,9 @@
 
   let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [] };
   let noBenefitOpen = false;
-  // null = 진짜 이번 달(필터 없음). "YYYY-MM" 문자열이면 카드 탭의 혜택별
-  // "사용내역" 목록만 그 달로 필터링해서 본다(한도/잔여는 항상 진짜 이번 달 기준).
+  // null = 진짜 이번 달(필터 없음). "YYYY-MM" 문자열이면 카드 탭의 "사용내역"
+  // 목록뿐 아니라 한도/잔여/전월실적까지 전부 그 달 기준으로 같이 바뀐다.
+  // (배정 모달은 예외 - 알림 자체의 결제 달 기준으로 따로 불러옴, 아래 참고)
   let selectedMonth = null;
   const openLogPanels = new Set(); // benefit id 목록 - 펼쳐진 사용내역 기억
   const openMemoPanels = new Set(); // "card-1", "benefit-3" 같은 키 - 펼쳐진 설명 기억
@@ -1885,9 +1886,26 @@
   const assignCardSelect = document.getElementById("assign-card");
   const assignBenefitSelect = document.getElementById("assign-benefit");
   let assigningItem = null;
+  // 배정 모달은 "이 알림이 실제 결제된 달"(occurred_at) 기준 한도/잔여를 보여줘야
+  // 정확하다 - 상단 월 선택 바나 "진짜 오늘"이 아니라, 알림마다 결제 달이 다
+  // 다를 수 있으니 모달을 열 때마다 그 알림의 달로 따로 불러온 카드 목록.
+  let assignModalCards = [];
+
+  async function fetchStateForMonth(yearMonth) {
+    const url = yearMonth ? `/api/state?month=${encodeURIComponent(yearMonth)}` : "/api/state";
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "request failed");
+    return data;
+  }
+
+  function itemYearMonth(item) {
+    const oa = item && item.occurred_at;
+    return oa && oa.length >= 7 ? oa.slice(0, 7) : null;
+  }
 
   function fillAssignBenefitOptions(cardId, preselectBenefitId) {
-    const card = state.cards.find((c) => c.id == cardId);
+    const card = assignModalCards.find((c) => c.id == cardId);
     const benefits = card ? card.benefits : [];
     const placeholder = benefits.length
       ? `<option value="">해당 없음</option>`
@@ -1901,7 +1919,7 @@
   }
 
   function currentAssignBenefit() {
-    const card = state.cards.find((c) => c.id == assignCardSelect.value);
+    const card = assignModalCards.find((c) => c.id == assignCardSelect.value);
     if (!card) return null;
     return card.benefits.find((b) => b.id == assignBenefitSelect.value) || null;
   }
@@ -2001,17 +2019,26 @@
     preview.style.display = "none";
   }
 
-  function openAssignModal(item) {
+  async function openAssignModal(item) {
     if (!state.cards.length) {
       alert("먼저 카드와 혜택을 등록해주세요.");
       return;
     }
     assigningItem = item;
     document.getElementById("assign-raw-text").textContent = item.raw_text;
-    assignCardSelect.innerHTML = state.cards
+
+    try {
+      const monthState = await fetchStateForMonth(itemYearMonth(item));
+      assignModalCards = monthState.cards;
+    } catch (e) {
+      assignModalCards = state.cards;
+    }
+    if (assigningItem !== item) return; // 로딩 중에 다른 알림을 열었으면 무시
+
+    assignCardSelect.innerHTML = assignModalCards
       .map((c) => `<option value="${c.id}">${escapeHtml(shortCardName(c.name))}</option>`)
       .join("");
-    const preselectCardId = item.matched_card_id || state.cards[0].id;
+    const preselectCardId = item.matched_card_id || assignModalCards[0].id;
     assignCardSelect.value = preselectCardId;
     fillAssignBenefitOptions(preselectCardId, item.matched_benefit_id);
 
