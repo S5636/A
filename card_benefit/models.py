@@ -401,10 +401,15 @@ def tier_limit_for_spend(tier_table_json: str, spend: float):
 
 
 def match_benefit_keyword(merchant: str, merchant_keywords: str) -> bool:
-    """가맹점명이 혜택에 등록된 자동매칭 키워드 중 하나라도 포함하는지 확인."""
+    """가맹점명이 혜택에 등록된 자동매칭 키워드 중 하나라도 포함하는지 확인.
+
+    카드사 알림은 한글 발음과 영문 약어를 괄호로 묶어서 같이 찍는 경우가
+    많다("지에스(GS)25 중산고봉점"). 괄호를 그대로 두고 비교하면 "GS25"
+    키워드가 "(GS)25"에서 괄호에 걸려 끊겨서 매칭이 안 된다. 괄호만 지우고
+    (안의 글자는 그대로 남겨서) 비교하면 이런 경우도 잡힌다."""
     if not merchant or not merchant_keywords:
         return False
-    merchant_lower = merchant.lower()
+    merchant_lower = re.sub(r"[()]", "", merchant.lower())
     keywords = [k.strip().lower() for k in merchant_keywords.split(",") if k.strip()]
     return any(k in merchant_lower for k in keywords)
 

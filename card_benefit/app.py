@@ -411,7 +411,7 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         # 에도 우연히 들어있어서, 2자 기준이면 오히려 둘 다 걸려서 안 좁혀짐).
         # 그렇게 해서 정확히 하나로 좁혀지면 그걸 쓰고, 안 좁혀지면(둘 다 걸리거나
         # 하나도 안 걸리면) 그대로 애매한 걸로 둔다.
-        merchant_lower = item["merchant"].lower()
+        merchant_lower = re.sub(r"[()]", "", item["merchant"].lower())
         narrowed = [
             rp for rp in amount_matches
             if any(
@@ -429,7 +429,7 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
 
     if not item["merchant"]:
         return False
-    merchant_lower = item["merchant"].lower()
+    merchant_lower = re.sub(r"[()]", "", item["merchant"].lower())
     name_matches = [
         rp for rp in active_rows
         if last4_ok(rp) and not merchant_excluded(rp) and any(
