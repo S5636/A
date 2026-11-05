@@ -19,6 +19,7 @@
   const openLogPanels = new Set(); // benefit id 목록 - 펼쳐진 사용내역 기억
   const openMemoPanels = new Set(); // "card-1", "benefit-3" 같은 키 - 펼쳐진 설명 기억
   const openCompactPanels = new Set(); // card id 목록 - "월/연 횟수 혜택" 펼침 기억
+  const openCardNoBenefitPanels = new Set(); // card id 목록 - 카드별 "혜택없음 처리 내역" 펼침 기억
 
   async function api(url, options) {
     if (selectedMonth) {
@@ -448,6 +449,24 @@
       </div>
     ` : "";
 
+    const cardNoBenefitItems = (state.no_benefit || []).filter((it) => it.card_id === card.id);
+    const cardNoBenefitOpen = openCardNoBenefitPanels.has(card.id);
+    const cardNoBenefitHtml = cardNoBenefitItems.length ? `
+      <div class="benefit-compact-section">
+        <button class="card-no-benefit-toggle" data-card-id="${card.id}">
+          🚫 혜택없음 처리 내역 (${cardNoBenefitItems.length}건) ${cardNoBenefitOpen ? "▲" : "▾"}
+        </button>
+        <div class="log-list ${cardNoBenefitOpen ? "open" : ""}">
+          ${cardNoBenefitItems.map((it) => `
+            <div class="log-item">
+              <span>${it.occurred_at}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""} · ${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</span>
+              <button class="btn secondary small reopen-no-benefit-card" data-id="${it.id}">다시 확인</button>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    ` : "";
+
     return `
       <div class="card-head">
         <div class="card-title-row">
@@ -468,6 +487,7 @@
       ${memoToggleTemplate(`card-${card.id}`, card.memo)}
       <div class="benefit-list">${benefitsHtml}</div>
       ${compactSectionHtml}
+      ${cardNoBenefitHtml}
       <div class="add-benefit-row">
         <button class="btn secondary small add-benefit" data-card-id="${card.id}">+ 혜택 추가</button>
       </div>
@@ -636,6 +656,21 @@
         render();
       });
     }
+    const cardNoBenefitToggleBtn = el.querySelector(".card-no-benefit-toggle");
+    if (cardNoBenefitToggleBtn) {
+      cardNoBenefitToggleBtn.addEventListener("click", () => {
+        const id = Number(cardNoBenefitToggleBtn.dataset.cardId);
+        if (openCardNoBenefitPanels.has(id)) openCardNoBenefitPanels.delete(id);
+        else openCardNoBenefitPanels.add(id);
+        render();
+      });
+    }
+    el.querySelectorAll(".reopen-no-benefit-card").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        state = await api(`/api/inbox/${btn.dataset.id}/reopen`, { method: "POST" });
+        render();
+      })
+    );
 
     el.querySelectorAll(".use-benefit").forEach((btn) =>
       btn.addEventListener("click", () => {
@@ -1565,6 +1600,7 @@
     document.getElementById("card-last4").value = card ? card.last4 : "";
     document.getElementById("card-reset-day").value = card ? card.reset_day : 1;
     document.getElementById("card-perf-threshold").value = card && card.perf_threshold ? card.perf_threshold : "";
+    document.getElementById("card-perf-excluded").value = card ? card.perf_excluded_keywords : "";
     document.getElementById("card-memo").value = card ? card.memo : "";
     cardModal.classList.add("open");
   }
@@ -1578,6 +1614,7 @@
       last4: document.getElementById("card-last4").value.trim(),
       reset_day: document.getElementById("card-reset-day").value,
       perf_threshold: document.getElementById("card-perf-threshold").value || 0,
+      perf_excluded_keywords: document.getElementById("card-perf-excluded").value.trim(),
       memo: document.getElementById("card-memo").value.trim(),
     };
     if (!payload.name) { alert("카드 이름을 입력하세요."); return; }

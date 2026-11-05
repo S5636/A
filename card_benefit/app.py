@@ -188,6 +188,7 @@ def serialize_no_benefit(conn):
             "amount": r["amount"],
             "merchant": r["merchant"],
             "occurred_at": r["occurred_at"],
+            "card_id": r["card_id"],
             "card_name": r["card_name"],
         }
         for r in rows
@@ -763,6 +764,7 @@ def _serialize_cards(conn):
             "perf_met": (auto_this_month_spend >= perf_threshold) if perf_threshold > 0 else None,
             "this_month_spend": auto_this_month_spend,
             "memo": card["memo"],
+            "perf_excluded_keywords": card["perf_excluded_keywords"],
             "cycle_start": start.isoformat(),
             "cycle_end": (end - timedelta(days=1)).isoformat(),
             "days_left": days_left,
@@ -811,8 +813,9 @@ def create_card():
     try:
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM cards").fetchone()["m"]
         conn.execute(
-            """INSERT INTO cards (name, short_name, issuer, last4, reset_day, perf_threshold, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO cards (name, short_name, issuer, last4, reset_day, perf_threshold, memo, sort_order,
+               perf_excluded_keywords)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (data.get("short_name") or "").strip(),
@@ -822,6 +825,7 @@ def create_card():
                 perf_threshold,
                 (data.get("memo") or "").strip(),
                 max_order + 1,
+                (data.get("perf_excluded_keywords") or "").strip(),
             ),
         )
         conn.commit()
@@ -855,7 +859,7 @@ def update_card(card_id):
 
         conn.execute(
             """UPDATE cards SET name = ?, short_name = ?, issuer = ?, last4 = ?, reset_day = ?,
-               perf_threshold = ?, memo = ?, sort_order = ? WHERE id = ?""",
+               perf_threshold = ?, memo = ?, sort_order = ?, perf_excluded_keywords = ? WHERE id = ?""",
             (
                 name,
                 (data.get("short_name", card["short_name"]) or "").strip(),
@@ -865,6 +869,7 @@ def update_card(card_id):
                 perf_threshold,
                 (data.get("memo", card["memo"]) or "").strip(),
                 sort_order,
+                (data.get("perf_excluded_keywords", card["perf_excluded_keywords"]) or "").strip(),
                 card_id,
             ),
         )

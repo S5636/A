@@ -209,6 +209,10 @@
       <input type="number" id="card-perf-threshold" min="0" step="1" placeholder="예: 300000">
       <small>이 금액 이상 써야 혜택이 적용되는 카드면 입력하세요. 조건 없으면 비워두세요.</small>
     </label>
+    <label>전월실적 제외 키워드 (선택, 쉼표로 구분)
+      <input type="text" id="card-perf-excluded" placeholder="예: 도시가스,한국전력,현금서비스,카드론">
+      <small>이 카드 실제 약관상 "전월 이용금액 제외 대상"에 해당하는 가맹점 키워드를 넣으세요(공과금/세금/상품권 등 - 카드마다 다릅니다). 가맹점명에 이 단어가 들어있으면 전월실적 자동 합산에서 빠집니다. 비워두면 현금서비스/카드론/연회비/수수료/이자/거래취소만 기본으로 제외됩니다.</small>
+    </label>
     <label>메모 (선택)
       <textarea id="card-memo" rows="2" placeholder="카드 특이사항 등"></textarea>
     </label>
