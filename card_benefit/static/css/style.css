@@ -421,6 +421,16 @@ body { padding-bottom: 40px; }
 .inbox-item-amount { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .inbox-item-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 .inbox-item .btn { flex-shrink: 0; white-space: nowrap; }
+.dup-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+}
+.dup-group-title { font-size: 12px; font-weight: 700; color: var(--text-secondary); padding: 0 2px; }
 
 /* ---------- 백업 / 일괄 업로드 ---------- */
 .backup-section { margin-bottom: 5px; }

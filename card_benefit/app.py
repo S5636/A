@@ -219,6 +219,7 @@ def serialize_full():
             "recurring_payments": serialize_recurring_payments(conn),
             "insurances": serialize_insurances(conn),
             "medical_expenses": serialize_medical_expenses(conn),
+            "suspected_duplicates": find_suspected_duplicates(conn),
         }
     finally:
         conn.close()
@@ -256,6 +257,115 @@ def serialize_medical_expenses(conn):
         }
         for r in rows
         if is_medical_merchant(r["merchant"])
+    ]
+
+
+def find_suspected_duplicates(conn):
+    """같은 결제가 두 경로(폰 알림 자동수집 + 엑셀 명세서 업로드)로 각각
+    들어와서, 실제로는 같은 결제인데 inbox_items에 행이 두 개로 남아있는
+    경우를 찾아준다. "같은 날짜/비슷한 시각(5분 이내)"이라는 조건은
+    _find_duplicate(엑셀 업로드 시 중복판단)와 완전히 똑같이 쓰되, 금액만
+    10% 이내로 느슨하게 본다(해외결제는 알림 시점 추정환율과 명세서 확정
+    환율이 달라서 완전히 똑같지 않을 수 있고, 국내도 드물게 그럼 - 금액이
+    정확히 같은 건 어차피 _find_duplicate가 이미 걸러줬을 것이므로 여기
+    남아있다는 자체가 금액이 다르다는 신호).
+    "같은 가맹점에 같은 금액이 매일/매번 반복해서 찍히는" 구독성/정액
+    결제(예: LG U+ 소액결제, 스크린골프 등)를 오탐으로 묶지 않도록, 날짜가
+    하루 이상 벌어지거나 둘 다 시각까지 있는데 5분 넘게 떨어진 건 절대
+    묶지 않는다(하루 걸러 반복되는 정액결제가 "의심"에 전부 딸려 들어오는
+    걸 막기 위함)."""
+    rows = conn.execute(
+        "SELECT * FROM inbox_items WHERE status != 'cancelled' AND dup_ignored = 0 "
+        "AND merchant != '' AND amount IS NOT NULL ORDER BY occurred_at"
+    ).fetchall()
+
+    card_label_for = _card_label_matcher(conn)
+    benefits_by_id = {b["id"]: b for b in conn.execute("SELECT id, name FROM benefits")}
+    recurring_by_id = {r["id"]: r for r in conn.execute("SELECT id, name FROM recurring_payments")}
+    insurance_by_id = {
+        r["id"]: r for r in conn.execute("SELECT id, company, product_name FROM insurances")
+    }
+
+    def linked_label(r):
+        if r["recurring_id"] is not None and r["recurring_id"] in recurring_by_id:
+            return f"고정지출 · {recurring_by_id[r['recurring_id']]['name']}"
+        if r["insurance_id"] is not None and r["insurance_id"] in insurance_by_id:
+            ins = insurance_by_id[r["insurance_id"]]
+            return f"보험 · {ins['company']} {ins['product_name']}".strip()
+        if r["status"] == "assigned" and r["benefit_id"] in benefits_by_id:
+            return f"혜택 · {benefits_by_id[r['benefit_id']]['name']}"
+        if r["status"] == "no_benefit":
+            return "혜택 없음 처리됨"
+        return "대기 중(미배정)"
+
+    def _ts(s):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d %H:%M:%S") if len(s) > 10 else None
+        except (TypeError, ValueError):
+            return None
+
+    def is_pair(a, b):
+        if not ((not a["last4"] or not b["last4"]) or card_codes_match(a["last4"], b["last4"])):
+            return False
+        base = max(a["amount"] or 0, 1)
+        if abs((b["amount"] or 0) - (a["amount"] or 0)) / base > 0.1:
+            return False
+        ta, tb = _ts(a["occurred_at"]), _ts(b["occurred_at"])
+        if ta and tb:
+            return abs((tb - ta).total_seconds()) <= 300
+        return a["occurred_at"][:10] == b["occurred_at"][:10]
+
+    by_merchant = defaultdict(list)
+    for r in rows:
+        by_merchant[_merchant_base(r["merchant"])].append(r)
+
+    groups = []
+    for items in by_merchant.values():
+        if len(items) < 2:
+            continue
+        # 같은 가맹점 안에서 서로 "의심 쌍"인 것들끼리 union-find로 묶는다
+        # (A-B, B-C가 각각 의심쌍이면 A-C가 직접 조건을 만족 안 해도 한
+        # 묶음으로 본다 - 세 소스에서 각각 들어온 경우를 위함).
+        parent = {r["id"]: r["id"] for r in items}
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(x, y):
+            rx, ry = find(x), find(y)
+            if rx != ry:
+                parent[rx] = ry
+
+        for i in range(len(items)):
+            for j in range(i + 1, len(items)):
+                if is_pair(items[i], items[j]):
+                    union(items[i]["id"], items[j]["id"])
+
+        clusters = defaultdict(list)
+        for r in items:
+            clusters[find(r["id"])].append(r)
+        groups.extend(c for c in clusters.values() if len(c) >= 2)
+
+    return [
+        {
+            "merchant": cluster[0]["merchant"],
+            "items": [
+                {
+                    "id": r["id"],
+                    "amount": r["amount"],
+                    "occurred_at": r["occurred_at"],
+                    "merchant": r["merchant"],
+                    "card_label": card_label_for(r["last4"]),
+                    "source": r["source"],
+                    "linked_label": linked_label(r),
+                }
+                for r in cluster
+            ],
+        }
+        for cluster in groups
     ]
 
 
@@ -2379,6 +2489,20 @@ def discard_inbox_item(item_id):
     conn = get_conn()
     try:
         conn.execute("DELETE FROM inbox_items WHERE id = ?", (item_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/inbox/<int:item_id>/dup-ignore", methods=["POST"])
+def dismiss_suspected_duplicate(item_id):
+    """"중복 의심" 묶음에서 "중복 아님" 처리 - 이 알림은 앞으로 중복 의심
+    목록 계산에서 빼준다(실제로는 같은 날 같은 가맹점에 금액이 비슷한
+    별개의 결제였던 경우를 위함)."""
+    conn = get_conn()
+    try:
+        conn.execute("UPDATE inbox_items SET dup_ignored = 1 WHERE id = ?", (item_id,))
         conn.commit()
     finally:
         conn.close()

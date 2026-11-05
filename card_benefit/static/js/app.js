@@ -33,7 +33,7 @@
     el.style.boxShadow = `0 0 7px -2px ${hexToRgba(NEON_YELLOW, 0.65)}`;
   }
 
-  let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [] };
+  let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [], suspected_duplicates: [] };
   let inboxOpen = false;
   let noBenefitOpen = false;
   // null = 진짜 이번 달(필터 없음). "YYYY-MM" 문자열이면 카드 탭의 "사용내역"
@@ -175,6 +175,7 @@
     renderRecurring();
     renderInsurance();
     renderMedical();
+    renderDuplicates();
     requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
   }
 
@@ -1644,6 +1645,53 @@
       });
     });
     wireBulkBar(medicalList, "medical", ids, medicalActions);
+  }
+
+  // ---- 중복 의심 알림 ----
+  const dupSection = document.getElementById("dup-section");
+  const dupList = document.getElementById("dup-list");
+  let dupOpen = false;
+  document.getElementById("dup-toggle").addEventListener("click", () => {
+    dupOpen = !dupOpen;
+    render();
+  });
+
+  function renderDuplicates() {
+    const groups = state.suspected_duplicates || [];
+    dupSection.style.display = groups.length ? "block" : "none";
+    document.getElementById("dup-count").textContent = groups.length ? `${groups.length}묶음` : "";
+    dupList.style.display = dupOpen ? "flex" : "none";
+
+    dupList.innerHTML = groups.map((g) => `
+      <div class="dup-group">
+        <div class="dup-group-title">${escapeHtml(displayMerchant(g.merchant))}</div>
+        ${g.items.map((it) => `
+          <div class="inbox-item">
+            <div class="inbox-item-info">
+              <div class="inbox-item-amount">${fmt(it.amount)}원</div>
+              <div class="inbox-item-sub">${it.occurred_at}${it.card_label ? " · " + escapeHtml(shortCardName(it.card_label)) : ""} · ${it.source === "notification" ? "알림" : it.source === "excel" ? "엑셀" : "미상"}</div>
+              <div class="inbox-item-sub">${escapeHtml(it.linked_label)}</div>
+            </div>
+            <button class="btn secondary small dup-ignore" data-id="${it.id}">중복 아님</button>
+            <button class="btn danger small dup-delete" data-id="${it.id}">이 건 삭제</button>
+          </div>
+        `).join("")}
+      </div>
+    `).join("");
+
+    dupList.querySelectorAll(".dup-ignore").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        state = await api(`/api/inbox/${btn.dataset.id}/dup-ignore`, { method: "POST" });
+        render();
+      });
+    });
+    dupList.querySelectorAll(".dup-delete").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("이 알림 기록을 삭제할까요? (이미 혜택/고정지출/보험에 배정된 실제 기록은 남고, 알림 큐의 이 항목만 지워집니다)")) return;
+        state = await api(`/api/inbox/${btn.dataset.id}`, { method: "DELETE" });
+        render();
+      });
+    });
   }
 
   // ---- 카드 모달 ----
