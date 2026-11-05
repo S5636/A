@@ -2162,6 +2162,33 @@ def discard_inbox_item(item_id):
     return jsonify(serialize_full())
 
 
+@app.route("/api/inbox/bulk-no-benefit", methods=["POST"])
+def bulk_mark_no_benefit():
+    """받은 알림 리스트에서 여러 개를 한 번에 "혜택 없음" 처리한다(완전 삭제와
+    달리 "혜택없음 처리 내역"에 남아서 전월실적 자동집계엔 그대로 들어감)."""
+    data = request.get_json(force=True) or {}
+    ids = data.get("ids") or []
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return jsonify({"error": "처리할 항목을 선택하세요."}), 400
+    if not ids:
+        return jsonify({"error": "처리할 항목을 선택하세요."}), 400
+
+    conn = get_conn()
+    try:
+        placeholders = ",".join("?" for _ in ids)
+        conn.execute(
+            f"UPDATE inbox_items SET status = 'no_benefit', benefit_id = NULL "
+            f"WHERE id IN ({placeholders}) AND status = 'pending'",
+            ids,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
 @app.route("/api/inbox/bulk-delete", methods=["POST"])
 def bulk_delete_inbox_items():
     """받은 알림/혜택없음 처리 내역 리스트에서 여러 개를 한 번에 완전 삭제한다.

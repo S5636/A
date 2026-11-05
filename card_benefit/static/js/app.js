@@ -255,21 +255,26 @@
   // 업로드했을 때 필요없는 알림을 리스트별로 한 번에 치울 수 있게 한다 ----
   const bulkSelections = { inbox: new Set(), noBenefit: new Set(), medical: new Set() };
 
-  function bulkBarHtml(key, actionLabel, itemIds) {
+  // actions: [{label, onAction: async (selectedIds) => bool}, ...] - 보통 1개지만
+  // "받은 알림"처럼 "선택 삭제"/"선택 혜택없음 처리"를 둘 다 둬야 하는 경우도 있다.
+  function bulkBarHtml(key, actions, itemIds) {
     if (!itemIds.length) return "";
     const selected = bulkSelections[key];
     for (const id of [...selected]) if (!itemIds.includes(id)) selected.delete(id);
     const allSelected = itemIds.every((id) => selected.has(id));
+    const buttonsHtml = actions.map((a, i) =>
+      `<button class="btn secondary small bulk-action-btn" data-action-index="${i}" ${selected.size ? "" : "disabled"}>${a.label}</button>`
+    ).join("");
     return `
       <div class="bulk-bar">
         <label><input type="checkbox" class="bulk-select-all" ${allSelected ? "checked" : ""}> 전체선택</label>
         <span class="bulk-count">${selected.size}개 선택</span>
-        <button class="btn secondary small bulk-action-btn" ${selected.size ? "" : "disabled"}>${actionLabel}</button>
+        ${buttonsHtml}
       </div>
     `;
   }
 
-  function wireBulkBar(container, key, itemIds, onAction) {
+  function wireBulkBar(container, key, itemIds, actions) {
     const selected = bulkSelections[key];
     const allCb = container.querySelector(".bulk-select-all");
     if (allCb) {
@@ -287,17 +292,17 @@
         render();
       });
     });
-    const actionBtn = container.querySelector(".bulk-action-btn");
-    if (actionBtn) {
-      actionBtn.addEventListener("click", async () => {
+    container.querySelectorAll(".bulk-action-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
         if (!selected.size) return;
-        const proceeded = await onAction([...selected]);
+        const action = actions[Number(btn.dataset.actionIndex)];
+        const proceeded = await action.onAction([...selected]);
         if (proceeded) {
           selected.clear();
           render();
         }
       });
-    }
+    });
   }
 
   function renderInbox() {
@@ -305,7 +310,33 @@
     const ids = items.map((it) => it.id);
     inboxSection.style.display = items.length ? "block" : "none";
     inboxCount.textContent = items.length ? `${items.length}건` : "";
-    inboxList.innerHTML = bulkBarHtml("inbox", "선택 삭제", ids) + items.map((it) => `
+    const inboxActions = [
+      {
+        label: "선택 혜택없음 처리",
+        onAction: async (selectedIds) => {
+          if (!confirm(`${selectedIds.length}건을 "혜택없음 처리 내역"으로 옮길까요?`)) return false;
+          state = await api("/api/inbox/bulk-no-benefit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: selectedIds }),
+          });
+          return true;
+        },
+      },
+      {
+        label: "선택 삭제",
+        onAction: async (selectedIds) => {
+          if (!confirm(`${selectedIds.length}건을 완전히 삭제할까요? 되돌릴 수 없습니다.`)) return false;
+          state = await api("/api/inbox/bulk-delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: selectedIds }),
+          });
+          return true;
+        },
+      },
+    ];
+    inboxList.innerHTML = bulkBarHtml("inbox", inboxActions, ids) + items.map((it) => `
       <div class="inbox-item" data-id="${it.id}">
         <input type="checkbox" class="bulk-item-check" data-id="${it.id}" ${bulkSelections.inbox.has(it.id) ? "checked" : ""}>
         <div class="inbox-item-info">
@@ -323,15 +354,7 @@
         openAssignModal(item);
       })
     );
-    wireBulkBar(inboxList, "inbox", ids, async (selectedIds) => {
-      if (!confirm(`${selectedIds.length}건을 완전히 삭제할까요? 되돌릴 수 없습니다.`)) return false;
-      state = await api("/api/inbox/bulk-delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: selectedIds }),
-      });
-      return true;
-    });
+    wireBulkBar(inboxList, "inbox", ids, inboxActions);
   }
 
   // ---- 혜택 없음 처리 내역 ----
@@ -341,7 +364,21 @@
     noBenefitSection.style.display = items.length ? "block" : "none";
     noBenefitCount.textContent = items.length ? `${items.length}건` : "";
     noBenefitList.style.display = noBenefitOpen ? "flex" : "none";
-    noBenefitList.innerHTML = bulkBarHtml("noBenefit", "선택 삭제", ids) + items.map((it) => `
+    const noBenefitActions = [
+      {
+        label: "선택 삭제",
+        onAction: async (selectedIds) => {
+          if (!confirm(`${selectedIds.length}건을 완전히 삭제할까요? 되돌릴 수 없습니다.`)) return false;
+          state = await api("/api/inbox/bulk-delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: selectedIds }),
+          });
+          return true;
+        },
+      },
+    ];
+    noBenefitList.innerHTML = bulkBarHtml("noBenefit", noBenefitActions, ids) + items.map((it) => `
       <div class="inbox-item" data-id="${it.id}">
         <input type="checkbox" class="bulk-item-check" data-id="${it.id}" ${bulkSelections.noBenefit.has(it.id) ? "checked" : ""}>
         <div class="inbox-item-info">
@@ -368,15 +405,7 @@
         render();
       })
     );
-    wireBulkBar(noBenefitList, "noBenefit", ids, async (selectedIds) => {
-      if (!confirm(`${selectedIds.length}건을 완전히 삭제할까요? 되돌릴 수 없습니다.`)) return false;
-      state = await api("/api/inbox/bulk-delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: selectedIds }),
-      });
-      return true;
-    });
+    wireBulkBar(noBenefitList, "noBenefit", ids, noBenefitActions);
   }
   document.getElementById("no-benefit-toggle").addEventListener("click", () => {
     noBenefitOpen = !noBenefitOpen;
@@ -1483,7 +1512,20 @@
     const unclaimedTotal = items.filter((m) => !m.claimed).reduce((sum, m) => sum + (m.amount || 0), 0);
     document.getElementById("medical-unclaimed-total").textContent = `청구 안 한 병원비 합계 ₩${fmt(unclaimedTotal)}`;
 
-    medicalList.innerHTML = bulkBarHtml("medical", "선택 제외(병원비 아님)", ids) + items.map((m) => `
+    const medicalActions = [
+      {
+        label: "선택 제외(병원비 아님)",
+        onAction: async (selectedIds) => {
+          state = await api("/api/medical-expenses/bulk-exclude", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: selectedIds }),
+          });
+          return true;
+        },
+      },
+    ];
+    medicalList.innerHTML = bulkBarHtml("medical", medicalActions, ids) + items.map((m) => `
       <div class="inbox-item">
         <input type="checkbox" class="bulk-item-check" data-id="${m.id}" ${bulkSelections.medical.has(m.id) ? "checked" : ""}>
         <div class="inbox-item-info">
@@ -1506,14 +1548,7 @@
         render();
       });
     });
-    wireBulkBar(medicalList, "medical", ids, async (selectedIds) => {
-      state = await api("/api/medical-expenses/bulk-exclude", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: selectedIds }),
-      });
-      return true;
-    });
+    wireBulkBar(medicalList, "medical", ids, medicalActions);
   }
 
   // ---- 카드 모달 ----
