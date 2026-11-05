@@ -1951,7 +1951,11 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
     "raw"는 입력값을 그대로 쓰고, 나머지는 결제금액을 자동으로 실제
     혜택금액(잔돈/할인액)으로 환산한다 - 결제금액 총액이 그대로 한도를
     깎아먹지 않도록. (used_value, memo, rate_category, error) 를 돌려준다.
-    error가 있으면(업종별 일/월 횟수 한도 초과 등) 기록하지 않고 그 문구를 보여준다.
+    전월실적 미달/할인 적용 시간대 밖 결제/업종별 일·월 횟수 초과/업종별
+    월적립한도 초과처럼 "이 혜택 대상이긴 한데 조건을 못 채운" 경우는 기록
+    자체를 막지 않고 0원으로 기록하면서 메모에 사유를 남긴다(큐에 계속
+    남겨두지 않고, 어떤 결제가 왜 할인을 못 받았는지 내역에서 바로 보이게).
+    error는 그 외의 문제에만 쓴다.
     category_override가 있으면(네이버페이/토스페이처럼 가맹점명으로 업종을 알 수
     없어서 사용자가 직접 고른 경우) 가맹점명 매칭 대신 그 업종 값을 그대로 쓴다.
     occurred_at(알림/엑셀의 실제 결제 시각, "YYYY-MM-DD HH:MM:SS")이 있으면
@@ -1966,6 +1970,8 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
         except ValueError:
             hour = None
 
+    block_reason = None
+
     # 혜택 전체에 거는 시간대 조건(업종별 요율표 없이 단일 할인율인 혜택용 -
     # LADY CLASSIC "브런치 할인"처럼 "오전 11시~오후 2시만" 적용되는 경우).
     try:
@@ -1974,7 +1980,7 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
         b_start_hour = b_end_hour = None
     if b_start_hour is not None and b_end_hour is not None and hour is not None:
         if not (b_start_hour <= hour < b_end_hour):
-            return None, None, None, f"이 혜택은 {b_start_hour}시~{b_end_hour}시 결제만 대상이라 이 결제는 할인 대상이 아닙니다."
+            block_reason = f"{b_start_hour}시~{b_end_hour}시 결제만 대상이라 할인 대상이 아님"
 
     effective_discount_percent = benefit["discount_percent"]
     if benefit["tier_table"] or (benefit["calc_mode"] == "percent_discount" and benefit["percent_tier_table"]):
@@ -1984,7 +1990,7 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
         except ValueError:
             ref_date = None
         if benefit["tier_table"] and card and tier_limit_for_spend(benefit["tier_table"], _perf_spend_for_card(conn, card, ref_date)) == 0:
-            return None, None, None, "그 달 전월실적이 최저 구간에도 못 미쳐서 이 혜택을 받을 수 없습니다."
+            block_reason = block_reason or "그 달 전월실적이 최저 구간에도 못 미쳐서 할인 대상이 아님"
         if benefit["calc_mode"] == "percent_discount" and benefit["percent_tier_table"] and card:
             tiered_percent = tier_limit_for_spend(benefit["percent_tier_table"], _perf_spend_for_card(conn, card, ref_date))
             if tiered_percent is not None:
@@ -1992,8 +1998,9 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
 
     if benefit["calc_mode"] == "change_under_1000":
         doubled = doubled or bool(benefit["always_doubled"])
-        earned = compute_change_earned(raw_value, doubled)
-        parts = [f"결제 {raw_value:,.0f}원 → 잔돈 {earned:,.0f}원{'(2배)' if doubled else ''}"]
+        earned = 0 if block_reason else compute_change_earned(raw_value, doubled)
+        tag = f"({block_reason})" if block_reason else ('(2배)' if doubled else '')
+        parts = [f"결제 {raw_value:,.0f}원 → 잔돈 {earned:,.0f}원{tag}"]
         if memo:
             parts.append(memo)
         return earned, " · ".join(parts), "", None
@@ -2005,24 +2012,33 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
             )
             category = category_override
             if time_blocked:
-                return None, None, None, "이 업종은 할인 적용 시간대 밖이라 이 결제는 할인 대상이 아닙니다."
+                block_reason = block_reason or "이 업종은 할인 적용 시간대 밖이라 할인 대상이 아님"
         else:
             percent, cap, daily_limit, monthly_limit, monthly_point_cap, category = match_rate_table(
                 merchant, benefit["rate_table"], effective_discount_percent, benefit["per_txn_cap"], hour
             )
             if category == TIME_BLOCKED_LABEL:
-                return None, None, None, "이 시간대는 할인 대상이 아닙니다(업종은 맞지만 할인 적용 시간대 밖입니다)."
+                block_reason = block_reason or "업종은 맞지만 할인 적용 시간대 밖이라 할인 대상이 아님"
+                category = ""
         capped_note = ""
-        if category and used_at:
+        if category and used_at and not block_reason:
             if daily_limit and _category_usage_count(conn, benefit_id, category, used_at) >= daily_limit:
-                return None, None, None, f"이 업종은 하루 {daily_limit:g}회까지만 할인되는데, 오늘 이미 한도를 채워서 이 결제는 할인 대상이 아닙니다."
-            if monthly_limit and _category_usage_count(conn, benefit_id, category, used_at, monthly=True) >= monthly_limit:
-                return None, None, None, f"이 업종은 이번 달 {monthly_limit:g}회까지만 할인되는데, 이미 한도를 채워서 이 결제는 할인 대상이 아닙니다."
-            if monthly_point_cap:
+                block_reason = f"이 업종은 하루 {daily_limit:g}회 한도를 이미 채워서 할인 대상이 아님"
+            elif monthly_limit and _category_usage_count(conn, benefit_id, category, used_at, monthly=True) >= monthly_limit:
+                block_reason = f"이 업종은 이번 달 {monthly_limit:g}회 한도를 이미 채워서 할인 대상이 아님"
+            elif monthly_point_cap:
                 already = _category_month_earned(conn, benefit_id, category, used_at)
                 remaining = max(0, monthly_point_cap - already)
                 if remaining <= 0:
-                    return None, None, None, f"이 업종은 이번 달 적립 한도 {monthly_point_cap:,.0f}포인트를 이미 채워서 이 결제는 적립 대상이 아닙니다."
+                    block_reason = f"이 업종은 이번 달 적립 한도 {monthly_point_cap:,.0f}P를 이미 채워서 할인 대상이 아님"
+
+        if block_reason:
+            category_label = f"{category} " if category else ""
+            parts = [f"결제 {raw_value:,.0f}원 → 할인 0원({category_label}{block_reason})"]
+            if memo:
+                parts.append(memo)
+            return 0, " · ".join(parts), (category or ""), None
+
         earned = compute_percent_discount(raw_value, percent, cap)
         if category and used_at and monthly_point_cap:
             already = _category_month_earned(conn, benefit_id, category, used_at)
