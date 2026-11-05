@@ -410,12 +410,24 @@ def match_benefit_keyword(merchant: str, merchant_keywords: str) -> bool:
     카드사 알림은 한글 발음과 영문 약어를 괄호로 묶어서 같이 찍는 경우가
     많다("지에스(GS)25 중산고봉점"). 괄호를 그대로 두고 비교하면 "GS25"
     키워드가 "(GS)25"에서 괄호에 걸려 끊겨서 매칭이 안 된다. 괄호만 지우고
-    (안의 글자는 그대로 남겨서) 비교하면 이런 경우도 잡힌다."""
+    (안의 글자는 그대로 남겨서) 비교하면 이런 경우도 잡힌다.
+
+    키워드 앞에 "-"를 붙이면 제외 키워드다("이마트"는 매칭시키고 싶지만
+    "이마트24"는 완전히 다른 업종(편의점)이라 빼고 싶을 때 "-이마트24"로
+    등록) - 제외 키워드 중 하나라도 가맹점명에 들어있으면, 다른 키워드가
+    맞아도 매칭시키지 않는다."""
     if not merchant or not merchant_keywords:
         return False
     merchant_lower = re.sub(r"[()]", "", merchant.lower())
-    keywords = [k.strip().lower() for k in merchant_keywords.split(",") if k.strip()]
-    return any(k in merchant_lower for k in keywords)
+    positive, negative = [], []
+    for k in merchant_keywords.split(","):
+        k = k.strip().lower()
+        if not k:
+            continue
+        (negative if k.startswith("-") else positive).append(k[1:] if k.startswith("-") else k)
+    if any(k in merchant_lower for k in negative):
+        return False
+    return any(k in merchant_lower for k in positive)
 
 
 _MEDICAL_KEYWORDS = [
@@ -435,16 +447,24 @@ def is_medical_merchant(merchant: str) -> bool:
     return any(k in merchant for k in _MEDICAL_KEYWORDS) or "pharmacy" in merchant_lower
 
 
-def match_rate_table(merchant: str, rate_table_json: str, default_percent: float = 0, default_cap: float = 0):
+TIME_BLOCKED_LABEL = "__TIME_BLOCKED__"
+
+
+def match_rate_table(merchant: str, rate_table_json: str, default_percent: float = 0, default_cap: float = 0, hour=None):
     """가맹점명과 rate_table(JSON [["라벨:키워드1,키워드2", 할인율], ...] 또는
     [[..., 할인율, 건당한도], ...] 또는 [[..., 할인율, 건당한도, 일한도, 월한도], ...] 또는
-    [[..., 할인율, 건당한도, 일한도, 월한도, 업종별월적립한도], ...])을 받아서 해당 업종의
+    [[..., 할인율, 건당한도, 일한도, 월한도, 업종별월적립한도], ...] 또는
+    [[..., ..., 업종별월적립한도, 시작시, 끝시], ...])을 받아서 해당 업종의
     (할인율, 건당한도, 일 횟수한도, 월 횟수한도, 업종별 월 적립(포인트) 한도, 라벨)을 돌려준다.
     첫 값에 "쇼핑:이마트,쿠팡"처럼 ":"로 라벨을 붙이면 그 라벨이 화면 표시/한도 구분에
     쓰이고, ":"가 없으면 키워드 문자열 자체가 라벨로 쓰인다. Daily Plan/Monthly Plan처럼
     하나의 혜택 안에서 업종별로 할인율(과 한도)이 다른 경우에 쓴다. 마지막 값(업종별 월
     적립한도)은 "이 업종은 이번 달 최대 1만 포인트까지만 적립"처럼 횟수가 아니라 적립액
     자체를 업종별로 깎는 카드(씨티 리워드 등)에 쓴다 - 횟수 한도와는 별개로 같이 걸 수 있다.
+    일곱·여덟 번째 값(시작시/끝시, 0~23)은 Time Plan의 DAY/NIGHT처럼 "이 시간대
+    결제만" 적용되는 업종에 쓴다 - hour(결제 시각의 시, 0~23)를 넘기면 그 시간대
+    밖일 때 TIME_BLOCKED_LABEL을 라벨로 돌려줘서(할인율 0) 호출하는 쪽이 "이
+    시간대는 할인 대상이 아님"을 구분해서 안내할 수 있게 한다.
     매칭 안 되면 (default_percent, default_cap, 0, 0, 0, None).
     """
     if rate_table_json and merchant:
@@ -455,7 +475,7 @@ def match_rate_table(merchant: str, rate_table_json: str, default_percent: float
         if isinstance(rows, list):
             merchant_lower = merchant.lower()
             for entry in rows:
-                if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3, 4, 5, 6):
+                if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3, 4, 5, 6, 7, 8):
                     continue
                 raw_keywords = str(entry[0])
                 if ":" in raw_keywords:
@@ -467,10 +487,21 @@ def match_rate_table(merchant: str, rate_table_json: str, default_percent: float
                 daily_limit = entry[3] if len(entry) >= 4 else 0
                 monthly_limit = entry[4] if len(entry) >= 5 else 0
                 monthly_point_cap = entry[5] if len(entry) >= 6 else 0
+                start_hour = entry[6] if len(entry) >= 7 else None
+                end_hour = entry[7] if len(entry) >= 8 else None
+                pos_kws, neg_kws = [], []
                 for kw in kw_part.split(","):
                     kw = kw.strip().lower()
-                    if kw and kw in merchant_lower:
-                        return percent, cap, daily_limit, monthly_limit, monthly_point_cap, label
+                    if not kw:
+                        continue
+                    (neg_kws if kw.startswith("-") else pos_kws).append(kw[1:] if kw.startswith("-") else kw)
+                if any(kw in merchant_lower for kw in neg_kws):
+                    continue
+                if any(kw in merchant_lower for kw in pos_kws):
+                    if start_hour is not None and end_hour is not None and hour is not None:
+                        if not (start_hour <= hour < end_hour):
+                            return 0, 0, 0, 0, 0, TIME_BLOCKED_LABEL
+                    return percent, cap, daily_limit, monthly_limit, monthly_point_cap, label
     return default_percent, default_cap, 0, 0, 0, None
 
 
@@ -490,7 +521,7 @@ def parse_rate_table_categories(rate_table_json: str):
 
     categories = []
     for entry in rows:
-        if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3, 4, 5, 6):
+        if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3, 4, 5, 6, 7, 8):
             continue
         raw_keywords = str(entry[0])
         label = raw_keywords.split(":", 1)[0] if ":" in raw_keywords else raw_keywords
@@ -499,6 +530,8 @@ def parse_rate_table_categories(rate_table_json: str):
         daily_limit = entry[3] if len(entry) >= 4 else 0
         monthly_limit = entry[4] if len(entry) >= 5 else 0
         monthly_point_cap = entry[5] if len(entry) >= 6 else 0
+        start_hour = entry[6] if len(entry) >= 7 else None
+        end_hour = entry[7] if len(entry) >= 8 else None
         categories.append({
             "label": label,
             "percent": percent,
@@ -506,18 +539,28 @@ def parse_rate_table_categories(rate_table_json: str):
             "daily_limit": daily_limit,
             "monthly_limit": monthly_limit,
             "monthly_point_cap": monthly_point_cap,
+            "start_hour": start_hour,
+            "end_hour": end_hour,
         })
     return categories
 
 
-def rate_table_entry_by_label(rate_table_json: str, label: str, default_percent: float = 0, default_cap: float = 0):
+def rate_table_entry_by_label(rate_table_json: str, label: str, default_percent: float = 0, default_cap: float = 0, hour=None):
     """사용자가 가맹점 자동인식 대신 업종을 직접 골랐을 때 쓴다. label과 정확히
-    일치하는 rate_table 항목의 (할인율, 건당한도, 일한도, 월한도, 업종별월적립한도)를 돌려준다."""
+    일치하는 rate_table 항목의 (할인율, 건당한도, 일한도, 월한도, 업종별월적립한도,
+    시간대밖여부)를 돌려준다. 그 업종에 시간대 조건(start_hour/end_hour)이 있고
+    hour가 그 밖이면 마지막 값을 True로 돌려준다 - 업종을 사람이 직접 골랐어도
+    실제 카드사 할인은 시간대를 가리므로 그대로 적용해야 한다."""
     for cat in parse_rate_table_categories(rate_table_json):
         if cat["label"] == label:
+            if (
+                cat["start_hour"] is not None and cat["end_hour"] is not None and hour is not None
+                and not (cat["start_hour"] <= hour < cat["end_hour"])
+            ):
+                return 0, 0, cat["daily_limit"], cat["monthly_limit"], cat["monthly_point_cap"], True
             cap = cat["cap"] or default_cap
-            return cat["percent"], cap, cat["daily_limit"], cat["monthly_limit"], cat["monthly_point_cap"]
-    return default_percent, default_cap, 0, 0, 0
+            return cat["percent"], cap, cat["daily_limit"], cat["monthly_limit"], cat["monthly_point_cap"], False
+    return default_percent, default_cap, 0, 0, 0, False
 
 
 def annotate_merchant(name: str) -> str:

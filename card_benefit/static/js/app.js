@@ -1595,14 +1595,31 @@
   const perfModal = document.getElementById("perf-modal");
   let editingPerfCardId = null;
 
+  function defaultPerfMonth() {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  async function loadPerfValueForMonth() {
+    const ym = document.getElementById("perf-month").value;
+    if (!ym || !editingPerfCardId) return;
+    const data = await api(`/api/cards/${editingPerfCardId}/performance/${ym}`);
+    document.getElementById("perf-value").value = data.total_spend != null ? data.total_spend : "";
+  }
+
   function openPerfModal(card) {
     editingPerfCardId = card.id;
+    const defaultMonth = defaultPerfMonth();
+    document.getElementById("perf-month").value = defaultMonth;
     document.getElementById("perf-value").value = card.perf_spend || "";
     perfModal.classList.add("open");
   }
+  document.getElementById("perf-month").addEventListener("change", loadPerfValueForMonth);
   document.getElementById("perf-cancel").addEventListener("click", () => perfModal.classList.remove("open"));
   document.getElementById("perf-save").addEventListener("click", async () => {
     const total_spend = document.getElementById("perf-value").value;
+    const year_month = document.getElementById("perf-month").value || defaultPerfMonth();
     if (total_spend === "" || Number(total_spend) < 0) {
       alert("사용액을 입력하세요.");
       return;
@@ -1610,7 +1627,7 @@
     state = await api(`/api/cards/${editingPerfCardId}/performance`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ total_spend }),
+      body: JSON.stringify({ total_spend, year_month }),
     });
     perfModal.classList.remove("open");
     render();
@@ -1706,52 +1723,69 @@
     return Math.floor((base * percent) / 100);
   }
 
-  function matchRateTable(merchant, rateTableJson, defaultPercent, defaultCap) {
-    if (!rateTableJson || !merchant) return [defaultPercent, defaultCap, ""];
+  function matchRateTable(merchant, rateTableJson, defaultPercent, defaultCap, hour) {
+    if (!rateTableJson || !merchant) return [defaultPercent, defaultCap, "", false];
     let rows;
     try {
       rows = JSON.parse(rateTableJson);
     } catch (e) {
-      return [defaultPercent, defaultCap, ""];
+      return [defaultPercent, defaultCap, "", false];
     }
-    if (!Array.isArray(rows)) return [defaultPercent, defaultCap, ""];
+    if (!Array.isArray(rows)) return [defaultPercent, defaultCap, "", false];
     const merchantLower = merchant.toLowerCase();
     for (const entry of rows) {
-      if (!Array.isArray(entry) || entry.length < 2 || entry.length > 6) continue;
+      if (!Array.isArray(entry) || entry.length < 2 || entry.length > 8) continue;
       const rawKeywords = String(entry[0]);
       const colonIdx = rawKeywords.indexOf(":");
       const label = colonIdx >= 0 ? rawKeywords.slice(0, colonIdx) : rawKeywords;
       const kwPart = colonIdx >= 0 ? rawKeywords.slice(colonIdx + 1) : rawKeywords;
       const percent = entry[1];
       const cap = entry.length >= 3 ? entry[2] : defaultCap;
+      const startHour = entry.length >= 7 ? entry[6] : null;
+      const endHour = entry.length >= 8 ? entry[7] : null;
+      const posKws = [];
+      const negKws = [];
       for (const kw of kwPart.split(",")) {
         const k = kw.trim().toLowerCase();
-        if (k && merchantLower.includes(k)) return [percent, cap, label];
+        if (!k) continue;
+        (k.startsWith("-") ? negKws : posKws).push(k.startsWith("-") ? k.slice(1) : k);
+      }
+      if (negKws.some((k) => merchantLower.includes(k))) continue;
+      if (posKws.some((k) => merchantLower.includes(k))) {
+        if (startHour != null && endHour != null && hour != null && !(hour >= startHour && hour < endHour)) {
+          return [0, 0, label, true];
+        }
+        return [percent, cap, label, false];
       }
     }
-    return [defaultPercent, defaultCap, ""];
+    return [defaultPercent, defaultCap, "", false];
   }
 
-  function rateTableEntryByLabel(rateTableJson, label, defaultPercent, defaultCap) {
-    if (!rateTableJson || !label) return [defaultPercent, defaultCap];
+  function rateTableEntryByLabel(rateTableJson, label, defaultPercent, defaultCap, hour) {
+    if (!rateTableJson || !label) return [defaultPercent, defaultCap, false];
     let rows;
     try {
       rows = JSON.parse(rateTableJson);
     } catch (e) {
-      return [defaultPercent, defaultCap];
+      return [defaultPercent, defaultCap, false];
     }
-    if (!Array.isArray(rows)) return [defaultPercent, defaultCap];
+    if (!Array.isArray(rows)) return [defaultPercent, defaultCap, false];
     for (const entry of rows) {
-      if (!Array.isArray(entry) || entry.length < 2 || entry.length > 6) continue;
+      if (!Array.isArray(entry) || entry.length < 2 || entry.length > 8) continue;
       const rawKeywords = String(entry[0]);
       const colonIdx = rawKeywords.indexOf(":");
       const entryLabel = colonIdx >= 0 ? rawKeywords.slice(0, colonIdx) : rawKeywords;
       if (entryLabel === label) {
         const cap = entry.length >= 3 ? entry[2] : defaultCap;
-        return [entry[1], cap];
+        const startHour = entry.length >= 7 ? entry[6] : null;
+        const endHour = entry.length >= 8 ? entry[7] : null;
+        if (startHour != null && endHour != null && hour != null && !(hour >= startHour && hour < endHour)) {
+          return [0, 0, true];
+        }
+        return [entry[1], cap, false];
       }
     }
-    return [defaultPercent, defaultCap];
+    return [defaultPercent, defaultCap, false];
   }
 
   function updateUseChangePreview() {
@@ -1920,13 +1954,20 @@
     }
     if (isPercent && amount) {
       const manualCategory = categorySelect.value;
-      let percent, cap, label;
+      const occurredAt = (assigningItem && assigningItem.occurred_at) || "";
+      const hour = occurredAt.length >= 13 ? Number(occurredAt.slice(11, 13)) : null;
+      let percent, cap, label, timeBlocked;
       if (manualCategory) {
-        [percent, cap] = rateTableEntryByLabel(benefit.rate_table, manualCategory, benefit.discount_percent, benefit.per_txn_cap);
+        [percent, cap, timeBlocked] = rateTableEntryByLabel(benefit.rate_table, manualCategory, benefit.discount_percent, benefit.per_txn_cap, hour);
         label = manualCategory;
       } else {
         const merchant = (assigningItem && assigningItem.merchant) || "";
-        [percent, cap, label] = matchRateTable(merchant, benefit.rate_table, benefit.discount_percent, benefit.per_txn_cap);
+        [percent, cap, label, timeBlocked] = matchRateTable(merchant, benefit.rate_table, benefit.discount_percent, benefit.per_txn_cap, hour);
+      }
+      if (timeBlocked) {
+        preview.style.display = "block";
+        preview.textContent = `할인 예상: 0원 (${label ? label + " " : ""}할인 적용 시간대가 아님)`;
+        return;
       }
       let earned = computePercentDiscount(amount, percent, cap);
       let note = "";

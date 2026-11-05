@@ -325,12 +325,17 @@
 <!-- 전월실적 입력 모달 -->
 <div class="modal-backdrop" id="perf-modal">
   <div class="modal">
-    <h2>지난달(전월) 실적 직접 수정</h2>
+    <h2>전월실적 직접 수정</h2>
     <p class="hint" style="margin-top:0;">
       평소엔 입력 안 하셔도 됩니다 - 받은 결제 알림을 합산해서 자동으로 계산됩니다.
       카드사 앱 숫자와 다르면(현금영수증 결제 등 알림에 안 잡힌 게 있으면) 여기서 직접 고칠 수 있습니다.
+      밀린 과거 결제를 지금 기록할 땐, 그 결제가 일어난 달의 전전달(그 달 기준 "전월") 실적이 기준입니다 -
+      아래에서 달을 바꿔서 그 달 실적을 입력해주세요.
     </p>
-    <label id="perf-value-label">지난달 사용액 (원)
+    <label id="perf-month-label">실적을 입력할 달 (그 달 1일~말일 사용액)
+      <input type="month" id="perf-month">
+    </label>
+    <label id="perf-value-label">사용액 (원)
       <input type="number" id="perf-value" min="0" step="1">
     </label>
     <div class="modal-actions">

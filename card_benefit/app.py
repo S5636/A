@@ -17,6 +17,7 @@ from flask import Flask, jsonify, make_response, render_template, request, send_
 from openpyxl import Workbook, load_workbook
 
 from models import (
+    TIME_BLOCKED_LABEL,
     annotate_merchant,
     card_codes_match,
     compute_change_earned,
@@ -863,6 +864,22 @@ def update_card(card_id):
     finally:
         conn.close()
     return jsonify(serialize_full())
+
+
+@app.route("/api/cards/<int:card_id>/performance/<year_month>", methods=["GET"])
+def get_performance(card_id, year_month):
+    """특정 달(YYYY-MM)에 수기로 입력해둔 전월실적이 있으면 돌려준다 - 밀린
+    과거 결제를 기록하려고 과거 달의 실적을 입력하는 모달에서, 이미 입력해둔
+    값이 있으면 그걸 보여주기 위함(없으면 total_spend: null)."""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT total_spend FROM performance WHERE card_id = ? AND year_month = ?",
+            (card_id, year_month),
+        ).fetchone()
+    finally:
+        conn.close()
+    return jsonify({"total_spend": row["total_spend"] if row else None})
 
 
 @app.route("/api/cards/<int:card_id>/performance", methods=["POST"])
@@ -1898,7 +1915,7 @@ def _perf_spend_for_card(conn, card, ref_date=None):
     )
 
 
-def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, merchant="", used_at="", category_override=""):
+def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, merchant="", used_at="", category_override="", occurred_at=""):
     """혜택의 calc_mode에 따라 입력값(결제금액 등)을 실제 한도 소진값으로 변환한다.
 
     "raw"는 입력값을 그대로 쓰고, 나머지는 결제금액을 자동으로 실제
@@ -1907,7 +1924,17 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
     error가 있으면(업종별 일/월 횟수 한도 초과 등) 기록하지 않고 그 문구를 보여준다.
     category_override가 있으면(네이버페이/토스페이처럼 가맹점명으로 업종을 알 수
     없어서 사용자가 직접 고른 경우) 가맹점명 매칭 대신 그 업종 값을 그대로 쓴다.
+    occurred_at(알림/엑셀의 실제 결제 시각, "YYYY-MM-DD HH:MM:SS")이 있으면
+    Time Plan의 DAY/NIGHT처럼 "이 시간대 결제만" 적용되는 업종 조건을 확인하는 데
+    쓴다 - 수기로 기록할 땐(occurred_at 없음) 시간 정보가 없어서 이 조건을
+    건너뛴다(차단하지 않음).
     """
+    hour = None
+    if occurred_at and len(occurred_at) >= 13:
+        try:
+            hour = int(occurred_at[11:13])
+        except ValueError:
+            hour = None
     effective_discount_percent = benefit["discount_percent"]
     if benefit["tier_table"] or (benefit["calc_mode"] == "percent_discount" and benefit["percent_tier_table"]):
         card = conn.execute("SELECT * FROM cards WHERE id = ?", (benefit["card_id"],)).fetchone()
@@ -1932,14 +1959,18 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
 
     if benefit["calc_mode"] == "percent_discount":
         if category_override:
-            percent, cap, daily_limit, monthly_limit, monthly_point_cap = rate_table_entry_by_label(
-                benefit["rate_table"], category_override, effective_discount_percent, benefit["per_txn_cap"]
+            percent, cap, daily_limit, monthly_limit, monthly_point_cap, time_blocked = rate_table_entry_by_label(
+                benefit["rate_table"], category_override, effective_discount_percent, benefit["per_txn_cap"], hour
             )
             category = category_override
+            if time_blocked:
+                return None, None, None, "이 업종은 할인 적용 시간대 밖이라 이 결제는 할인 대상이 아닙니다."
         else:
             percent, cap, daily_limit, monthly_limit, monthly_point_cap, category = match_rate_table(
-                merchant, benefit["rate_table"], effective_discount_percent, benefit["per_txn_cap"]
+                merchant, benefit["rate_table"], effective_discount_percent, benefit["per_txn_cap"], hour
             )
+            if category == TIME_BLOCKED_LABEL:
+                return None, None, None, "이 시간대는 할인 대상이 아닙니다(업종은 맞지만 할인 적용 시간대 밖입니다)."
         capped_note = ""
         if category and used_at:
             if daily_limit and _category_usage_count(conn, benefit_id, category, used_at) >= daily_limit:
@@ -2164,7 +2195,8 @@ def assign_inbox_item(item_id):
             }), 400
 
         used_value, memo, rate_category, error = _apply_calc_mode(
-            conn, benefit_id, benefit, raw_value, bool(data.get("doubled")), memo, merchant, used_at, category_override
+            conn, benefit_id, benefit, raw_value, bool(data.get("doubled")), memo, merchant, used_at, category_override,
+            item["occurred_at"] or ""
         )
         if error:
             return jsonify({"error": error}), 400
