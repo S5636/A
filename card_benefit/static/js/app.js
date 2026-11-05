@@ -152,11 +152,15 @@
     return escapedText.replace(/\(2배\)/g, '<span class="badge-double">2배 특별적립</span>');
   }
 
-  // 가맹점명 뒤에 자동매칭용으로 붙는 "(배달의민족)"/"(토스)" 같은 안내는
-  // 매칭에만 쓰고 화면에는 보여주지 않는다.
+  // 가맹점명 뒤에 자동매칭용으로 "(배달의민족)"/"(Claude 구독)"처럼 붙는 건
+  // 실제 서비스명이다(models.py의 annotate_merchant) - 원래 법인명/PG사명이
+  // 길고 안 읽혀서 알림 큐에는 이 요약명만 보여준다.
+  const MERCHANT_ALIAS_BRANDS = ["배달의민족", "토스", "Claude 구독", "알리익스프레스"];
   function displayMerchant(m) {
     if (!m) return m;
-    return m.replace(/\s*\((배달의민족|토스)\)\s*$/, "");
+    const match = m.match(/\(([^()]+)\)\s*$/);
+    if (match && MERCHANT_ALIAS_BRANDS.includes(match[1])) return match[1];
+    return m;
   }
 
   function render() {

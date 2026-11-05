@@ -344,6 +344,8 @@ _MERCHANT_ALIASES = {
     # 알림 문구가 "주식회사 우아한형제"처럼 끝 글자가 잘려서 오는 경우가 있어서
     # "들" 없이도 잡히게 짧게 잡는다.
     "우아한형제": "배달의민족",
+    "anthropic": "Claude 구독",
+    "aliexpress": "알리익스프레스",
 }
 
 # 카드마다 "전월(전년도) 이용금액 제외 대상"이 안내장 기준으로 서로
@@ -579,8 +581,9 @@ def annotate_merchant(name: str) -> str:
     # 섞여 나오는 경우가 있어서, 가맹점 키워드 매칭("LG U+")이 깨지지
     # 않도록 저장 시점에 공백을 하나로 정리한다.
     name = re.sub(r"\s+", " ", str(name).strip())
+    name_lower = name.lower()
     for key, brand in _MERCHANT_ALIASES.items():
-        if key in name:
+        if key.lower() in name_lower:
             return f"{name} ({brand})"
     return name
 
@@ -612,7 +615,7 @@ _USAGE_TYPE_HEADERS = ["이용구분", "거래구분", "결제구분", "국내�
 # 땐 가맹점명으로 보조 판단한다 - 카드사마다 표기가 달라 완벽친 않지만,
 # PayPal·AliExpress처럼 누가 봐도 해외 결제대행사인 것만 최소로 등록해둔다
 # (확인 안 된 상호를 짐작으로 추가하진 않는다).
-FOREIGN_MERCHANT_KEYWORDS = ["PAYPAL", "ALIEXPRESS"]
+FOREIGN_MERCHANT_KEYWORDS = ["PAYPAL", "ALIEXPRESS", "ANTHROPIC"]
 
 
 def is_foreign_merchant(merchant: str) -> bool:
