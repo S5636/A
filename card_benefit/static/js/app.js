@@ -18,7 +18,22 @@
     return `rgba(${r},${g},${b},${alpha})`;
   }
 
-  let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [] };
+  // 카드/대출/고정지출/보험 박스마다 다른 색 배경 틴트를 입혀서 서로
+  // 구분되게 한다(전부 class="card"라 배경이 다 똑같았음). 제목 글씨색은
+  // 템플릿이 이미 직접 색을 넣어둔 경우(대출 만기임박 경고 등)는 그대로
+  // 둔다 - 장식용 틴트가 그 경고색을 덮어쓰면 안 되므로.
+  function applyCardColorTint(el, idx) {
+    const color = CARD_COLORS[idx % CARD_COLORS.length];
+    const titleEl = el.querySelector(".card-title");
+    if (titleEl && !titleEl.style.color) titleEl.style.color = color;
+    el.style.background = `linear-gradient(${hexToRgba(color, 0.07)}, ${hexToRgba(color, 0.07)}), var(--surface)`;
+    el.style.borderColor = hexToRgba(color, 0.22);
+  }
+
+  let state = {
+    cards: [], real_month_summary: { earn: 0, cashback: 0, total_spend: 0 },
+    inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [],
+  };
   let noBenefitOpen = false;
   // null = 진짜 이번 달(필터 없음). "YYYY-MM" 문자열이면 카드 탭의 "사용내역"
   // 목록뿐 아니라 한도/잔여/전월실적까지 전부 그 달 기준으로 같이 바뀐다.
@@ -179,16 +194,10 @@
   // ---- 최상단 이번 달 적립/캐시백/혜택률 합계 ----
   function renderMonthlySummary() {
     const section = document.getElementById("monthly-summary");
-    let earn = 0;
-    let cashback = 0;
-    let totalSpend = 0;
-    state.cards.forEach((card) => {
-      totalSpend += card.this_month_spend || 0;
-      card.benefits.forEach((b) => {
-        if (b.calc_mode === "change_under_1000") earn += b.used || 0;
-        else if (b.calc_mode === "percent_discount") cashback += b.used || 0;
-      });
-    });
+    // 월 선택 바를 과거 달로 옮겨도 이 요약 3박스는 항상 "진짜 지금 이번 달"
+    // 기준이어야 하므로, state.cards(월 선택 바 기준)가 아니라 서버가 항상
+    // 실제 이번 달로 따로 계산해서 주는 real_month_summary를 쓴다.
+    const { earn, cashback, total_spend: totalSpend } = state.real_month_summary || { earn: 0, cashback: 0, total_spend: 0 };
     const rate = totalSpend > 0 ? ((earn + cashback) / totalSpend * 100) : 0;
     section.style.display = state.cards.length ? "flex" : "none";
     const monthLabel = `${new Date().getMonth() + 1}월`;
@@ -439,13 +448,7 @@
       el.className = "card";
       el.id = `card-${card.id}`;
       el.innerHTML = cardTemplate(card, idx === 0, idx === state.cards.length - 1);
-      const cardColor = CARD_COLORS[idx % CARD_COLORS.length];
-      el.querySelector(".card-title").style.color = cardColor;
-      // 카드마다 다른 색 배경 틴트를 입혀서 카드 박스를 서로 구분되게 한다
-      // (지금까지는 CARD_COLORS가 제목 글씨색에만 쓰이고 박스 배경은 전부
-      // 똑같은 --surface 한 가지라 카드끼리 구분이 안 됐었음).
-      el.style.background = `linear-gradient(${hexToRgba(cardColor, 0.08)}, ${hexToRgba(cardColor, 0.08)}), var(--surface)`;
-      el.style.borderColor = hexToRgba(cardColor, 0.4);
+      applyCardColorTint(el, idx);
       cardList.appendChild(el);
       wireCard(el, card, state.cards, idx);
     });
@@ -804,6 +807,7 @@
       el.id = `loan-${loan.id}`;
       const isManual = loanSort === "manual";
       el.innerHTML = loanTemplate(loan, isManual, idx === 0, idx === loans.length - 1);
+      applyCardColorTint(el, idx);
       loanList.appendChild(el);
       wireLoan(el, loan, isManual ? loans : null, idx);
     });
@@ -1119,11 +1123,12 @@
     document.getElementById("recurring-unmatched-total").textContent =
       `미확인 ₩${fmt(state.recurring_payments.filter((r) => r.active && !r.matched_this_month).reduce((sum, r) => sum + (r.amount || 0), 0))}`;
 
-    sortedRecurring().forEach((item) => {
+    sortedRecurring().forEach((item, idx) => {
       const el = document.createElement("div");
       el.className = "card";
       el.id = `recurring-${item.id}`;
       el.innerHTML = recurringTemplate(item);
+      applyCardColorTint(el, idx);
       list.appendChild(el);
       wireRecurring(el, item);
     });
@@ -1402,11 +1407,12 @@
     document.getElementById("insurance-unmatched-total").textContent =
       `미확인 ₩${fmt(state.insurances.filter((r) => r.active && !r.matched_this_month).reduce((sum, r) => sum + (r.monthly_premium || 0), 0))}`;
 
-    sortedInsurances().forEach((item) => {
+    sortedInsurances().forEach((item, idx) => {
       const el = document.createElement("div");
       el.className = "card";
       el.id = `insurance-${item.id}`;
       el.innerHTML = insuranceTemplate(item);
+      applyCardColorTint(el, idx);
       list.appendChild(el);
       wireInsurance(el, item);
     });

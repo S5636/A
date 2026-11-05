@@ -208,11 +208,47 @@ def serialize_no_benefit(conn):
     ]
 
 
+def _real_month_summary(conn):
+    """최상단 적립/캐시백/혜택률 요약 3박스용 - 상단 월 선택 바와 무관하게
+    항상 "진짜 지금 이번 달" 기준으로 계산한다. 한도/잔여처럼 과거 달을
+    돌아보는 용도가 아니라 "지금 이번 달 현황이 어떤지" 보여주는 실시간
+    대시보드라서, 과거 달을 보고 있어도 이 박스 숫자는 안 바뀌어야 한다."""
+    cards = conn.execute("SELECT * FROM cards ORDER BY sort_order ASC, id ASC").fetchall()
+    earn = 0.0
+    cashback = 0.0
+    total_spend = 0.0
+    this_month = current_year_month(None)
+    for card in cards:
+        start, end = cycle_bounds(card["reset_day"], None)
+        rows = conn.execute(
+            """SELECT amount, merchant FROM inbox_items
+               WHERE card_id = ? AND status IN ('assigned', 'no_benefit')
+               AND substr(occurred_at, 1, 7) = ?""",
+            (card["id"], this_month),
+        ).fetchall()
+        total_spend += sum(
+            r["amount"] for r in rows
+            if not is_performance_excluded(r["merchant"], card["perf_excluded_keywords"])
+        )
+        for b in conn.execute("SELECT id, calc_mode FROM benefits WHERE card_id = ?", (card["id"],)).fetchall():
+            used = conn.execute(
+                """SELECT COALESCE(SUM(used_value), 0) AS total FROM usage_logs
+                   WHERE benefit_id = ? AND used_at >= ? AND used_at < ?""",
+                (b["id"], start.isoformat(), end.isoformat()),
+            ).fetchone()["total"]
+            if b["calc_mode"] == "change_under_1000":
+                earn += used
+            elif b["calc_mode"] == "percent_discount":
+                cashback += used
+    return {"earn": earn, "cashback": cashback, "total_spend": total_spend}
+
+
 def serialize_full():
     conn = get_conn()
     try:
         return {
             "cards": _serialize_cards(conn),
+            "real_month_summary": _real_month_summary(conn),
             "inbox": serialize_inbox(conn),
             "no_benefit": serialize_no_benefit(conn),
             "loans": serialize_loans(conn),
