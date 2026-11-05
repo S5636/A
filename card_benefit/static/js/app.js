@@ -72,7 +72,6 @@
     document.getElementById("month-label").textContent = `${y}년 ${m}월`;
     const isCurrent = !selectedMonth;
     document.getElementById("month-today").style.display = isCurrent ? "none" : "";
-    document.getElementById("month-bar-hint").style.display = isCurrent ? "none" : "block";
     document.getElementById("month-next").disabled = isCurrent;
   }
 
