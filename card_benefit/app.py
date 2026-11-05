@@ -658,6 +658,13 @@ def _serialize_cards(conn):
                    ORDER BY usage_logs.used_at DESC, usage_logs.id DESC""",
                 (b["id"], log_start.isoformat(), log_end.isoformat()),
             ).fetchall()
+            # "사용"(used)은 한도에서 깎인 할인/적립액 합계고, payment_sum은 그
+            # 할인을 받은 실제 결제금액 자체의 합계 - 서로 다른 숫자라 화면에
+            # 둘 다 따로 보여준다. raw_value가 없는 옛날 기록(이 컬럼 생기기
+            # 전)은 used_value로 대신한다.
+            payment_sum = sum(
+                (l["raw_value"] if l["raw_value"] is not None else l["used_value"]) for l in logs
+            )
 
             tiered_limit = tier_limit_for_spend(b["tier_table"], perf_spend)
             # 구간표가 있는 혜택은 전월실적이 최저 구간에도 못 미치면 tiered_limit이
@@ -742,6 +749,7 @@ def _serialize_cards(conn):
                 "category_usage": category_usage,
                 "always_doubled": bool(b["always_doubled"]),
                 "used": used,
+                "payment_sum": payment_sum,
                 "remaining": remaining,
                 "percent": percent,
                 "over_limit": (not unlimited) and remaining < 0,
@@ -2128,9 +2136,9 @@ def log_usage(benefit_id):
             return jsonify({"error": error}), 400
 
         conn.execute(
-            """INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo, rate_category)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (benefit_id, used_value, used_at, merchant, memo, rate_category),
+            """INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo, rate_category, raw_value)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (benefit_id, used_value, used_at, merchant, memo, rate_category, raw_value),
         )
         conn.commit()
     finally:
@@ -2292,9 +2300,9 @@ def assign_inbox_item(item_id):
             return jsonify({"error": error}), 400
 
         conn.execute(
-            """INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo, source_inbox_id, rate_category)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (benefit_id, used_value, used_at, merchant, memo, item_id, rate_category),
+            """INSERT INTO usage_logs (benefit_id, used_value, used_at, merchant, memo, source_inbox_id, rate_category, raw_value)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (benefit_id, used_value, used_at, merchant, memo, item_id, rate_category, raw_value),
         )
         conn.execute(
             "UPDATE inbox_items SET status = 'assigned', card_id = ?, benefit_id = ? WHERE id = ?",
@@ -2539,8 +2547,8 @@ def _import_own_template(ws):
             seen_combo.add(combo)
 
             conn.execute(
-                "INSERT INTO usage_logs (benefit_id, used_value, used_at, memo) VALUES (?, ?, ?, ?)",
-                (benefit_id, used_value, used_at_str, memo_str),
+                "INSERT INTO usage_logs (benefit_id, used_value, used_at, memo, raw_value) VALUES (?, ?, ?, ?, ?)",
+                (benefit_id, used_value, used_at_str, memo_str, used_value),
             )
             added += 1
         conn.commit()

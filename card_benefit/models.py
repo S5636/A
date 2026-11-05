@@ -204,6 +204,10 @@ def init_db():
         # 시간대가 다르면(Time Plan DAY/NIGHT처럼) rate_table의 entry[6]/[7]을 쓴다.
         _ensure_column(conn, "benefits", "start_hour", "start_hour INTEGER")
         _ensure_column(conn, "benefits", "end_hour", "end_hour INTEGER")
+        # used_value는 "실제로 한도에서 깎인 금액"(할인/적립액)이라 결제금액 자체와
+        # 다르다(예: 10% 할인이면 결제 10만원 → used_value 1만원). 결제금액 자체의
+        # 합계를 따로 보여주려면 변환 전 원래 입력값도 같이 저장해둬야 한다.
+        _ensure_column(conn, "usage_logs", "raw_value", "raw_value REAL DEFAULT NULL")
         _ensure_column(conn, "inbox_items", "approval_no", "approval_no TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "usage_type", "usage_type TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "source", "source TEXT DEFAULT ''")

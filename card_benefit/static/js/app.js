@@ -10,6 +10,14 @@
 
   const CARD_COLORS = ["#a78bfa", "#ec4899", "#fab219", "#22c55e", "#3987e5", "#f97316"];
 
+  function hexToRgba(hex, alpha) {
+    const h = hex.replace("#", "");
+    const r = parseInt(h.substring(0, 2), 16);
+    const g = parseInt(h.substring(2, 4), 16);
+    const b = parseInt(h.substring(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
   let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [] };
   let noBenefitOpen = false;
   // null = 진짜 이번 달(필터 없음). "YYYY-MM" 문자열이면 카드 탭의 "사용내역"
@@ -214,7 +222,7 @@
 
   // 고정지출/보험 공용: 이번 달 것만 아니라 과거 달(엑셀로 몇 달치 한 번에
   // 올린 것 포함) 매칭 내역까지 "내역" 버튼으로 펼쳐서 보여준다.
-  function matchHistoryTemplate(logKey, history) {
+  function matchHistoryTemplate(logKey, history, { showToggle = true } = {}) {
     const logsOpen = openLogPanels.has(logKey);
     const logsHtml = history.length
       ? history.map((h) => `
@@ -224,14 +232,21 @@
           </div>
         `).join("")
       : `<div class="log-item"><span>매칭된 결제 내역 없음</span></div>`;
-    return `
+    const toggleHtml = showToggle ? `
       <div class="benefit-sub">
         <div class="benefit-buttons">
           <button class="btn small toggle-match-log" data-log-key="${logKey}">내역${history.length ? ` (${history.length})` : ""}</button>
         </div>
       </div>
+    ` : "";
+    return `
+      ${toggleHtml}
       <div class="log-list ${logsOpen ? "open" : ""}" data-log-for="${logKey}">${logsHtml}</div>
     `;
+  }
+
+  function matchHistoryToggleBtn(logKey, history) {
+    return `<button class="btn small toggle-match-log" data-log-key="${logKey}">내역${history.length ? ` (${history.length})` : ""}</button>`;
   }
 
   function wireMatchHistory(el, logKey) {
@@ -424,7 +439,13 @@
       el.className = "card";
       el.id = `card-${card.id}`;
       el.innerHTML = cardTemplate(card, idx === 0, idx === state.cards.length - 1);
-      el.querySelector(".card-title").style.color = CARD_COLORS[idx % CARD_COLORS.length];
+      const cardColor = CARD_COLORS[idx % CARD_COLORS.length];
+      el.querySelector(".card-title").style.color = cardColor;
+      // 카드마다 다른 색 배경 틴트를 입혀서 카드 박스를 서로 구분되게 한다
+      // (지금까지는 CARD_COLORS가 제목 글씨색에만 쓰이고 박스 배경은 전부
+      // 똑같은 --surface 한 가지라 카드끼리 구분이 안 됐었음).
+      el.style.background = `linear-gradient(${hexToRgba(cardColor, 0.08)}, ${hexToRgba(cardColor, 0.08)}), var(--surface)`;
+      el.style.borderColor = hexToRgba(cardColor, 0.4);
       cardList.appendChild(el);
       wireCard(el, card, state.cards, idx);
     });
@@ -575,7 +596,7 @@
             ? `초과 ${fmt(Math.abs(b.remaining))}${unit}`
             : `잔여 ${fmt(b.remaining)}${unit}`;
           return `<div class="benefit-remaining-wrap">
-            <span class="benefit-used">사용 ${fmt(b.used)}${unit}</span>
+            <span class="benefit-used">결제금액 ${fmt(b.payment_sum)}${unit}</span>
             <span class="benefit-sep">/</span>
             <span class="benefit-remaining remaining-${cls}">${remainingText}</span>
           </div>`;
@@ -1128,6 +1149,7 @@
             <div class="card-text-row">
               <span class="card-method-dim">${item.payment_method ? escapeHtml(item.payment_method) : "결제수단 미입력"}</span>
               <span class="card-head-right">
+                ${matchHistoryToggleBtn(`recurring-${item.id}`, item.match_history)}
                 <button class="icon-btn edit-recurring" data-id="${item.id}" title="수정">✏️</button>
                 <button class="icon-btn delete-recurring" data-id="${item.id}" title="삭제">🗑️</button>
               </span>
@@ -1136,7 +1158,7 @@
         </div>
       </div>
       ${memoToggleTemplate(`recurring-${item.id}`, item.memo)}
-      ${matchHistoryTemplate(`recurring-${item.id}`, item.match_history)}
+      ${matchHistoryTemplate(`recurring-${item.id}`, item.match_history, { showToggle: false })}
     `;
   }
 
