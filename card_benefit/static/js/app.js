@@ -22,12 +22,15 @@
   // 구분되게 한다(전부 class="card"라 배경이 다 똑같았음). 제목 글씨색은
   // 템플릿이 이미 직접 색을 넣어둔 경우(대출 만기임박 경고 등)는 그대로
   // 둔다 - 장식용 틴트가 그 경고색을 덮어쓰면 안 되므로.
+  const NEON_YELLOW = "#f4ff2b";
+
   function applyCardColorTint(el, idx) {
     const color = CARD_COLORS[idx % CARD_COLORS.length];
     const titleEl = el.querySelector(".card-title");
     if (titleEl && !titleEl.style.color) titleEl.style.color = color;
     el.style.background = `linear-gradient(${hexToRgba(color, 0.07)}, ${hexToRgba(color, 0.07)}), var(--surface)`;
-    el.style.borderColor = hexToRgba(color, 0.22);
+    el.style.borderColor = NEON_YELLOW;
+    el.style.boxShadow = `0 0 7px -2px ${hexToRgba(NEON_YELLOW, 0.65)}`;
   }
 
   let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [] };
