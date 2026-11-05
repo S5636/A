@@ -388,7 +388,7 @@
           <div class="inbox-item-sub">${it.occurred_at}${it.card_name ? " · " + escapeHtml(shortCardName(it.card_name)) : ""}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""}</div>
         </div>
         <div class="benefit-buttons">
-          <button class="btn secondary small reopen-no-benefit" data-id="${it.id}">다시 확인</button>
+          <button class="btn secondary small reopen-no-benefit" data-id="${it.id}">재확인</button>
           <button class="btn secondary small delete-no-benefit" data-id="${it.id}">완전 삭제</button>
         </div>
       </div>
@@ -449,18 +449,25 @@
       </div>
     ` : "";
 
-    const cardNoBenefitItems = (state.no_benefit || []).filter((it) => it.card_id === card.id);
+    const activeMonth = selectedMonth || currentMonthStr();
+    const cardNoBenefitItems = (state.no_benefit || []).filter(
+      (it) => it.card_id === card.id && (it.occurred_at || "").slice(0, 7) === activeMonth
+    );
+    const cardNoBenefitSum = cardNoBenefitItems.reduce((s, it) => s + (it.amount || 0), 0);
     const cardNoBenefitOpen = openCardNoBenefitPanels.has(card.id);
     const cardNoBenefitHtml = cardNoBenefitItems.length ? `
       <div class="benefit-compact-section">
-        <button class="card-no-benefit-toggle" data-card-id="${card.id}">
-          🚫 혜택없음 처리 내역 (${cardNoBenefitItems.length}건) ${cardNoBenefitOpen ? "▲" : "▾"}
-        </button>
+        <div class="card-no-benefit-head">
+          <button class="card-no-benefit-toggle" data-card-id="${card.id}">
+            🚫 혜택없음 ${cardNoBenefitItems.length}건 ${cardNoBenefitOpen ? "▲" : "▾"}
+          </button>
+          <span class="card-no-benefit-sum">${fmt(cardNoBenefitSum)}원</span>
+        </div>
         <div class="log-list ${cardNoBenefitOpen ? "open" : ""}">
           ${cardNoBenefitItems.map((it) => `
             <div class="log-item">
               <span>${it.occurred_at}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""} · ${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</span>
-              <button class="btn secondary small reopen-no-benefit-card" data-id="${it.id}">다시 확인</button>
+              <button class="reopen-no-benefit-card" data-id="${it.id}">재확인</button>
             </div>
           `).join("")}
         </div>
@@ -567,7 +574,11 @@
           const remainingText = b.over_limit
             ? `초과 ${fmt(Math.abs(b.remaining))}${unit}`
             : `잔여 ${fmt(b.remaining)}${unit}`;
-          return `<div class="benefit-remaining remaining-${cls}">${remainingText}</div>`;
+          return `<div class="benefit-remaining-wrap">
+            <span class="benefit-used">사용 ${fmt(b.used)}${unit}</span>
+            <span class="benefit-sep">/</span>
+            <span class="benefit-remaining remaining-${cls}">${remainingText}</span>
+          </div>`;
         })();
 
     const progressHtml = b.unlimited
@@ -579,7 +590,7 @@
 
     const subText = b.unlimited
       ? ``
-      : `한도 ${fmt(b.limit_value)}${unit} 중 ${fmt(b.used)}${unit} 사용`;
+      : `한도 ${fmt(b.limit_value)}${unit}`;
 
     const categoryUsageHtml = (b.category_usage && b.category_usage.length)
       ? `<div class="category-usage">${b.category_usage.map((c) => {
