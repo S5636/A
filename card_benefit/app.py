@@ -280,6 +280,16 @@ def _extract_method_last4(payment_method):
     return m.group(1) if m else ""
 
 
+def _merchant_base(merchant):
+    """가맹점명을 "해제" 시 기억해둘 때/나중에 비교할 때 쓰는 정규화 형태로
+    만든다. "가맹점명: ㈜골프존" 같은 접두어, ㈜/(주) 표기 차이, 공백만
+    다르고 사실상 같은 문구를 같은 것으로 보기 위함."""
+    s = re.sub(r"^가맹점명\s*[:：]\s*", "", (merchant or "").strip())
+    s = s.replace("㈜", "(주)")
+    s = re.sub(r"\s+", "", s)
+    return s.lower()
+
+
 _NAME_TOKEN_STOPWORDS = {"hl", "주식회사", "(주)"}
 
 # 여러 계열사/서비스를 거느린 대기업 집단 이름은 그 자체로는 아무것도
@@ -378,9 +388,20 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         except (IndexError, KeyError):
             return False
 
+    def merchant_excluded(rp):
+        # "내역"에서 특정 건을 "해제"하면 그 가맹점명을 이 항목의 제외
+        # 목록에 적어둔다(unlink_match 참고) - 그래야 다음 달에 똑같은
+        # 가맹점에서 또 결제가 들어와도(새 알림, 새 id라서 automatch_excluded
+        # 플래그만으론 못 막음) 다시 자동으로 안 붙는다.
+        if not rp["excluded_merchants"] or not item["merchant"]:
+            return False
+        excluded = [m for m in rp["excluded_merchants"].split("\n") if m]
+        return _merchant_base(item["merchant"]) in excluded
+
     amount_matches = [
         rp for rp in active_rows
-        if not is_variable_amount(rp) and rp[amount_column] == item["amount"] and last4_ok(rp)
+        if not is_variable_amount(rp) and rp[amount_column] == item["amount"]
+        and last4_ok(rp) and not merchant_excluded(rp)
     ]
     if len(amount_matches) > 1 and item["merchant"]:
         # 금액(+카드)까지 같은 게 두 개 이상이면(예: 서로 다른 구독 두 개가
@@ -411,7 +432,7 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
     merchant_lower = item["merchant"].lower()
     name_matches = [
         rp for rp in active_rows
-        if last4_ok(rp) and any(
+        if last4_ok(rp) and not merchant_excluded(rp) and any(
             tok.lower() in merchant_lower
             for tok in _safe_name_tokens(rp[name_column]) + _safe_name_tokens(rp["billing_alias"])
         )
@@ -1210,12 +1231,37 @@ def unmatch_recurring(item_id):
 def unlink_match(inbox_id):
     """고정지출/보험 "내역" 패널에서 특정 건(이번 달이든 지난 달이든) 매칭만
     하나 풀어준다. 알림 자체(inbox_items 행)나 status는 그대로 둔다.
-    automatch_excluded도 같이 세워서, 자동 매칭(엑셀 재업로드나 "자동 매칭
-    시도" 버튼)이 다음에 또 똑같이 잡아가지 않게 한다 - 해제했는데 매번
-    다시 자동으로 묶이는 문제가 있었음("골프존커머스"가 "골프존"으로 계속
-    재매칭됨). 필요하면 ❓배지로 수동 매칭은 여전히 가능하다."""
+
+    두 가지를 같이 기록해서, 해제한 게 다시 자동으로 안 붙게 한다.
+    automatch_excluded는 "이 알림 자체"를 영구히 자동매칭 대상에서 뺀다
+    (재업로드/"자동 매칭 시도"가 같은 알림을 다시 건드리지 않게). 그런데
+    다음 달에 같은 가맹점에서 또 결제가 오면 그건 새 알림(새 id)이라
+    automatch_excluded만으론 못 막으므로, 매칭돼 있던 항목의
+    excluded_merchants에도 이 가맹점명을 적어둔다 - 그래야 같은 가맹점이
+    또 와도 그 항목으로는 다시 안 묶인다."""
     conn = get_conn()
     try:
+        item = conn.execute(
+            "SELECT recurring_id, insurance_id, merchant FROM inbox_items WHERE id = ?", (inbox_id,)
+        ).fetchone()
+        if item and item["merchant"]:
+            merchant_key = _merchant_base(item["merchant"])
+            for table, fk_id in (
+                ("recurring_payments", item["recurring_id"]),
+                ("insurances", item["insurance_id"]),
+            ):
+                if not fk_id:
+                    continue
+                rp = conn.execute(
+                    f"SELECT excluded_merchants FROM {table} WHERE id = ?", (fk_id,)
+                ).fetchone()
+                existing = [m for m in (rp["excluded_merchants"] or "").split("\n") if m] if rp else []
+                if merchant_key not in existing:
+                    existing.append(merchant_key)
+                    conn.execute(
+                        f"UPDATE {table} SET excluded_merchants = ? WHERE id = ?",
+                        ("\n".join(existing), fk_id),
+                    )
         conn.execute(
             "UPDATE inbox_items SET recurring_id = NULL, insurance_id = NULL, automatch_excluded = 1 WHERE id = ?",
             (inbox_id,),
