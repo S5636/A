@@ -79,6 +79,20 @@ def serialize_inbox(conn):
                     matched_doubled = b["calc_mode"] == "change_under_1000"
                     break
 
+        if not matched_benefit and card and r["usage_type"] and "해외" in r["usage_type"]:
+            # 가맹점명만으론 아무 혜택도 안 걸렸는데, 카드사 엑셀의 "이용구분"에
+            # "해외"라고 명시돼 있으면(가맹점명 추측이 아니라 확실한 신호) "해외"
+            # 키워드를 등록해둔 혜택으로 바로 잡아준다. 특정 가맹점이 아니라
+            # "해외결제 자체"가 대상인 혜택(예: "Discount Plan+ 해외 5% 결제일
+            # 할인")을 위한 것 - ANTHROPIC처럼 해외 온라인 결제는 가맹점명으로
+            # 업종을 유추할 수가 없어서 이 방법밖에 없다.
+            for b in benefits_by_card.get(card["id"], []):
+                keywords = [k.strip().lower() for k in (b["merchant_keywords"] or "").split(",") if k.strip()]
+                if "해외" in keywords:
+                    matched_benefit = b
+                    matched_doubled = b["calc_mode"] == "change_under_1000"
+                    break
+
         if not matched_benefit and card:
             # 가맹점 키워드로 못 찾았어도, 이 카드에 "잔돈 자동계산"형 혜택이
             # 있으면(더모아처럼 거의 모든 결제가 적립 대상인 카드) 기본으로
