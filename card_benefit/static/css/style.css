@@ -227,6 +227,11 @@ body { padding-bottom: 40px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 2px; }
 .card-head-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 .card-head-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.match-history-toggle {
+  background: var(--surface-3); border: 1px solid var(--border-strong); color: var(--text-primary);
+  border-radius: 5px; padding: 2px 5px; font-size: 10px; font-weight: 600; cursor: pointer; line-height: 1.4;
+}
+.match-history-toggle:hover { filter: brightness(1.15); }
 .card-text-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .card-text-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .card-method-dim {

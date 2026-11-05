@@ -246,7 +246,7 @@
   }
 
   function matchHistoryToggleBtn(logKey, history) {
-    return `<button class="btn small toggle-match-log" data-log-key="${logKey}">내역${history.length ? ` (${history.length})` : ""}</button>`;
+    return `<button class="match-history-toggle toggle-match-log" data-log-key="${logKey}">내역${history.length ? ` (${history.length})` : ""}</button>`;
   }
 
   function wireMatchHistory(el, logKey) {
@@ -1435,6 +1435,7 @@
             <div class="card-text-row">
               <span class="card-method-dim">${item.company ? escapeHtml(item.company) : "보험사 미입력"}</span>
               <span class="card-head-right">
+                ${matchHistoryToggleBtn(`insurance-${item.id}`, item.match_history)}
                 <button class="icon-btn edit-insurance" data-id="${item.id}" title="수정">✏️</button>
                 <button class="icon-btn delete-insurance" data-id="${item.id}" title="삭제">🗑️</button>
               </span>
@@ -1444,7 +1445,7 @@
       </div>
       ${infoLine ? `<div class="perf-row-sub">${escapeHtml(infoLine)}</div>` : ""}
       ${memoToggleTemplate(`insurance-${item.id}`, item.memo)}
-      ${matchHistoryTemplate(`insurance-${item.id}`, item.match_history)}
+      ${matchHistoryTemplate(`insurance-${item.id}`, item.match_history, { showToggle: false })}
     `;
   }
 
