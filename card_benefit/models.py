@@ -756,6 +756,15 @@ def parse_datetime_cell(value):
     if value is None:
         return None
     if isinstance(value, datetime):
+        # openpyxl(.xlsx)은 날짜만 있는 셀도 항상 datetime으로 돌려준다(시간은
+        # 무조건 00:00:00) - 진짜 자정 결제인지 그냥 날짜만 있던 셀인지 구분이
+        # 안 되는데, 실제로는 거의 다 후자다(자정 결제는 극히 드묾). 그대로
+        # "시간 있음"으로 처리하면 모든 .xlsx 날짜 열이 가짜 00:00:00 시간을
+        # 달고 들어와서, 중복판정의 "비슷한 시간" 비교나 시간대 조건 매칭을
+        # 다 망가뜨린다. 그래서 정각 자정이면 날짜만 있던 것으로 본다(.xls의
+        # 기존 xlrd 처리 방식과 동일한 규칙).
+        if value.hour == 0 and value.minute == 0 and value.second == 0:
+            return value.date().isoformat()
         return value.strftime("%Y-%m-%d %H:%M:%S")
     if isinstance(value, date):
         return value.isoformat()

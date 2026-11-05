@@ -2617,10 +2617,12 @@ def _import_statement(ws, header_info):
         # 승인번호·카드번호 자릿수가 다르더라도 서로 잡아낼 수 있다.
         seen_approval = set()
         existing_by_amount = defaultdict(list)
-        for r in conn.execute("SELECT last4, amount, occurred_at, approval_no FROM inbox_items"):
+        for r in conn.execute("SELECT id, last4, amount, occurred_at, approval_no FROM inbox_items"):
             if r["approval_no"]:
                 seen_approval.add(r["approval_no"])
-            existing_by_amount[r["amount"]].append([r["last4"] or "", r["occurred_at"] or "", r["approval_no"] or ""])
+            existing_by_amount[r["amount"]].append(
+                [r["id"], r["last4"] or "", r["occurred_at"] or "", r["approval_no"] or ""]
+            )
 
         def _last4_compatible(a, b):
             # 카드번호가 한쪽에라도 없으면(예: 일부 카드사 알림은 마스킹이
@@ -2642,10 +2644,17 @@ def _import_statement(ws, header_info):
                 return None
 
         def _find_duplicate(last4, amount, occurred_at, approval_no):
+            """중복이면 (안내 문구, 시간을 보강해줄 기존 inbox_items.id 또는
+            None)을 돌려준다. 기존 기록엔 날짜만 있고(시간 없음) 이번에 올리는
+            행엔 시간까지 있으면, 새 행을 또 insert하는 대신(중복 행이 두 개
+            생기면 안 되므로) 기존 기록의 occurred_at을 그 시간으로 보강한다 -
+            그래야 나중에 같은 날짜에 여러 건이 몰려도 실제 결제 순서를
+            알 수 있다(시간 없는 파일을 먼저 올리고, 시간 있는 파일을 나중에
+            다시 올리는 경우를 위한 것)."""
             if approval_no and approval_no in seen_approval:
-                return f"승인번호({approval_no})가 이미 등록되어 있어 중복으로 보고 건너뜀"
+                return f"승인번호({approval_no})가 이미 등록되어 있어 중복으로 보고 건너뜀", None
             new_ts = _parse_ts(occurred_at)
-            for old_last4, old_occurred_at, old_approval in existing_by_amount.get(amount, []):
+            for old_id, old_last4, old_occurred_at, old_approval in existing_by_amount.get(amount, []):
                 if not _last4_compatible(last4, old_last4):
                     continue
                 if approval_no and old_approval and approval_no != old_approval:
@@ -2653,10 +2662,16 @@ def _import_statement(ws, header_info):
                 if len(occurred_at) > 10 and len(old_occurred_at) > 10:
                     old_ts = _parse_ts(old_occurred_at)
                     if new_ts and old_ts and abs((new_ts - old_ts).total_seconds()) <= 300:
-                        return "같은 카드·금액·비슷한 시간 내역이 이미 있어 중복으로 보고 건너뜀"
+                        return "같은 카드·금액·비슷한 시간 내역이 이미 있어 중복으로 보고 건너뜀", None
                 elif occurred_at[:10] == old_occurred_at[:10]:
-                    return "같은 카드·금액·날짜 내역이 이미 있어 중복으로 보고 건너뜀"
-            return None
+                    if len(occurred_at) > 10 and len(old_occurred_at) <= 10:
+                        return (
+                            "같은 카드·금액·날짜 내역이 이미 있어 중복으로 보고 건너뜀"
+                            "(기존 기록에 시간 정보 보강함)",
+                            old_id,
+                        )
+                    return "같은 카드·금액·날짜 내역이 이미 있어 중복으로 보고 건너뜀", None
+            return None, None
 
         # 취소 거래는 카드사 엑셀에 원 결제 건과 같은 승인번호로 "취소" 행이
         # 따로 한 줄 더 찍혀 나온다(금액은 음수로, 비고엔 "취소"로). 이걸 그냥
@@ -2736,8 +2751,16 @@ def _import_statement(ws, header_info):
                 cancel_matched += 1
                 continue
 
-            dup_reason = _find_duplicate(last4, amount, occurred_at, approval_no)
+            dup_reason, backfill_id = _find_duplicate(last4, amount, occurred_at, approval_no)
             if dup_reason:
+                if backfill_id:
+                    conn.execute(
+                        "UPDATE inbox_items SET occurred_at = ? WHERE id = ?", (occurred_at, backfill_id)
+                    )
+                    for entry in existing_by_amount.get(amount, []):
+                        if entry[0] == backfill_id:
+                            entry[2] = occurred_at
+                            break
                 skipped.append(f"{i}행: {dup_reason}")
                 continue
             if approval_no:
