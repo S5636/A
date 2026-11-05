@@ -341,7 +341,8 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
     자동집계(status가 assigned/no_benefit인 것만 합산)에서도 빠지는 문제가
     생기기 때문 - 카드로 결제한 고정지출/보험료도 전월실적엔 그대로 잡혀야 한다."""
     item = conn.execute(
-        "SELECT * FROM inbox_items WHERE id = ? AND recurring_id IS NULL AND insurance_id IS NULL",
+        "SELECT * FROM inbox_items WHERE id = ? AND recurring_id IS NULL AND insurance_id IS NULL "
+        "AND automatch_excluded = 0",
         (inbox_id,),
     ).fetchone()
     if not item or not item["amount"]:
@@ -1208,11 +1209,15 @@ def unmatch_recurring(item_id):
 @app.route("/api/match/<int:inbox_id>/unlink", methods=["POST"])
 def unlink_match(inbox_id):
     """고정지출/보험 "내역" 패널에서 특정 건(이번 달이든 지난 달이든) 매칭만
-    하나 풀어준다. 알림 자체(inbox_items 행)나 status는 그대로 둔다."""
+    하나 풀어준다. 알림 자체(inbox_items 행)나 status는 그대로 둔다.
+    automatch_excluded도 같이 세워서, 자동 매칭(엑셀 재업로드나 "자동 매칭
+    시도" 버튼)이 다음에 또 똑같이 잡아가지 않게 한다 - 해제했는데 매번
+    다시 자동으로 묶이는 문제가 있었음("골프존커머스"가 "골프존"으로 계속
+    재매칭됨). 필요하면 ❓배지로 수동 매칭은 여전히 가능하다."""
     conn = get_conn()
     try:
         conn.execute(
-            "UPDATE inbox_items SET recurring_id = NULL, insurance_id = NULL WHERE id = ?",
+            "UPDATE inbox_items SET recurring_id = NULL, insurance_id = NULL, automatch_excluded = 1 WHERE id = ?",
             (inbox_id,),
         )
         conn.commit()
