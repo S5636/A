@@ -1980,7 +1980,7 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
         b_start_hour = b_end_hour = None
     if b_start_hour is not None and b_end_hour is not None and hour is not None:
         if not (b_start_hour <= hour < b_end_hour):
-            block_reason = f"{b_start_hour}시~{b_end_hour}시 결제만 대상이라 할인 대상이 아님"
+            block_reason = "시간외 결제"
 
     effective_discount_percent = benefit["discount_percent"]
     if benefit["tier_table"] or (benefit["calc_mode"] == "percent_discount" and benefit["percent_tier_table"]):
@@ -1990,7 +1990,7 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
         except ValueError:
             ref_date = None
         if benefit["tier_table"] and card and tier_limit_for_spend(benefit["tier_table"], _perf_spend_for_card(conn, card, ref_date)) == 0:
-            block_reason = block_reason or "그 달 전월실적이 최저 구간에도 못 미쳐서 할인 대상이 아님"
+            block_reason = block_reason or "전월실적 미달"
         if benefit["calc_mode"] == "percent_discount" and benefit["percent_tier_table"] and card:
             tiered_percent = tier_limit_for_spend(benefit["percent_tier_table"], _perf_spend_for_card(conn, card, ref_date))
             if tiered_percent is not None:
@@ -2012,25 +2012,25 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
             )
             category = category_override
             if time_blocked:
-                block_reason = block_reason or "이 업종은 할인 적용 시간대 밖이라 할인 대상이 아님"
+                block_reason = block_reason or "시간외 결제"
         else:
             percent, cap, daily_limit, monthly_limit, monthly_point_cap, category = match_rate_table(
                 merchant, benefit["rate_table"], effective_discount_percent, benefit["per_txn_cap"], hour
             )
             if category == TIME_BLOCKED_LABEL:
-                block_reason = block_reason or "업종은 맞지만 할인 적용 시간대 밖이라 할인 대상이 아님"
+                block_reason = block_reason or "시간외 결제"
                 category = ""
         capped_note = ""
         if category and used_at and not block_reason:
             if daily_limit and _category_usage_count(conn, benefit_id, category, used_at) >= daily_limit:
-                block_reason = f"이 업종은 하루 {daily_limit:g}회 한도를 이미 채워서 할인 대상이 아님"
+                block_reason = "일/월 횟수 초과"
             elif monthly_limit and _category_usage_count(conn, benefit_id, category, used_at, monthly=True) >= monthly_limit:
-                block_reason = f"이 업종은 이번 달 {monthly_limit:g}회 한도를 이미 채워서 할인 대상이 아님"
+                block_reason = "일/월 횟수 초과"
             elif monthly_point_cap:
                 already = _category_month_earned(conn, benefit_id, category, used_at)
                 remaining = max(0, monthly_point_cap - already)
                 if remaining <= 0:
-                    block_reason = f"이 업종은 이번 달 적립 한도 {monthly_point_cap:,.0f}P를 이미 채워서 할인 대상이 아님"
+                    block_reason = "월적립한도 초과"
 
         if block_reason:
             category_label = f"{category} " if category else ""
