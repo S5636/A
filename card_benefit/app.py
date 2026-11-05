@@ -113,6 +113,21 @@ def serialize_inbox(conn):
                 # 키워드가 아예 없는(=구분할 필요 없이 통째로 2배인) 혜택에만 쓴다.
                 matched_doubled = bool(matched_benefit["always_doubled"]) and not matched_benefit["merchant_keywords"]
 
+        if not matched_benefit and card:
+            # 더모아형(change_under_1000)이 아니라, "기본적립"처럼 특정 업종
+            # 구분 없이 전체 결제에 그냥 적용되는 percent_discount 혜택도 있다
+            # (merchant_keywords를 일부러 비워서 "그 외 전부"를 뜻하게 등록한
+            # 경우 - 씨티카드 특별적립/기본적립처럼 업종별 혜택과 전체 기본
+            # 적립이 같이 있는 카드가 그렇다). 더 구체적인 혜택(키워드 있는
+            # 특별적립 등)으로 못 찾았을 때만 이걸 기본값으로 쓴다.
+            percent_catch_all = [
+                b for b in benefits_by_card.get(card["id"], [])
+                if b["calc_mode"] == "percent_discount" and not b["merchant_keywords"]
+            ]
+            if percent_catch_all:
+                matched_benefit = percent_catch_all[0]
+                matched_doubled = False
+
         # 카드사 엑셀의 "이용구분"에 해외/할부라고 명시돼 있으면, 가맹점명으로
         # 유추할 필요 없이 그 자체로 확실한 신호이므로 더모아형(잔돈 적립) 혜택은
         # 무조건 특별적립(2배) 대상으로 본다(안내장 기준: 해외이용, 할부거래는
@@ -2177,12 +2192,28 @@ def bulk_mark_no_benefit():
 
     conn = get_conn()
     try:
+        # card_id를 안 채워주면 전월실적 자동집계(_auto_spend, card_id가 있는
+        # 'assigned'/'no_benefit' 건만 합산)에서 이 건들이 전부 빠진다 - last4로
+        # 카드를 찾을 수 있으면 같이 채워준다(단일 건 처리인 mark_no_benefit은
+        # 모달에서 이미 고른 카드를 받아오지만, 여기는 모달 없이 여러 카드가
+        # 섞인 채로 선택될 수 있어서 항목마다 last4로 직접 찾아야 함).
+        cards_with_code = conn.execute("SELECT id, last4 FROM cards WHERE last4 != ''").fetchall()
         placeholders = ",".join("?" for _ in ids)
-        conn.execute(
-            f"UPDATE inbox_items SET status = 'no_benefit', benefit_id = NULL "
-            f"WHERE id IN ({placeholders}) AND status = 'pending'",
+        items = conn.execute(
+            f"SELECT id, last4, card_id FROM inbox_items WHERE id IN ({placeholders}) AND status = 'pending'",
             ids,
-        )
+        ).fetchall()
+        for item in items:
+            card_id = item["card_id"]
+            if not card_id and item["last4"]:
+                for c in cards_with_code:
+                    if card_codes_match(c["last4"], item["last4"]):
+                        card_id = c["id"]
+                        break
+            conn.execute(
+                "UPDATE inbox_items SET status = 'no_benefit', benefit_id = NULL, card_id = ? WHERE id = ?",
+                (card_id, item["id"]),
+            )
         conn.commit()
     finally:
         conn.close()
