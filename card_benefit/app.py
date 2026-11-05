@@ -261,19 +261,18 @@ def serialize_medical_expenses(conn):
 
 
 def find_suspected_duplicates(conn):
-    """같은 결제가 두 경로(폰 알림 자동수집 + 엑셀 명세서 업로드)로 각각
-    들어와서, 실제로는 같은 결제인데 inbox_items에 행이 두 개로 남아있는
-    경우를 찾아준다. "같은 날짜/비슷한 시각(5분 이내)"이라는 조건은
-    _find_duplicate(엑셀 업로드 시 중복판단)와 완전히 똑같이 쓰되, 금액만
-    10% 이내로 느슨하게 본다(해외결제는 알림 시점 추정환율과 명세서 확정
-    환율이 달라서 완전히 똑같지 않을 수 있고, 국내도 드물게 그럼 - 금액이
-    정확히 같은 건 어차피 _find_duplicate가 이미 걸러줬을 것이므로 여기
-    남아있다는 자체가 금액이 다르다는 신호).
-    "같은 가맹점에 같은 금액이 매일/매번 반복해서 찍히는" 구독성/정액
-    결제(예: LG U+ 소액결제, 스크린골프 등)를 오탐으로 묶지 않도록, 날짜가
-    하루 이상 벌어지거나 둘 다 시각까지 있는데 5분 넘게 떨어진 건 절대
-    묶지 않는다(하루 걸러 반복되는 정액결제가 "의심"에 전부 딸려 들어오는
-    걸 막기 위함)."""
+    """같은 날 같은 가맹점에서 2번 이상 찍힌 알림을 묶어서 보여준다. 두 가지
+    경우를 다 포함한다 - (1) 같은 결제가 두 경로(폰 알림 자동수집 + 엑셀
+    명세서 업로드)로 각각 들어와서 실제로는 한 건인데 행이 두 개로 남은
+    경우(해외결제는 알림 시점 추정환율과 명세서 확정환율이 달라 금액이
+    완전히 똑같지 않을 수 있음), (2) 더모아처럼 "동일 가맹점 1일 1회만
+    적립"인 카드에서 같은 가맹점을 하루에 정말로 여러 번 결제해서, 먼저
+    들어온 것만 적립되고 나머지는 적립 대상에서 막힌 경우(이땐 금액이
+    서로 다른 게 보통이고, 중복 등록이 아니라 그 카드 정책상 원래 둘 다
+    못 받는 게 맞는 상황이다). 금액 비교는 일부러 안 한다 - 어느 쪽이든
+    "같은 날 같은 가맹점"이라는 사실 자체가 확인해볼 가치가 있어서다.
+    날짜가 하루라도 벌어지면 절대 안 묶는다(LG U+ 소액결제처럼 매일 반복
+    찍히는 정액 결제가 전부 딸려 들어오는 걸 막기 위함)."""
     rows = conn.execute(
         "SELECT * FROM inbox_items WHERE status != 'cancelled' AND dup_ignored = 0 "
         "AND merchant != '' AND amount IS NOT NULL ORDER BY occurred_at"
@@ -298,21 +297,9 @@ def find_suspected_duplicates(conn):
             return "혜택 없음 처리됨"
         return "대기 중(미배정)"
 
-    def _ts(s):
-        try:
-            return datetime.strptime(s, "%Y-%m-%d %H:%M:%S") if len(s) > 10 else None
-        except (TypeError, ValueError):
-            return None
-
     def is_pair(a, b):
         if not ((not a["last4"] or not b["last4"]) or card_codes_match(a["last4"], b["last4"])):
             return False
-        base = max(a["amount"] or 0, 1)
-        if abs((b["amount"] or 0) - (a["amount"] or 0)) / base > 0.1:
-            return False
-        ta, tb = _ts(a["occurred_at"]), _ts(b["occurred_at"])
-        if ta and tb:
-            return abs((tb - ta).total_seconds()) <= 300
         return a["occurred_at"][:10] == b["occurred_at"][:10]
 
     by_merchant = defaultdict(list)
