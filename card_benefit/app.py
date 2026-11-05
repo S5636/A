@@ -2435,8 +2435,84 @@ def _repair_xlsx_styles(data):
         return None
 
 
+class _SimpleSheet:
+    """openpyxl Worksheet를 흉내내는 최소한의 어댑터. _import_statement 등
+    기존 코드는 ws.iter_rows(min_row=, max_row=, values_only=True)만 쓰므로
+    그것만 구현하면 HTML표/구버전 xls도 기존 파싱 로직을 그대로 재사용할 수
+    있다."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def iter_rows(self, min_row=1, max_row=None, values_only=True):
+        start = max(min_row - 1, 0)
+        end = max_row if max_row is not None else len(self._rows)
+        for row in self._rows[start:end]:
+            yield tuple(row)
+
+
+class _SimpleWorkbook:
+    def __init__(self, rows):
+        self.active = _SimpleSheet(rows)
+
+
+def _looks_like_html(data):
+    """일부 카드사(씨티 등)는 진짜 엑셀 파일이 아니라, 엑셀에서 연 HTML
+    표를 그대로 .xls 확장자로 내보낸다(파일 내용은 사실 <html>...). 확장자만
+    보고는 구분이 안 돼서 내용으로 판단한다."""
+    head = data[:4096]
+    return head.lstrip()[:5].lower() in (b"<html", b"<!doc") or b"<table" in head.lower()
+
+
+def _load_html_table_workbook(data):
+    """HTML로 찍힌 '엑셀'을 읽는다. <table> 안의 행을 전부 순서대로 이어붙여서
+    한 시트처럼 만든다(보통 표 하나 + 아래에 '총 이용건수/총 이용금액' 같은
+    요약 표가 하나 더 있는데, 요약 표는 날짜/금액 열이 안 맞아서 기존 파싱
+    로직이 알아서 건너뛴다)."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(data, "lxml")
+    rows = []
+    for table in soup.find_all("table"):
+        for tr in table.find_all("tr"):
+            cells = [c.get_text(strip=True) for c in tr.find_all(["td", "th"])]
+            if cells:
+                rows.append(cells)
+    if not rows:
+        raise ValueError("HTML에서 표를 찾지 못했습니다.")
+    return _SimpleWorkbook(rows)
+
+
+def _load_legacy_xls_workbook(data):
+    """진짜 옛날 바이너리 .xls(OLE2) 파일을 읽는다 - openpyxl은 .xlsx만
+    지원해서 이 포맷은 아예 못 연다."""
+    import xlrd
+
+    wb = xlrd.open_workbook(file_contents=data)
+    sheet = wb.sheet_by_index(0)
+    rows = []
+    for r in range(sheet.nrows):
+        row = []
+        for c in range(sheet.ncols):
+            cell = sheet.cell(r, c)
+            if cell.ctype == xlrd.XL_CELL_DATE:
+                try:
+                    dt = xlrd.xldate_as_datetime(cell.value, wb.datemode)
+                    row.append(dt.strftime("%Y-%m-%d") if dt.time().hour == dt.time().minute == 0 else dt.strftime("%Y-%m-%d %H:%M:%S"))
+                except Exception:
+                    row.append(cell.value)
+            else:
+                row.append(cell.value)
+        rows.append(row)
+    return _SimpleWorkbook(rows)
+
+
 def _load_workbook_resilient(file_storage):
     data = file_storage.read()
+    if _looks_like_html(data):
+        return _load_html_table_workbook(data)
+    if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return _load_legacy_xls_workbook(data)
     try:
         return load_workbook(BytesIO(data), data_only=True)
     except Exception:
