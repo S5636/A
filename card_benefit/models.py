@@ -213,6 +213,24 @@ def init_db():
         _ensure_column(conn, "insurances", "card_id", "card_id INTEGER DEFAULT NULL")
         _ensure_column(conn, "recurring_payments", "billing_alias", "billing_alias TEXT DEFAULT ''")
         _ensure_column(conn, "insurances", "billing_alias", "billing_alias TEXT DEFAULT ''")
+
+        # recurring_id/insurance_id는 _ensure_column으로 나중에 추가된 컬럼이라
+        # (예전 DB엔 처음부터 있던 게 아니라서) ON DELETE SET NULL 외래키 제약이
+        # 안 걸려있다 - ALTER TABLE ADD COLUMN으로는 외래키를 못 붙인다. 그래서
+        # 고정지출/보험 항목을 지우면, 그걸 가리키던 알림들의 recurring_id/
+        # insurance_id가 안 지워지고 존재하지 않는 id로 그대로 남는다(고아
+        # 참조). 이러면 그 알림은 recurring_id IS NOT NULL이라 다른 어떤 것과도
+        # 다시 매칭이 안 되는데, 화면 어디에도 안 보여서(참조하는 행 자체가
+        # 없으니) 티도 안 나고 영원히 막혀있게 된다. 매번 시작할 때 이런
+        # 고아 참조를 찾아서 지워준다.
+        conn.execute(
+            "UPDATE inbox_items SET recurring_id = NULL "
+            "WHERE recurring_id IS NOT NULL AND recurring_id NOT IN (SELECT id FROM recurring_payments)"
+        )
+        conn.execute(
+            "UPDATE inbox_items SET insurance_id = NULL "
+            "WHERE insurance_id IS NOT NULL AND insurance_id NOT IN (SELECT id FROM insurances)"
+        )
         conn.commit()
     finally:
         conn.close()

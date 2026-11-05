@@ -359,6 +359,24 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         rp for rp in active_rows
         if not is_variable_amount(rp) and rp[amount_column] == item["amount"] and last4_ok(rp)
     ]
+    if len(amount_matches) > 1 and item["merchant"]:
+        # 금액(+카드)까지 같은 게 두 개 이상이면(예: 서로 다른 구독 두 개가
+        # 우연히 똑같이 9,900원인 경우 - "골프존"과 "카카오 골프"처럼), 가맹점명에
+        # 이름/별칭 단어가 들어있는 쪽으로 좁혀본다. 여기서는 길이 3자 미만인
+        # 짧은 단어는 후보에서 뺀다("카카오 골프"의 "골프"가 "골프존" 가맹점명
+        # 에도 우연히 들어있어서, 2자 기준이면 오히려 둘 다 걸려서 안 좁혀짐).
+        # 그렇게 해서 정확히 하나로 좁혀지면 그걸 쓰고, 안 좁혀지면(둘 다 걸리거나
+        # 하나도 안 걸리면) 그대로 애매한 걸로 둔다.
+        merchant_lower = item["merchant"].lower()
+        narrowed = [
+            rp for rp in amount_matches
+            if any(
+                len(tok) >= 3 and tok.lower() in merchant_lower
+                for tok in _name_tokens(rp[name_column]) + _name_tokens(rp["billing_alias"])
+            )
+        ]
+        if len(narrowed) == 1:
+            amount_matches = narrowed
     if len(amount_matches) == 1:
         conn.execute(f"UPDATE inbox_items SET {fk_column} = ? WHERE id = ?", (amount_matches[0]["id"], inbox_id))
         return True
