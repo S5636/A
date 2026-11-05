@@ -520,14 +520,32 @@ def serialize_loans(conn):
     return result
 
 
+def _display_month_bounds():
+    """쿼리스트링의 ?month=YYYY-MM을 달력 월 경계([시작일, 종료일))로 바꾼다.
+    없거나 형식이 틀리면 None - 그럴 땐 호출하는 쪽에서 카드의 실제 이번 달
+    혜택 사이클(cycle_bounds)을 그대로 쓴다. "한도/잔여"는 항상 진짜 이번 달
+    기준으로 고정하고, 이 함수는 "사용내역 목록"을 과거 달로 돌려볼 때만 쓴다."""
+    display_month = (request.args.get("month") or "").strip()
+    if not re.match(r"^\d{4}-\d{2}$", display_month):
+        return None
+    year, month = map(int, display_month.split("-"))
+    if not (1 <= month <= 12):
+        return None
+    start = date(year, month, 1)
+    end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    return start, end
+
+
 def _serialize_cards(conn):
     cards = conn.execute(
         "SELECT * FROM cards ORDER BY sort_order ASC, id ASC"
     ).fetchall()
+    display_bounds = _display_month_bounds()
 
     result = []
     for card in cards:
         start, end = cycle_bounds(card["reset_day"])
+        log_start, log_end = display_bounds or (start, end)
 
         this_month = current_year_month()
         prev_month = previous_year_month()
@@ -580,7 +598,7 @@ def _serialize_cards(conn):
                    WHERE usage_logs.benefit_id = ?
                    AND usage_logs.used_at >= ? AND usage_logs.used_at < ?
                    ORDER BY usage_logs.used_at DESC, usage_logs.id DESC""",
-                (b["id"], start.isoformat(), end.isoformat()),
+                (b["id"], log_start.isoformat(), log_end.isoformat()),
             ).fetchall()
 
             tiered_limit = tier_limit_for_spend(b["tier_table"], perf_spend)

@@ -12,11 +12,17 @@
 
   let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [] };
   let noBenefitOpen = false;
+  // null = 진짜 이번 달(필터 없음). "YYYY-MM" 문자열이면 카드 탭의 혜택별
+  // "사용내역" 목록만 그 달로 필터링해서 본다(한도/잔여는 항상 진짜 이번 달 기준).
+  let selectedMonth = null;
   const openLogPanels = new Set(); // benefit id 목록 - 펼쳐진 사용내역 기억
   const openMemoPanels = new Set(); // "card-1", "benefit-3" 같은 키 - 펼쳐진 설명 기억
   const openCompactPanels = new Set(); // card id 목록 - "월/연 횟수 혜택" 펼침 기억
 
   async function api(url, options) {
+    if (selectedMonth) {
+      url += (url.includes("?") ? "&" : "?") + "month=" + encodeURIComponent(selectedMonth);
+    }
     const res = await fetch(url, options);
     const data = await res.json();
     if (!res.ok) {
@@ -25,6 +31,45 @@
     }
     return data;
   }
+
+  function currentMonthStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  function shiftMonthStr(ym, delta) {
+    const [y, m] = ym.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  function renderMonthBar() {
+    const ym = selectedMonth || currentMonthStr();
+    const [y, m] = ym.split("-").map(Number);
+    document.getElementById("month-label").textContent = `${y}년 ${m}월`;
+    const isCurrent = !selectedMonth;
+    document.getElementById("month-today").style.display = isCurrent ? "none" : "";
+    document.getElementById("month-bar-hint").style.display = isCurrent ? "none" : "block";
+    document.getElementById("month-next").disabled = isCurrent;
+  }
+
+  document.getElementById("month-prev").addEventListener("click", async () => {
+    selectedMonth = shiftMonthStr(selectedMonth || currentMonthStr(), -1);
+    state = await api("/api/state");
+    render();
+  });
+  document.getElementById("month-next").addEventListener("click", async () => {
+    if (!selectedMonth) return;
+    const next = shiftMonthStr(selectedMonth, 1);
+    selectedMonth = next === currentMonthStr() ? null : next;
+    state = await api("/api/state");
+    render();
+  });
+  document.getElementById("month-today").addEventListener("click", async () => {
+    selectedMonth = null;
+    state = await api("/api/state");
+    render();
+  });
 
   function fmt(n) {
     return Number(n).toLocaleString("ko-KR");
@@ -92,6 +137,7 @@
   function render() {
     const scrollX = window.scrollX;
     const scrollY = window.scrollY;
+    renderMonthBar();
     renderInbox();
     renderNoBenefit();
     renderCards();
