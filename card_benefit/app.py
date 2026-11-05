@@ -56,7 +56,7 @@ def serialize_inbox(conn):
     cards_with_code = conn.execute("SELECT id, name, last4 FROM cards WHERE last4 != ''").fetchall()
     benefits_by_card = {}
     for b in conn.execute(
-        "SELECT id, card_id, name, merchant_keywords, calc_mode, always_doubled FROM benefits"
+        "SELECT id, card_id, name, merchant_keywords, calc_mode, always_doubled, rate_table FROM benefits"
     ):
         benefits_by_card.setdefault(b["card_id"], []).append(b)
 
@@ -82,16 +82,35 @@ def serialize_inbox(conn):
         if not matched_benefit and card and r["usage_type"] and "해외" in r["usage_type"]:
             # 가맹점명만으론 아무 혜택도 안 걸렸는데, 카드사 엑셀의 "이용구분"에
             # "해외"라고 명시돼 있으면(가맹점명 추측이 아니라 확실한 신호) "해외"
-            # 키워드를 등록해둔 혜택으로 바로 잡아준다. 특정 가맹점이 아니라
-            # "해외결제 자체"가 대상인 혜택(예: "Discount Plan+ 해외 5% 결제일
-            # 할인")을 위한 것 - ANTHROPIC처럼 해외 온라인 결제는 가맹점명으로
-            # 업종을 유추할 수가 없어서 이 방법밖에 없다.
+            # 가 대상인 혜택으로 바로 잡아준다. ANTHROPIC처럼 해외 온라인 결제는
+            # 가맹점명으로 업종을 유추할 수가 없어서 이 방법밖에 없다. 먼저
+            # merchant_keywords에 바로 "해외"가 있는 혜택을 찾고, 없으면 업종별
+            # 요율표(rate_table) 안에 "해외:" 카테고리가 있는 혜택(예: Discount
+            # Plan+의 Daily Plan 생활5%-해외)을 찾는다 - 후자는 category를 못
+            # 골라줘도 일단 해당 혜택의 기본 할인율/한도로 계산되는데, 해외
+            # 영역이 그 혜택의 다른 영역들과 할인율·한도가 똑같은 카드라면
+            # 결과값은 어차피 정확하다.
             for b in benefits_by_card.get(card["id"], []):
                 keywords = [k.strip().lower() for k in (b["merchant_keywords"] or "").split(",") if k.strip()]
                 if "해외" in keywords:
                     matched_benefit = b
                     matched_doubled = b["calc_mode"] == "change_under_1000"
                     break
+            if not matched_benefit:
+                for b in benefits_by_card.get(card["id"], []):
+                    if b["calc_mode"] != "percent_discount":
+                        continue
+                    try:
+                        rt_rows = json.loads(b["rate_table"] or "[]")
+                    except (TypeError, ValueError):
+                        continue
+                    if any(
+                        isinstance(row, list) and row and isinstance(row[0], str) and row[0].startswith("해외:")
+                        for row in rt_rows
+                    ):
+                        matched_benefit = b
+                        matched_doubled = False
+                        break
 
         if not matched_benefit and card:
             # 가맹점 키워드로 못 찾았어도, 이 카드에 "잔돈 자동계산"형 혜택이
