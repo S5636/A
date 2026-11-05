@@ -377,7 +377,10 @@ def compute_percent_discount(payment_amount: float, percent: float, per_txn_cap:
     base = payment_amount
     if per_txn_cap and per_txn_cap > 0:
         base = min(base, per_txn_cap)
-    return round(base * percent / 100)
+    # round()가 아니라 버림(절삭)이어야 한다 - 실제 카드사 적립내역과 대조해보니
+    # (예: 8,300원×0.5% = 41.5 → 실제 적립 41P, 15,530원×0.5% = 77.65 → 실제
+    # 77P) round면 42/78로 1P 더 쳐서 실제보다 과대계산됨. 소수점 이하는 그냥 버림.
+    return int(base * percent / 100)
 
 
 def tier_limit_for_spend(tier_table_json: str, spend: float):

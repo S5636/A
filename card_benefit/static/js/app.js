@@ -1700,7 +1700,10 @@
     percent = Number(percent) || 0;
     let base = amount;
     if (cap && cap > 0) base = Math.min(base, cap);
-    return Math.round((base * percent) / 100);
+    // 서버 쪽(compute_percent_discount)과 똑같이 반올림이 아니라 버림 -
+    // 실제 카드사 적립내역과 대조해서 확인된 방식(예: 8,300원×0.5%=41.5 →
+    // 실제 41P, 반올림이면 42P로 미리보기가 실제보다 1원 더 크게 나옴).
+    return Math.floor((base * percent) / 100);
   }
 
   function matchRateTable(merchant, rateTableJson, defaultPercent, defaultCap) {
