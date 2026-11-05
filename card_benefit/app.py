@@ -777,8 +777,6 @@ def _serialize_cards(conn):
                 "logs": [dict(l) for l in logs],
             })
 
-        days_left = (end - date.today()).days
-
         result.append({
             "id": card["id"],
             "name": card["name"],
@@ -796,7 +794,6 @@ def _serialize_cards(conn):
             "perf_excluded_keywords": card["perf_excluded_keywords"],
             "cycle_start": start.isoformat(),
             "cycle_end": (end - timedelta(days=1)).isoformat(),
-            "days_left": days_left,
             "benefits": benefit_list,
             "sort_order": card["sort_order"],
         })
@@ -908,20 +905,21 @@ def update_card(card_id):
     return jsonify(serialize_full())
 
 
-@app.route("/api/cards/<int:card_id>/performance/<year_month>", methods=["GET"])
-def get_performance(card_id, year_month):
-    """특정 달(YYYY-MM)에 수기로 입력해둔 전월실적이 있으면 돌려준다 - 밀린
-    과거 결제를 기록하려고 과거 달의 실적을 입력하는 모달에서, 이미 입력해둔
-    값이 있으면 그걸 보여주기 위함(없으면 total_spend: null)."""
+@app.route("/api/cards/<int:card_id>/performance/<year_month>", methods=["DELETE"])
+def delete_performance(card_id, year_month):
+    """수기로 입력해둔 전월실적을 지워서 자동 계산(받은 알림 합산)으로
+    되돌린다 - 한번 직접 입력하면 계속 그 값이 고정돼서 자동 계산으로
+    돌아갈 방법이 없었음."""
     conn = get_conn()
     try:
-        row = conn.execute(
-            "SELECT total_spend FROM performance WHERE card_id = ? AND year_month = ?",
+        conn.execute(
+            "DELETE FROM performance WHERE card_id = ? AND year_month = ?",
             (card_id, year_month),
-        ).fetchone()
+        )
+        conn.commit()
     finally:
         conn.close()
-    return jsonify({"total_spend": row["total_spend"] if row else None})
+    return jsonify(serialize_full())
 
 
 @app.route("/api/cards/<int:card_id>/performance", methods=["POST"])

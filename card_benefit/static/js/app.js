@@ -1699,9 +1699,16 @@
     const [y, m] = editingPerfYearMonth.split("-").map(Number);
     document.getElementById("perf-modal-title").textContent = `${y}년 ${m}월 실적 직접 수정`;
     document.getElementById("perf-value").value = card.perf_spend || "";
+    document.getElementById("perf-reset").style.display = card.perf_auto ? "none" : "";
     perfModal.classList.add("open");
   }
   document.getElementById("perf-cancel").addEventListener("click", () => perfModal.classList.remove("open"));
+  document.getElementById("perf-reset").addEventListener("click", async () => {
+    if (!confirm("직접 입력한 실적을 지우고 자동 계산(받은 알림 합산)으로 되돌릴까요?")) return;
+    state = await api(`/api/cards/${editingPerfCardId}/performance/${editingPerfYearMonth}`, { method: "DELETE" });
+    perfModal.classList.remove("open");
+    render();
+  });
   document.getElementById("perf-save").addEventListener("click", async () => {
     const total_spend = document.getElementById("perf-value").value;
     if (total_spend === "" || Number(total_spend) < 0) {
