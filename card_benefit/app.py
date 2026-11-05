@@ -81,6 +81,14 @@ def serialize_inbox(conn):
                     matched_doubled = b["calc_mode"] == "change_under_1000"
                     break
 
+        # 더모아 안내장상 "이동통신요금 자동이체"만 특별적립(2배) 대상이고,
+        # "즉시납부"(그때그때 수동으로 낸 것)는 자동이체가 아니라서 2배 대상이
+        # 아니다. 가맹점명 키워드(SKT/KT/LGU+ 등)만 보고는 둘을 구분 못 해서
+        # 즉시납부 건도 2배로 잘못 잡혔었음 - 가맹점명에 "즉시납부"라고 명시돼
+        # 있으면 2배 적용을 취소한다(1배 적립은 그대로 유지).
+        if matched_doubled and "즉시납부" in (r["merchant"] or ""):
+            matched_doubled = False
+
         is_foreign = (r["usage_type"] and "해외" in r["usage_type"]) or is_foreign_merchant(r["merchant"])
         if not matched_benefit and card and is_foreign:
             # 가맹점명만으론 아무 혜택도 안 걸렸는데, 카드사 엑셀의 "이용구분"에
