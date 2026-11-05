@@ -1850,12 +1850,17 @@ def _category_month_earned(conn, benefit_id, category, used_at):
     return row["total"]
 
 
-def _perf_spend_for_card(conn, card):
+def _perf_spend_for_card(conn, card, ref_date=None):
     """카드의 "전월실적" 합계 (_serialize_cards와 같은 기준: 수동 입력이 있으면
     그걸 쓰고, 없으면 지난달 확인된 결제 알림 합계에서 실적 제외 항목을 뺀 자동
-    집계). 구간표(tier_table)가 있는 혜택이 전월실적 미달로 이번 달 혜택 대상이
-    아닌지 판단할 때 재사용한다."""
-    prev_month = previous_year_month()
+    집계). 구간표(tier_table)가 있는 혜택이 전월실적 미달로 혜택 대상이 아닌지
+    판단할 때 재사용한다.
+
+    ref_date를 넘기면 "오늘" 대신 그 날짜가 속한 달의 전월실적을 본다 - 밀린
+    과거 결제(예: 8월 거래)를 지금(11월) 기록할 때, "오늘 기준 지난달(10월)"
+    실적으로 판단해버리면 엉뚱한 기준이 된다. 그 결제가 일어난 달(8월) 기준
+    지난달(7월) 실적으로 판단해야 맞다."""
+    prev_month = previous_year_month(ref_date)
     manual_row = conn.execute(
         "SELECT total_spend FROM performance WHERE card_id = ? AND year_month = ?",
         (card["id"], prev_month),
@@ -1887,10 +1892,14 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
     effective_discount_percent = benefit["discount_percent"]
     if benefit["tier_table"] or (benefit["calc_mode"] == "percent_discount" and benefit["percent_tier_table"]):
         card = conn.execute("SELECT * FROM cards WHERE id = ?", (benefit["card_id"],)).fetchone()
-        if benefit["tier_table"] and card and tier_limit_for_spend(benefit["tier_table"], _perf_spend_for_card(conn, card)) == 0:
-            return None, None, None, "전월실적이 최저 구간에도 못 미쳐서 이번 달은 이 혜택을 받을 수 없습니다."
+        try:
+            ref_date = datetime.strptime(used_at, "%Y-%m-%d").date() if used_at else None
+        except ValueError:
+            ref_date = None
+        if benefit["tier_table"] and card and tier_limit_for_spend(benefit["tier_table"], _perf_spend_for_card(conn, card, ref_date)) == 0:
+            return None, None, None, "그 달 전월실적이 최저 구간에도 못 미쳐서 이 혜택을 받을 수 없습니다."
         if benefit["calc_mode"] == "percent_discount" and benefit["percent_tier_table"] and card:
-            tiered_percent = tier_limit_for_spend(benefit["percent_tier_table"], _perf_spend_for_card(conn, card))
+            tiered_percent = tier_limit_for_spend(benefit["percent_tier_table"], _perf_spend_for_card(conn, card, ref_date))
             if tiered_percent is not None:
                 effective_discount_percent = tiered_percent
 
