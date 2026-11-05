@@ -382,12 +382,18 @@ def _safe_name_tokens(name):
     중에 매칭 대상을 찾을 때 쓴다. 이때는 _name_tokens보다 훨씬 엄격해야
     한다 - 3자 미만 단어와 대기업 집단명(카카오/삼성/LG 등)은 그 자체로
     아무것도 특정하지 못해서, 금액 검증 없이 쓰면 완전히 상관없는 가맹점을
-    잡아버린다("카카오 골프"가 "카카오T택시"를 가져가버린 사례)."""
+    잡아버린다("카카오 골프"가 "카카오T택시"를 가져가버린 사례). "101호"처럼
+    숫자+호/동/단/층으로만 된 토큰도 같은 이유로 뺀다 - 아파트 전기세 두
+    개를 "101호"/"102호"로 구분하려고 이름에 넣어둔 건데, 전혀 다른 청구서
+    (예: "중산마을1단 0103동0101호" 관리비)의 동·호수 표기에 우연히 "101호"가
+    그대로 들어있어서 가맹점명이 하나도 안 겹치는 별개 결제가 잘못 묶인
+    실제 사고가 있었다."""
     tokens = re.split(r"[\s/()·\-]+", name or "")
     return [
         t for t in tokens
         if len(t) >= 3 and t.lower() not in _NAME_TOKEN_STOPWORDS
         and t.lower() not in _CONGLOMERATE_STOPWORDS
+        and not re.match(r"^\d+(호|동|단|층)$", t)
     ]
 
 
@@ -457,13 +463,15 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
 
     def is_variable_amount(rp):
         # 도시가스/전기세처럼 매달 청구 금액이 바뀌는 고정지출(카테고리
-        # "주거/관리비")은 등록된 amount가 그냥 마지막으로 확인한 예시값일
-        # 뿐이라, 그 숫자와 우연히 같은 아무 결제(예: 주유소 3,000원)가
-        # 금액만 보고 잘못 묶이면 안 된다. 그래서 이런 항목은 금액 매칭
-        # 후보에서 아예 빼고 이름/별칭 매칭만 쓴다. (insurances 테이블에는
-        # category 컬럼이 없으므로 보험료는 이 예외 대상이 아니다.)
+        # "주거/관리비", 또는 전기세를 따로 모아둔 "마귀" 분류)은 등록된
+        # amount가 그냥 마지막으로 확인한 예시값일 뿐이라, 그 숫자와 우연히
+        # 같은 아무 결제(예: "우주정거장" 3,000원이 "HL 삼천리 도시가스"의
+        # 등록 금액 3,000원과 우연히 같아서 잘못 묶인 실제 사고)가 금액만
+        # 보고 잘못 묶이면 안 된다. 그래서 이런 항목은 금액 매칭 후보에서
+        # 아예 빼고 이름/별칭 매칭만 쓴다. (insurances 테이블에는 category
+        # 컬럼이 없으므로 보험료는 이 예외 대상이 아니다.)
         try:
-            return rp["category"] == "주거/관리비"
+            return rp["category"] in ("주거/관리비", "마귀")
         except (IndexError, KeyError):
             return False
 
@@ -1279,33 +1287,55 @@ def delete_recurring_payment(item_id):
     return jsonify(serialize_full())
 
 
+def _match_candidates(conn, table, item_id, name_column):
+    """아직 다른 고정지출/보험에 안 묶인 알림들을 후보로 보여준다. 이름/별칭
+    (billing_alias)에 들어있는 단어가 가맹점명에 포함되는 후보를 맨 위로
+    올려서("이름 일치" 표시) 먼저 보이게 하고, 나머지는 최근 것부터 채운다.
+    예전엔 그냥 "최근 100건"만 보여줘서, 알림이 많이 쌓인 상태에서 한 달에
+    한 번만 결제되는 항목(카드/계좌 알림에 다른 이름으로 찍히는 경우도
+    billing_alias를 등록해두는 이유가 바로 이거다)은 최근 100건 안에 아예
+    안 들어가 후보에서 완전히 안 보이는 문제가 있었다."""
+    card_label_for = _card_label_matcher(conn)
+    rp = conn.execute(f"SELECT {name_column}, billing_alias FROM {table} WHERE id = ?", (item_id,)).fetchone()
+    tokens = []
+    if rp:
+        tokens = [t.lower() for t in (_safe_name_tokens(rp[name_column]) + _safe_name_tokens(rp["billing_alias"]))]
+
+    def is_name_match(merchant):
+        merchant_lower = (merchant or "").lower()
+        return bool(tokens) and any(tok in merchant_lower for tok in tokens)
+
+    rows = conn.execute(
+        """SELECT * FROM inbox_items
+           WHERE recurring_id IS NULL AND insurance_id IS NULL
+           ORDER BY occurred_at DESC"""
+    ).fetchall()
+    matched = [r for r in rows if is_name_match(r["merchant"])]
+    others = [r for r in rows if not is_name_match(r["merchant"])]
+    picked = (matched + others)[:150]
+    return [
+        {
+            "id": r["id"],
+            "amount": r["amount"],
+            "merchant": r["merchant"],
+            "last4": r["last4"],
+            "card_label": card_label_for(r["last4"]),
+            "occurred_at": r["occurred_at"],
+            "status": r["status"],
+            "name_matched": is_name_match(r["merchant"]),
+        }
+        for r in picked
+    ]
+
+
 @app.route("/api/recurring/<int:item_id>/match-candidates", methods=["GET"])
 def recurring_match_candidates(item_id):
-    """아직 다른 고정지출/보험에 안 묶인 알림들을 후보로 보여준다. 이번 달로
-    제한하면 엑셀로 지난 달치를 올렸을 때 정작 고를 후보가 하나도 안 보이는
-    문제가 있어서, 달 상관없이 최근 것부터 보여준다(개수만 넉넉하게 제한).
-    혜택배정 큐(status)는 전혀 건드리지 않으므로, 이미 혜택에 배정됐거나
-    "혜택 없음" 처리된 알림도 후보에 포함된다(고정지출 확인은 별개 작업)."""
+    """고정지출용 - _match_candidates 참고. 혜택배정 큐(status)는 전혀
+    건드리지 않으므로, 이미 혜택에 배정됐거나 "혜택 없음" 처리된 알림도
+    후보에 포함된다(고정지출 확인은 별개 작업)."""
     conn = get_conn()
     try:
-        card_label_for = _card_label_matcher(conn)
-        rows = conn.execute(
-            """SELECT * FROM inbox_items
-               WHERE recurring_id IS NULL AND insurance_id IS NULL
-               ORDER BY occurred_at DESC LIMIT 100"""
-        ).fetchall()
-        return jsonify([
-            {
-                "id": r["id"],
-                "amount": r["amount"],
-                "merchant": r["merchant"],
-                "last4": r["last4"],
-                "card_label": card_label_for(r["last4"]),
-                "occurred_at": r["occurred_at"],
-                "status": r["status"],
-            }
-            for r in rows
-        ])
+        return jsonify(_match_candidates(conn, "recurring_payments", item_id, "name"))
     finally:
         conn.close()
 
@@ -1555,29 +1585,10 @@ def delete_insurance(item_id):
 
 @app.route("/api/insurances/<int:item_id>/match-candidates", methods=["GET"])
 def insurance_match_candidates(item_id):
-    """아직 다른 보험/고정지출에 안 묶인 알림들을 후보로 보여준다. 이번 달로
-    제한하지 않고 달 상관없이 최근 것부터 보여준다(개수만 넉넉하게 제한) -
-    엑셀로 지난 달치를 올렸을 때도 후보로 고를 수 있어야 하므로."""
+    """보험용 - _match_candidates 참고."""
     conn = get_conn()
     try:
-        card_label_for = _card_label_matcher(conn)
-        rows = conn.execute(
-            """SELECT * FROM inbox_items
-               WHERE insurance_id IS NULL AND recurring_id IS NULL
-               ORDER BY occurred_at DESC LIMIT 100"""
-        ).fetchall()
-        return jsonify([
-            {
-                "id": r["id"],
-                "amount": r["amount"],
-                "merchant": r["merchant"],
-                "last4": r["last4"],
-                "card_label": card_label_for(r["last4"]),
-                "occurred_at": r["occurred_at"],
-                "status": r["status"],
-            }
-            for r in rows
-        ])
+        return jsonify(_match_candidates(conn, "insurances", item_id, "product_name"))
     finally:
         conn.close()
 

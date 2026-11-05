@@ -1224,7 +1224,7 @@
       <label class="match-candidate-row">
         <input type="checkbox" class="match-candidate-check" data-id="${c.id}">
         <span>
-          ${fmt(c.amount)}원${c.merchant ? " · " + escapeHtml(c.merchant) : ""}${c.card_label ? " · " + escapeHtml(c.card_label) : ""}${statusLabel[c.status] || ""}<br>
+          ${c.name_matched ? '<span style="color:var(--good);font-weight:700;">이름일치 </span>' : ""}${fmt(c.amount)}원${c.merchant ? " · " + escapeHtml(c.merchant) : ""}${c.card_label ? " · " + escapeHtml(c.card_label) : ""}${statusLabel[c.status] || ""}<br>
           <span style="font-size:11px;color:var(--text-muted);">${c.occurred_at}</span>
         </span>
       </label>
