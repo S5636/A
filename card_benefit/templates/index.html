@@ -278,6 +278,10 @@
       <textarea id="benefit-tiers" rows="2" placeholder="예: [[400000,5000],[800000,10000],[1200000,15000],[1800000,20000]]"></textarea>
       <small>[[전월실적기준금액,그때한도], ...] 형태의 JSON. 입력하면 위 "월 한도" 대신 카드의 지난달(전월) 실적에 맞는 한도가 자동 계산됩니다. 모르면 비워두세요.</small>
     </label>
+    <label id="benefit-percent-tiers-row" style="display:none;">전월실적 구간별 자동 적립률/할인율 (고급, 선택)
+      <textarea id="benefit-percent-tiers" rows="2" placeholder="예: [[300000,0.5],[700000,0.75],[1000000,1.25],[2000000,1.5]]"></textarea>
+      <small>[[전월실적기준금액,그때%], ...] 형태의 JSON. 카드 기본적립처럼 실적 구간마다 적립률 자체가 달라질 때 씁니다(한도가 아니라 %가 바뀌는 경우). 입력하면 위 "기본 할인율"은 무시되고 지난달 실적에 맞는 %가 자동 적용됩니다. 모르면 비워두세요.</small>
+    </label>
     <label>메모 (선택)
       <textarea id="benefit-memo" rows="2" placeholder="적용 조건 등"></textarea>
     </label>

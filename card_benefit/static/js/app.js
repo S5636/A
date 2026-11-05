@@ -312,7 +312,7 @@
     inboxCount.textContent = items.length ? `${items.length}건` : "";
     const inboxActions = [
       {
-        label: "선택 혜택없음 처리",
+        label: "혜택X",
         onAction: async (selectedIds) => {
           if (!confirm(`${selectedIds.length}건을 "혜택없음 처리 내역"으로 옮길까요?`)) return false;
           state = await api("/api/inbox/bulk-no-benefit", {
@@ -324,7 +324,7 @@
         },
       },
       {
-        label: "선택 삭제",
+        label: "삭제",
         onAction: async (selectedIds) => {
           if (!confirm(`${selectedIds.length}건을 완전히 삭제할까요? 되돌릴 수 없습니다.`)) return false;
           state = await api("/api/inbox/bulk-delete", {
@@ -366,7 +366,7 @@
     noBenefitList.style.display = noBenefitOpen ? "flex" : "none";
     const noBenefitActions = [
       {
-        label: "선택 삭제",
+        label: "삭제",
         onAction: async (selectedIds) => {
           if (!confirm(`${selectedIds.length}건을 완전히 삭제할까요? 되돌릴 수 없습니다.`)) return false;
           state = await api("/api/inbox/bulk-delete", {
@@ -1514,7 +1514,7 @@
 
     const medicalActions = [
       {
-        label: "선택 제외(병원비 아님)",
+        label: "제외(병원비아님)",
         onAction: async (selectedIds) => {
           state = await api("/api/medical-expenses/bulk-exclude", {
             method: "POST",
@@ -1626,6 +1626,7 @@
     document.getElementById("benefit-percent-row").style.display = show;
     document.getElementById("benefit-cap-row").style.display = show;
     document.getElementById("benefit-rate-table-row").style.display = show;
+    document.getElementById("benefit-percent-tiers-row").style.display = show;
     document.getElementById("benefit-always-doubled-row").style.display = mode === "change_under_1000" ? "flex" : "none";
   }
   document.getElementById("benefit-calc-mode").addEventListener("change", updateBenefitCalcFieldsUI);
@@ -1638,11 +1639,12 @@
     document.getElementById("benefit-limit").value = benefit ? benefit.limit_value : "";
     document.getElementById("benefit-calc-mode").value = benefit ? benefit.calc_mode : "raw";
     document.getElementById("benefit-always-doubled").checked = !!(benefit && benefit.always_doubled);
-    document.getElementById("benefit-percent").value = benefit && benefit.discount_percent ? benefit.discount_percent : "";
+    document.getElementById("benefit-percent").value = benefit && benefit.discount_percent_raw ? benefit.discount_percent_raw : "";
     document.getElementById("benefit-cap").value = benefit && benefit.per_txn_cap ? benefit.per_txn_cap : "";
     document.getElementById("benefit-rate-table").value = benefit ? benefit.rate_table : "";
     document.getElementById("benefit-keywords").value = benefit ? benefit.merchant_keywords : "";
     document.getElementById("benefit-tiers").value = benefit ? benefit.tier_table : "";
+    document.getElementById("benefit-percent-tiers").value = benefit ? benefit.percent_tier_table : "";
     document.getElementById("benefit-memo").value = benefit ? benefit.memo : "";
     updateBenefitCalcFieldsUI();
     benefitModal.classList.add("open");
@@ -1660,11 +1662,13 @@
       rate_table: document.getElementById("benefit-rate-table").value.trim(),
       merchant_keywords: document.getElementById("benefit-keywords").value.trim(),
       tier_table: document.getElementById("benefit-tiers").value.trim(),
+      percent_tier_table: document.getElementById("benefit-percent-tiers").value.trim(),
       memo: document.getElementById("benefit-memo").value.trim(),
     };
     if (!payload.name) { alert("혜택 이름을 입력하세요."); return; }
-    if (payload.calc_mode === "percent_discount" && (!payload.discount_percent || Number(payload.discount_percent) <= 0)) {
-      alert("기본 할인율(%)을 입력하세요.");
+    if (payload.calc_mode === "percent_discount" && !payload.percent_tier_table
+        && (!payload.discount_percent || Number(payload.discount_percent) <= 0)) {
+      alert("기본 할인율(%)을 입력하거나, 전월실적 구간별 적립률을 입력하세요.");
       return;
     }
     const url = editingBenefit.benefitId

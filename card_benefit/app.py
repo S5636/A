@@ -682,6 +682,17 @@ def _serialize_cards(conn):
                         for c in categories
                     ]
 
+            # "기본적립"처럼 한도가 아니라 적립률(%) 자체가 전월실적 구간별로
+            # 바뀌는 혜택은 percent_tier_table에 [[기준금액,%],...]로 등록해둔다.
+            # 등록돼 있으면 "기본 할인율" 고정값 대신 이걸로 계산한 %를 쓴다
+            # (tier_limit_for_spend는 한도/퍼센트 구분 없이 그냥 구간表 조회라
+            # 그대로 재사용 가능 - 최저 구간 미달이면 0 돌려줌).
+            effective_discount_percent = b["discount_percent"]
+            if b["calc_mode"] == "percent_discount" and b["percent_tier_table"]:
+                tiered_percent = tier_limit_for_spend(b["percent_tier_table"], perf_spend)
+                if tiered_percent is not None:
+                    effective_discount_percent = tiered_percent
+
             benefit_list.append({
                 "id": b["id"],
                 "card_id": b["card_id"],
@@ -691,10 +702,12 @@ def _serialize_cards(conn):
                 "unlimited": unlimited,
                 "tiered": tiered_limit is not None,
                 "tier_table": b["tier_table"],
+                "percent_tier_table": b["percent_tier_table"],
                 "memo": b["memo"],
                 "merchant_keywords": b["merchant_keywords"],
                 "calc_mode": b["calc_mode"],
-                "discount_percent": b["discount_percent"],
+                "discount_percent": effective_discount_percent,
+                "discount_percent_raw": b["discount_percent"],
                 "per_txn_cap": b["per_txn_cap"],
                 "rate_table": b["rate_table"],
                 "category_usage": category_usage,
@@ -1675,6 +1688,10 @@ def create_benefit(card_id):
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     try:
+        percent_tier_table = _clean_tier_table(data.get("percent_tier_table"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    try:
         rate_table = _clean_rate_table(data.get("rate_table"))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -1690,8 +1707,8 @@ def create_benefit(card_id):
         ).fetchone()["m"]
         conn.execute(
             """INSERT INTO benefits (card_id, name, limit_type, limit_value, memo, merchant_keywords, tier_table,
-               calc_mode, discount_percent, per_txn_cap, rate_table, always_doubled, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               calc_mode, discount_percent, per_txn_cap, rate_table, always_doubled, sort_order, percent_tier_table)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 card_id, name, limit_type, limit_value,
                 (data.get("memo") or "").strip(),
@@ -1703,6 +1720,7 @@ def create_benefit(card_id):
                 rate_table,
                 always_doubled,
                 max_order + 1,
+                percent_tier_table,
             ),
         )
         conn.commit()
@@ -1740,6 +1758,10 @@ def update_benefit(benefit_id):
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
         try:
+            percent_tier_table = _clean_tier_table(data.get("percent_tier_table", b["percent_tier_table"]))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        try:
             rate_table = _clean_rate_table(data.get("rate_table", b["rate_table"]))
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
@@ -1753,7 +1775,7 @@ def update_benefit(benefit_id):
         conn.execute(
             """UPDATE benefits SET name = ?, limit_type = ?, limit_value = ?, memo = ?, merchant_keywords = ?,
                tier_table = ?, calc_mode = ?, discount_percent = ?, per_txn_cap = ?, rate_table = ?,
-               always_doubled = ?, memo_edited_by_user = ? WHERE id = ?""",
+               always_doubled = ?, memo_edited_by_user = ?, percent_tier_table = ? WHERE id = ?""",
             (
                 name, limit_type, limit_value,
                 new_memo,
@@ -1765,6 +1787,7 @@ def update_benefit(benefit_id):
                 rate_table,
                 always_doubled,
                 memo_edited_by_user,
+                percent_tier_table,
                 benefit_id,
             ),
         )
@@ -1861,10 +1884,15 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
     category_override가 있으면(네이버페이/토스페이처럼 가맹점명으로 업종을 알 수
     없어서 사용자가 직접 고른 경우) 가맹점명 매칭 대신 그 업종 값을 그대로 쓴다.
     """
-    if benefit["tier_table"]:
+    effective_discount_percent = benefit["discount_percent"]
+    if benefit["tier_table"] or (benefit["calc_mode"] == "percent_discount" and benefit["percent_tier_table"]):
         card = conn.execute("SELECT * FROM cards WHERE id = ?", (benefit["card_id"],)).fetchone()
-        if card and tier_limit_for_spend(benefit["tier_table"], _perf_spend_for_card(conn, card)) == 0:
+        if benefit["tier_table"] and card and tier_limit_for_spend(benefit["tier_table"], _perf_spend_for_card(conn, card)) == 0:
             return None, None, None, "전월실적이 최저 구간에도 못 미쳐서 이번 달은 이 혜택을 받을 수 없습니다."
+        if benefit["calc_mode"] == "percent_discount" and benefit["percent_tier_table"] and card:
+            tiered_percent = tier_limit_for_spend(benefit["percent_tier_table"], _perf_spend_for_card(conn, card))
+            if tiered_percent is not None:
+                effective_discount_percent = tiered_percent
 
     if benefit["calc_mode"] == "change_under_1000":
         doubled = doubled or bool(benefit["always_doubled"])
@@ -1877,12 +1905,12 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
     if benefit["calc_mode"] == "percent_discount":
         if category_override:
             percent, cap, daily_limit, monthly_limit, monthly_point_cap = rate_table_entry_by_label(
-                benefit["rate_table"], category_override, benefit["discount_percent"], benefit["per_txn_cap"]
+                benefit["rate_table"], category_override, effective_discount_percent, benefit["per_txn_cap"]
             )
             category = category_override
         else:
             percent, cap, daily_limit, monthly_limit, monthly_point_cap, category = match_rate_table(
-                merchant, benefit["rate_table"], benefit["discount_percent"], benefit["per_txn_cap"]
+                merchant, benefit["rate_table"], effective_discount_percent, benefit["per_txn_cap"]
             )
         capped_note = ""
         if category and used_at:
