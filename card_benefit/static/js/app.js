@@ -30,10 +30,8 @@
     el.style.borderColor = hexToRgba(color, 0.22);
   }
 
-  let state = {
-    cards: [], real_month_summary: { earn: 0, cashback: 0, total_spend: 0 },
-    inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [],
-  };
+  let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [] };
+  let inboxOpen = false;
   let noBenefitOpen = false;
   // null = 진짜 이번 달(필터 없음). "YYYY-MM" 문자열이면 카드 탭의 "사용내역"
   // 목록뿐 아니라 한도/잔여/전월실적까지 전부 그 달 기준으로 같이 바뀐다.
@@ -191,16 +189,26 @@
     })
   );
 
-  // ---- 최상단 이번 달 적립/캐시백/혜택률 합계 ----
+  // ---- 최상단 적립/캐시백/혜택률 합계 ----
   function renderMonthlySummary() {
     const section = document.getElementById("monthly-summary");
-    // 월 선택 바를 과거 달로 옮겨도 이 요약 3박스는 항상 "진짜 지금 이번 달"
-    // 기준이어야 하므로, state.cards(월 선택 바 기준)가 아니라 서버가 항상
-    // 실제 이번 달로 따로 계산해서 주는 real_month_summary를 쓴다.
-    const { earn, cashback, total_spend: totalSpend } = state.real_month_summary || { earn: 0, cashback: 0, total_spend: 0 };
+    // 카드탭 전체와 마찬가지로 이 요약 3박스도 상단 월 선택 바를 그대로
+    // 따라간다(값은 state.cards에서, 라벨도 selectedMonth 기준으로 같이
+    // 바뀜) - 과거 달을 보고 있는데 라벨만 "11월"로 고정돼 있으면 안 되므로.
+    let earn = 0;
+    let cashback = 0;
+    let totalSpend = 0;
+    state.cards.forEach((card) => {
+      totalSpend += card.this_month_spend || 0;
+      card.benefits.forEach((b) => {
+        if (b.calc_mode === "change_under_1000") earn += b.used || 0;
+        else if (b.calc_mode === "percent_discount") cashback += b.used || 0;
+      });
+    });
     const rate = totalSpend > 0 ? ((earn + cashback) / totalSpend * 100) : 0;
     section.style.display = state.cards.length ? "flex" : "none";
-    const monthLabel = `${new Date().getMonth() + 1}월`;
+    const activeMonth = selectedMonth || currentMonthStr();
+    const monthLabel = `${Number(activeMonth.split("-")[1])}월`;
     document.getElementById("summary-earn-label").textContent = `${monthLabel} 적립`;
     document.getElementById("summary-cashback-label").textContent = `${monthLabel} 할인·캐시백`;
     document.getElementById("summary-earn-value").textContent = `₩${fmt(earn)}`;
@@ -336,6 +344,7 @@
     const ids = items.map((it) => it.id);
     inboxSection.style.display = items.length ? "block" : "none";
     inboxCount.textContent = items.length ? `${items.length}건` : "";
+    inboxList.style.display = inboxOpen ? "flex" : "none";
     const inboxActions = [
       {
         label: "혜택X",
@@ -382,6 +391,10 @@
     );
     wireBulkBar(inboxList, "inbox", ids, inboxActions);
   }
+  document.getElementById("inbox-toggle").addEventListener("click", () => {
+    inboxOpen = !inboxOpen;
+    render();
+  });
 
   // ---- 혜택 없음 처리 내역 ----
   function renderNoBenefit() {
