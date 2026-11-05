@@ -199,6 +199,11 @@ def init_db():
         _ensure_column(conn, "benefits", "always_doubled", "always_doubled INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "benefits", "memo_edited_by_user", "memo_edited_by_user INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "benefits", "percent_tier_table", "percent_tier_table TEXT DEFAULT ''")
+        # 혜택 전체에 거는 시간대 조건(업종별 요율표 없이 단일 할인율인 혜택용 -
+        # 예: LADY CLASSIC "브런치 할인"은 오전 11시~오후 2시만 적용). 업종별로
+        # 시간대가 다르면(Time Plan DAY/NIGHT처럼) rate_table의 entry[6]/[7]을 쓴다.
+        _ensure_column(conn, "benefits", "start_hour", "start_hour INTEGER")
+        _ensure_column(conn, "benefits", "end_hour", "end_hour INTEGER")
         _ensure_column(conn, "inbox_items", "approval_no", "approval_no TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "usage_type", "usage_type TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "source", "source TEXT DEFAULT ''")

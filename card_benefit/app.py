@@ -573,9 +573,11 @@ def serialize_loans(conn):
 
 def _display_month_bounds():
     """쿼리스트링의 ?month=YYYY-MM을 달력 월 경계([시작일, 종료일))로 바꾼다.
-    없거나 형식이 틀리면 None - 그럴 땐 호출하는 쪽에서 카드의 실제 이번 달
-    혜택 사이클(cycle_bounds)을 그대로 쓴다. "한도/잔여"는 항상 진짜 이번 달
-    기준으로 고정하고, 이 함수는 "사용내역 목록"을 과거 달로 돌려볼 때만 쓴다."""
+    없거나 형식이 틀리면 None. 상단 월 선택 바에서 과거/미래 달을 고르면
+    "한도/잔여/전월실적"까지 전부 그 달 기준으로 같이 바뀐다(진짜 "그 달엔
+    어떤 상태였는지"를 그대로 보여주기 위함 - 예전엔 사용내역 목록만 과거
+    달로 바뀌고 한도는 항상 "진짜 오늘" 기준이라 헷갈린다는 피드백으로
+    바꿈)."""
     display_month = (request.args.get("month") or "").strip()
     if not re.match(r"^\d{4}-\d{2}$", display_month):
         return None
@@ -592,14 +594,18 @@ def _serialize_cards(conn):
         "SELECT * FROM cards ORDER BY sort_order ASC, id ASC"
     ).fetchall()
     display_bounds = _display_month_bounds()
+    # 월 선택 바에서 고른 달이 있으면 그 달 1일을 기준일로 써서 카드 사이클
+    # (reset_day가 1이 아닌 카드도 있음)/전월실적까지 전부 그 달 기준으로
+    # 계산한다. 없으면 None = 평소처럼 진짜 오늘 기준.
+    ref_date = display_bounds[0] if display_bounds else None
 
     result = []
     for card in cards:
-        start, end = cycle_bounds(card["reset_day"])
-        log_start, log_end = display_bounds or (start, end)
+        start, end = cycle_bounds(card["reset_day"], ref_date)
+        log_start, log_end = start, end
 
-        this_month = current_year_month()
-        prev_month = previous_year_month()
+        this_month = current_year_month(ref_date)
+        prev_month = previous_year_month(ref_date)
         perf_threshold = card["perf_threshold"] or 0
 
         # 실적은 손으로 입력할 필요 없이, 그동안 받은 결제 알림(배정됐거나
@@ -730,6 +736,8 @@ def _serialize_cards(conn):
                 "discount_percent_raw": b["discount_percent"],
                 "per_txn_cap": b["per_txn_cap"],
                 "rate_table": b["rate_table"],
+                "start_hour": b["start_hour"],
+                "end_hour": b["end_hour"],
                 "category_usage": category_usage,
                 "always_doubled": bool(b["always_doubled"]),
                 "used": used,
@@ -1732,6 +1740,14 @@ def create_benefit(card_id):
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     always_doubled = 1 if data.get("always_doubled") else 0
+    try:
+        start_hour = int(data.get("start_hour")) if data.get("start_hour") not in (None, "") else None
+    except (TypeError, ValueError):
+        start_hour = None
+    try:
+        end_hour = int(data.get("end_hour")) if data.get("end_hour") not in (None, "") else None
+    except (TypeError, ValueError):
+        end_hour = None
 
     conn = get_conn()
     try:
@@ -1743,8 +1759,9 @@ def create_benefit(card_id):
         ).fetchone()["m"]
         conn.execute(
             """INSERT INTO benefits (card_id, name, limit_type, limit_value, memo, merchant_keywords, tier_table,
-               calc_mode, discount_percent, per_txn_cap, rate_table, always_doubled, sort_order, percent_tier_table)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               calc_mode, discount_percent, per_txn_cap, rate_table, always_doubled, sort_order, percent_tier_table,
+               start_hour, end_hour)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 card_id, name, limit_type, limit_value,
                 (data.get("memo") or "").strip(),
@@ -1757,6 +1774,8 @@ def create_benefit(card_id):
                 always_doubled,
                 max_order + 1,
                 percent_tier_table,
+                start_hour,
+                end_hour,
             ),
         )
         conn.commit()
@@ -1807,11 +1826,20 @@ def update_benefit(benefit_id):
         # 이 표시가 있어야 update.py가 나중에 안내장 기준 설명으로 덮어쓰지 않고
         # 사용자가 쓴 내용을 지켜준다.
         memo_edited_by_user = 1 if new_memo != (b["memo"] or "") else b["memo_edited_by_user"]
+        try:
+            start_hour = int(data.get("start_hour", b["start_hour"])) if data.get("start_hour", b["start_hour"]) not in (None, "") else None
+        except (TypeError, ValueError):
+            start_hour = b["start_hour"]
+        try:
+            end_hour = int(data.get("end_hour", b["end_hour"])) if data.get("end_hour", b["end_hour"]) not in (None, "") else None
+        except (TypeError, ValueError):
+            end_hour = b["end_hour"]
 
         conn.execute(
             """UPDATE benefits SET name = ?, limit_type = ?, limit_value = ?, memo = ?, merchant_keywords = ?,
                tier_table = ?, calc_mode = ?, discount_percent = ?, per_txn_cap = ?, rate_table = ?,
-               always_doubled = ?, memo_edited_by_user = ?, percent_tier_table = ? WHERE id = ?""",
+               always_doubled = ?, memo_edited_by_user = ?, percent_tier_table = ?, start_hour = ?, end_hour = ?
+               WHERE id = ?""",
             (
                 name, limit_type, limit_value,
                 new_memo,
@@ -1824,6 +1852,8 @@ def update_benefit(benefit_id):
                 always_doubled,
                 memo_edited_by_user,
                 percent_tier_table,
+                start_hour,
+                end_hour,
                 benefit_id,
             ),
         )
@@ -1935,6 +1965,17 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
             hour = int(occurred_at[11:13])
         except ValueError:
             hour = None
+
+    # 혜택 전체에 거는 시간대 조건(업종별 요율표 없이 단일 할인율인 혜택용 -
+    # LADY CLASSIC "브런치 할인"처럼 "오전 11시~오후 2시만" 적용되는 경우).
+    try:
+        b_start_hour, b_end_hour = benefit["start_hour"], benefit["end_hour"]
+    except (IndexError, KeyError):
+        b_start_hour = b_end_hour = None
+    if b_start_hour is not None and b_end_hour is not None and hour is not None:
+        if not (b_start_hour <= hour < b_end_hour):
+            return None, None, None, f"이 혜택은 {b_start_hour}시~{b_end_hour}시 결제만 대상이라 이 결제는 할인 대상이 아닙니다."
+
     effective_discount_percent = benefit["discount_percent"]
     if benefit["tier_table"] or (benefit["calc_mode"] == "percent_discount" and benefit["percent_tier_table"]):
         card = conn.execute("SELECT * FROM cards WHERE id = ?", (benefit["card_id"],)).fetchone()

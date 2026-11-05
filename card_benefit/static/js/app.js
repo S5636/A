@@ -1594,32 +1594,26 @@
   // ---- 전월실적(지난달 사용액) 입력 모달 ----
   const perfModal = document.getElementById("perf-modal");
   let editingPerfCardId = null;
+  let editingPerfYearMonth = null;
 
-  function defaultPerfMonth() {
-    const d = new Date();
-    d.setMonth(d.getMonth() - 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  }
-
-  async function loadPerfValueForMonth() {
-    const ym = document.getElementById("perf-month").value;
-    if (!ym || !editingPerfCardId) return;
-    const data = await api(`/api/cards/${editingPerfCardId}/performance/${ym}`);
-    document.getElementById("perf-value").value = data.total_spend != null ? data.total_spend : "";
+  // 전월실적은 상단 월 선택 바가 가리키는 달의 "전월" 기준 - 바를 안 건드렸으면
+  // (selectedMonth == null) 진짜 지난달. 새 월 선택 버튼을 따로 안 만들고
+  // 이미 있는 월 선택 바를 그대로 따라간다.
+  function perfTargetYearMonth() {
+    return shiftMonthStr(selectedMonth || currentMonthStr(), -1);
   }
 
   function openPerfModal(card) {
     editingPerfCardId = card.id;
-    const defaultMonth = defaultPerfMonth();
-    document.getElementById("perf-month").value = defaultMonth;
+    editingPerfYearMonth = perfTargetYearMonth();
+    const [y, m] = editingPerfYearMonth.split("-").map(Number);
+    document.getElementById("perf-modal-title").textContent = `${y}년 ${m}월 실적 직접 수정`;
     document.getElementById("perf-value").value = card.perf_spend || "";
     perfModal.classList.add("open");
   }
-  document.getElementById("perf-month").addEventListener("change", loadPerfValueForMonth);
   document.getElementById("perf-cancel").addEventListener("click", () => perfModal.classList.remove("open"));
   document.getElementById("perf-save").addEventListener("click", async () => {
     const total_spend = document.getElementById("perf-value").value;
-    const year_month = document.getElementById("perf-month").value || defaultPerfMonth();
     if (total_spend === "" || Number(total_spend) < 0) {
       alert("사용액을 입력하세요.");
       return;
@@ -1627,7 +1621,7 @@
     state = await api(`/api/cards/${editingPerfCardId}/performance`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ total_spend, year_month }),
+      body: JSON.stringify({ total_spend, year_month: editingPerfYearMonth }),
     });
     perfModal.classList.remove("open");
     render();
@@ -1662,6 +1656,8 @@
     document.getElementById("benefit-keywords").value = benefit ? benefit.merchant_keywords : "";
     document.getElementById("benefit-tiers").value = benefit ? benefit.tier_table : "";
     document.getElementById("benefit-percent-tiers").value = benefit ? benefit.percent_tier_table : "";
+    document.getElementById("benefit-start-hour").value = benefit && benefit.start_hour !== null && benefit.start_hour !== undefined ? benefit.start_hour : "";
+    document.getElementById("benefit-end-hour").value = benefit && benefit.end_hour !== null && benefit.end_hour !== undefined ? benefit.end_hour : "";
     document.getElementById("benefit-memo").value = benefit ? benefit.memo : "";
     updateBenefitCalcFieldsUI();
     benefitModal.classList.add("open");
@@ -1680,6 +1676,8 @@
       merchant_keywords: document.getElementById("benefit-keywords").value.trim(),
       tier_table: document.getElementById("benefit-tiers").value.trim(),
       percent_tier_table: document.getElementById("benefit-percent-tiers").value.trim(),
+      start_hour: document.getElementById("benefit-start-hour").value.trim(),
+      end_hour: document.getElementById("benefit-end-hour").value.trim(),
       memo: document.getElementById("benefit-memo").value.trim(),
     };
     if (!payload.name) { alert("혜택 이름을 입력하세요."); return; }
@@ -1956,6 +1954,13 @@
       const manualCategory = categorySelect.value;
       const occurredAt = (assigningItem && assigningItem.occurred_at) || "";
       const hour = occurredAt.length >= 13 ? Number(occurredAt.slice(11, 13)) : null;
+      if (benefit.start_hour !== null && benefit.start_hour !== undefined
+          && benefit.end_hour !== null && benefit.end_hour !== undefined
+          && hour !== null && !(benefit.start_hour <= hour && hour < benefit.end_hour)) {
+        preview.style.display = "block";
+        preview.textContent = `할인 예상: 0원 (이 혜택은 ${benefit.start_hour}시~${benefit.end_hour}시 결제만 대상)`;
+        return;
+      }
       let percent, cap, label, timeBlocked;
       if (manualCategory) {
         [percent, cap, timeBlocked] = rateTableEntryByLabel(benefit.rate_table, manualCategory, benefit.discount_percent, benefit.per_txn_cap, hour);
