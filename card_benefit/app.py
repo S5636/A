@@ -2030,6 +2030,34 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
             if earned > remaining:
                 earned = remaining
                 capped_note = f"(업종별 월한도 {monthly_point_cap:,.0f}P 초과분 제외)"
+
+        # 업종별 한도와 별개로, 혜택 전체의 이번 달 한도(고정 limit_value 또는
+        # tier_table로 정해지는 전월실적별 한도)도 넘지 않게 막는다. 예전엔
+        # 건당 계산만 하고 월 누적 한도는 전혀 확인을 안 해서, 한도를 이미 다
+        # 쓴 뒤에도 결제마다 할인이 그대로 계속 기록되어(카드사 실제 지급액보다
+        # 많이 쌓임) 화면엔 뒤늦게 "초과"로만 표시되는 문제가 있었다.
+        if earned > 0 and used_at and benefit["limit_type"] != "count":
+            card_row = conn.execute("SELECT * FROM cards WHERE id = ?", (benefit["card_id"],)).fetchone()
+            if card_row:
+                try:
+                    cycle_ref = datetime.strptime(used_at, "%Y-%m-%d").date()
+                except ValueError:
+                    cycle_ref = None
+                cyc_start, cyc_end = cycle_bounds(card_row["reset_day"], cycle_ref)
+                if benefit["tier_table"]:
+                    overall_limit = tier_limit_for_spend(benefit["tier_table"], _perf_spend_for_card(conn, card_row, cycle_ref))
+                else:
+                    overall_limit = benefit["limit_value"] or 0
+                if overall_limit and overall_limit > 0:
+                    already_used = conn.execute(
+                        """SELECT COALESCE(SUM(used_value), 0) AS total FROM usage_logs
+                           WHERE benefit_id = ? AND used_at >= ? AND used_at < ?""",
+                        (benefit_id, cyc_start.isoformat(), cyc_end.isoformat()),
+                    ).fetchone()["total"]
+                    overall_remaining = max(0, overall_limit - already_used)
+                    if earned > overall_remaining:
+                        earned = overall_remaining
+                        capped_note += f"(이번 달 잔여한도 {overall_remaining:,.0f}원까지만)"
         category_label = f"{category} " if category else ""
         parts = [f"결제 {raw_value:,.0f}원 → 할인 {earned:,.0f}원({category_label}{percent:g}%){capped_note}"]
         if memo:
