@@ -1809,12 +1809,25 @@
 
     const preview = document.getElementById("assign-change-preview");
     const amount = document.getElementById("assign-amount").value;
+    // 혜택의 "이번달 잔여한도"(overall)는 limit_type이 "count"(횟수 한도)일 땐
+    // 금액이 아니라 횟수라서 원 단위 적립액과 비교할 수 없다 - 그럴 땐 clamp 생략.
+    const overallRemaining = benefit && benefit.limit_type !== "count" && benefit.remaining != null
+      ? Math.max(0, benefit.remaining)
+      : null;
     if (isChange && amount) {
       const doubled = document.getElementById("assign-doubled").checked;
       preview.style.display = "block";
-      preview.textContent = Number(amount) < 5000
-        ? "건당 5,000원 미만은 적립되지 않습니다."
-        : `잔돈 적립 예상: ${fmt(computeChangeEarned(amount, doubled))}원${doubled ? " (2배 적용)" : ""}`;
+      if (Number(amount) < 5000) {
+        preview.textContent = "건당 5,000원 미만은 적립되지 않습니다.";
+      } else {
+        let earned = computeChangeEarned(amount, doubled);
+        let note = doubled ? " (2배 적용)" : "";
+        if (overallRemaining != null && earned > overallRemaining) {
+          earned = overallRemaining;
+          note += ` (이번달 잔여한도 ${fmt(overallRemaining)}원이라 거기까지만 적립됩니다)`;
+        }
+        preview.textContent = `잔돈 적립 예상: ${fmt(earned)}원${note}`;
+      }
       return;
     }
     if (isPercent && amount) {
@@ -1827,9 +1840,28 @@
         const merchant = (assigningItem && assigningItem.merchant) || "";
         [percent, cap, label] = matchRateTable(merchant, benefit.rate_table, benefit.discount_percent, benefit.per_txn_cap);
       }
-      const earned = computePercentDiscount(amount, percent, cap);
+      let earned = computePercentDiscount(amount, percent, cap);
+      let note = "";
+      // 업종별 월 적립한도(이미 이번달 그 업종에서 얼마 적립했는지)가 있으면
+      // 건당 cap보다 이게 먼저 걸릴 수 있다 - 둘 다 확인해서 더 낮은 쪽을 적용.
+      const catUsage = label && benefit.category_usage
+        ? benefit.category_usage.find((c) => c.label === label)
+        : null;
+      const catRemaining = (catUsage && catUsage.monthly_point_cap)
+        ? Math.max(0, catUsage.monthly_point_cap - (catUsage.month_earned || 0))
+        : null;
+      const caps = [catRemaining, overallRemaining].filter((v) => v != null);
+      if (caps.length) {
+        const binding = Math.min(...caps);
+        if (earned > binding) {
+          earned = binding;
+          note = (catRemaining != null && catRemaining === binding)
+            ? `, 이번달 ${label} 적립한도 ${fmt(catUsage.monthly_point_cap)}원 중 ${fmt(catUsage.month_earned || 0)}원 이미 적립돼서 ${fmt(binding)}원까지만`
+            : `, 이번달 잔여한도 ${fmt(binding)}원이라 거기까지만`;
+        }
+      }
       preview.style.display = "block";
-      preview.textContent = `할인 예상: ${fmt(earned)}원 (${label ? label + " " : ""}${percent}%${cap ? `, ${fmt(cap)}원까지만 적용` : ""})`;
+      preview.textContent = `할인 예상: ${fmt(earned)}원 (${label ? label + " " : ""}${percent}%${cap ? `, ${fmt(cap)}원까지만 적용` : ""}${note})`;
       return;
     }
     preview.style.display = "none";
