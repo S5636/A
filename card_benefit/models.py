@@ -605,7 +605,21 @@ _CARDNO_HEADERS = ["카드번호", "카드no", "카드 no", "이용카드", "카
 _CANCEL_STATUS_HEADERS = ["취소상태", "매입구분", "승인상태", "거래상태", "상태"]
 _CANCEL_KEYWORDS = ["취소", "실패", "거절"]
 _APPROVAL_HEADERS = ["승인번호", "승인번호(취소포함)", "거래번호", "승인no", "승인 no", "전표번호"]
-_USAGE_TYPE_HEADERS = ["이용구분", "거래구분", "결제구분", "국내외구분"]
+_USAGE_TYPE_HEADERS = ["이용구분", "거래구분", "결제구분", "국내외구분", "상품구분"]
+
+# 엑셀 포맷에 따라 "이용구분" 같은 국내/해외 정보가 아예 없는 경우가 있다
+# (예: "상품구분"이 할부/일시불만 구분하고 국내외 구분이 없는 명세서). 그럴
+# 땐 가맹점명으로 보조 판단한다 - 카드사마다 표기가 달라 완벽친 않지만,
+# PayPal·AliExpress처럼 누가 봐도 해외 결제대행사인 것만 최소로 등록해둔다
+# (확인 안 된 상호를 짐작으로 추가하진 않는다).
+FOREIGN_MERCHANT_KEYWORDS = ["PAYPAL", "ALIEXPRESS"]
+
+
+def is_foreign_merchant(merchant: str) -> bool:
+    if not merchant:
+        return False
+    merchant_upper = merchant.upper()
+    return any(k in merchant_upper for k in FOREIGN_MERCHANT_KEYWORDS)
 
 
 def _norm_cell(cell):

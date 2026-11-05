@@ -30,6 +30,7 @@ from models import (
     get_setting,
     init_db,
     is_cancelled_status,
+    is_foreign_merchant,
     is_medical_merchant,
     is_performance_excluded,
     match_benefit_keyword,
@@ -80,10 +81,13 @@ def serialize_inbox(conn):
                     matched_doubled = b["calc_mode"] == "change_under_1000"
                     break
 
-        if not matched_benefit and card and r["usage_type"] and "해외" in r["usage_type"]:
+        is_foreign = (r["usage_type"] and "해외" in r["usage_type"]) or is_foreign_merchant(r["merchant"])
+        if not matched_benefit and card and is_foreign:
             # 가맹점명만으론 아무 혜택도 안 걸렸는데, 카드사 엑셀의 "이용구분"에
-            # "해외"라고 명시돼 있으면(가맹점명 추측이 아니라 확실한 신호) "해외"
-            # 가 대상인 혜택으로 바로 잡아준다. ANTHROPIC처럼 해외 온라인 결제는
+            # "해외"라고 명시돼 있거나(가맹점명 추측이 아니라 확실한 신호) PayPal/
+            # AliExpress처럼 "해외" 정보가 아예 없는 엑셀에서도 가맹점명으로 확실히
+            # 해외임을 알 수 있으면(is_foreign_merchant) "해외"가 대상인 혜택으로
+            # 바로 잡아준다. ANTHROPIC처럼 해외 온라인 결제는
             # 가맹점명으로 업종을 유추할 수가 없어서 이 방법밖에 없다. 먼저
             # merchant_keywords에 바로 "해외"가 있는 혜택을 찾고, 없으면 업종별
             # 요율표(rate_table) 안에 "해외:" 카테고리가 있는 혜택(예: Discount
@@ -151,10 +155,11 @@ def serialize_inbox(conn):
         # 카드사 엑셀의 "이용구분"에 해외/할부라고 명시돼 있으면, 가맹점명으로
         # 유추할 필요 없이 그 자체로 확실한 신호이므로 더모아형(잔돈 적립) 혜택은
         # 무조건 특별적립(2배) 대상으로 본다(안내장 기준: 해외이용, 할부거래는
-        # 항상 2배).
+        # 항상 2배). "이용구분" 정보가 아예 없는 엑셀이면 PayPal/AliExpress처럼
+        # 가맹점명으로 확실히 해외인 경우만 보조로 잡는다.
         if matched_benefit and matched_benefit["calc_mode"] == "change_under_1000":
             usage_type = r["usage_type"] or ""
-            if "해외" in usage_type or "할부" in usage_type:
+            if "해외" in usage_type or "할부" in usage_type or is_foreign_merchant(r["merchant"]):
                 matched_doubled = True
 
         items.append({
