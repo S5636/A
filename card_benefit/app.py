@@ -372,7 +372,23 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
     if not item or not item["amount"]:
         return False
 
-    active_rows = conn.execute(f"SELECT * FROM {table} WHERE active = 1").fetchall()
+    def is_cash_only(rp):
+        # 결제수단이 "현금"이고 연결된 카드도 없는 항목(예: "고양시청 납부")은
+        # 애초에 카드/계좌 알림·엑셀로는 절대 들어올 수 없는 결제다. last4가
+        # 없다는 이유로 last4_ok가 "제한 없음"으로 통과시켜버리면, 우연히 금액이나
+        # 이름이 비슷한 전혀 다른 결제가 자동으로 붙어버리는 문제가 있었다
+        # (실제로 "현금"인 고정지출에 네이버페이/지방세 알림이 잘못 매칭된 사례).
+        # 그래서 이런 항목은 자동매칭 후보에서 아예 뺀다 - 해당되면 사람이
+        # 직접 "+ 기록"으로 넣어야 한다.
+        try:
+            return not rp["card_id"] and (rp["payment_method"] or "").strip() == "현금"
+        except (IndexError, KeyError):
+            return False
+
+    active_rows = [
+        rp for rp in conn.execute(f"SELECT * FROM {table} WHERE active = 1").fetchall()
+        if not is_cash_only(rp)
+    ]
 
     def rp_last4(rp):
         # card_id로 등록된 카드를 결제수단으로 고른 항목은 payment_method
