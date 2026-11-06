@@ -2048,6 +2048,18 @@ def _category_month_earned(conn, benefit_id, category, used_at):
     return row["total"]
 
 
+def _plan_day_slot_used(conn, benefit_id, used_at):
+    """신한 Discount Plan+ "Plan Day 서비스"(매월 1일, Time Plan·Daily Plan 각각
+    그날 첫 번째 할인 거래 1건에 할인율 2배) - 업종별이 아니라 혜택 전체
+    기준으로 하루에 딱 1번만 적용되므로, 이 혜택에 오늘 이미 Plan Day
+    보너스가 적용된 기록이 있는지 확인한다."""
+    row = conn.execute(
+        "SELECT 1 FROM usage_logs WHERE benefit_id = ? AND used_at = ? AND memo LIKE '%Plan Day 2배%'",
+        (benefit_id, used_at),
+    ).fetchone()
+    return row is not None
+
+
 def _perf_spend_for_card(conn, card, ref_date=None):
     """카드의 "전월실적" 합계 (_serialize_cards와 같은 기준: 수동 입력이 있으면
     그걸 쓰고, 없으면 지난달 확인된 결제 알림 합계에서 실적 제외 항목을 뺀 자동
@@ -2171,6 +2183,20 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
                 parts.append(memo)
             return 0, " · ".join(parts), (category or ""), None
 
+        # Plan Day(매월 1일, Time Plan·Daily Plan 각각 그날 첫 거래 1건 2배) -
+        # 해외 영역은 PDF 안내상 명시적으로 제외 대상이다.
+        plan_day_bonus = False
+        if (
+            benefit["plan_day_double"]
+            and category
+            and not category.startswith("해외")
+            and used_at
+            and used_at.endswith("-01")
+            and not _plan_day_slot_used(conn, benefit_id, used_at)
+        ):
+            percent *= 2
+            plan_day_bonus = True
+
         earned = compute_percent_discount(raw_value, percent, cap)
         if category and used_at and monthly_point_cap:
             already = _category_month_earned(conn, benefit_id, category, used_at)
@@ -2207,7 +2233,8 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
                         earned = overall_remaining
                         capped_note += f"(이번 달 잔여한도 {overall_remaining:,.0f}원까지만)"
         category_label = f"{category} " if category else ""
-        parts = [f"결제 {raw_value:,.0f}원 → 할인 {earned:,.0f}원({category_label}{percent:g}%){capped_note}"]
+        plan_day_tag = " · Plan Day 2배" if plan_day_bonus else ""
+        parts = [f"결제 {raw_value:,.0f}원 → 할인 {earned:,.0f}원({category_label}{percent:g}%){capped_note}{plan_day_tag}"]
         if memo:
             parts.append(memo)
         return earned, " · ".join(parts), (category or ""), None
