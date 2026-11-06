@@ -2020,44 +2020,70 @@ def _duplicate_merchant_today(conn, benefit_id, used_at, merchant):
     return row is not None
 
 
-def _category_usage_count(conn, benefit_id, category, used_at, monthly=False):
+def _category_usage_count(conn, benefit_id, category, used_at, monthly=False, before_log_id=None):
     """rate_table 업종(category)별로 오늘(또는 이번 달) 몇 번 사용됐는지 센다.
-    Daily Plan처럼 "업종별 일 1회, 월 5회까지"인 경우 한도 초과 여부 확인에 쓴다."""
+    Daily Plan처럼 "업종별 일 1회, 월 5회까지"인 경우 한도 초과 여부 확인에 쓴다.
+    before_log_id는 "다시 계산"(_recalculate_benefit_logs)에서 쓴다 - 그냥
+    자기 자신만 빼고 세면(id != 자신), 같은 날 같은 업종으로 이미 등록된
+    다른 기록 두 건을 재계산할 때 서로가 서로를 "이미 썼음"으로 세서 둘 다
+    막혀버리는 모순이 생긴다(실제로 그렇게 됨을 테스트로 확인). 기록 당시엔
+    "그보다 먼저 들어온(id가 더 작은) 기록"만 보고 판단했으므로, 재계산도
+    그 시점 그대로 "자신보다 id가 작은 것만" 세야 원래 순서(선착순)가
+    재현된다."""
+    params = [benefit_id, category]
     if monthly:
-        row = conn.execute(
-            """SELECT COUNT(*) AS c FROM usage_logs
-               WHERE benefit_id = ? AND rate_category = ? AND substr(used_at, 1, 7) = ?""",
-            (benefit_id, category, used_at[:7]),
-        ).fetchone()
+        params.append(used_at[:7])
+        date_clause = "substr(used_at, 1, 7) = ?"
     else:
-        row = conn.execute(
-            "SELECT COUNT(*) AS c FROM usage_logs WHERE benefit_id = ? AND rate_category = ? AND used_at = ?",
-            (benefit_id, category, used_at),
-        ).fetchone()
+        params.append(used_at)
+        date_clause = "used_at = ?"
+    id_clause = ""
+    if before_log_id is not None:
+        id_clause = " AND id < ?"
+        params.append(before_log_id)
+    row = conn.execute(
+        f"SELECT COUNT(*) AS c FROM usage_logs WHERE benefit_id = ? AND rate_category = ? AND {date_clause}{id_clause}",
+        params,
+    ).fetchone()
     return row["c"]
 
 
-def _category_month_earned(conn, benefit_id, category, used_at):
+def _category_month_earned(conn, benefit_id, category, used_at, before_log_id=None):
     """rate_table 업종(category)별로 이번 달 이미 적립된 금액(포인트) 합계를 돌려준다.
     씨티 리워드처럼 "업종별 월 1만 포인트까지만"처럼 횟수가 아니라 적립액 자체를
-    업종별로 깎는 카드의 한도 체크에 쓴다."""
+    업종별로 깎는 카드의 한도 체크에 쓴다. before_log_id는 _category_usage_count와
+    같은 이유(선착순 순서 재현)로 "다시 계산" 시 자신보다 먼저 들어온 기록까지만
+    합산하기 위함."""
+    params = [benefit_id, category, used_at[:7]]
+    id_clause = ""
+    if before_log_id is not None:
+        id_clause = " AND id < ?"
+        params.append(before_log_id)
     row = conn.execute(
-        """SELECT COALESCE(SUM(used_value), 0) AS total FROM usage_logs
-           WHERE benefit_id = ? AND rate_category = ? AND substr(used_at, 1, 7) = ?""",
-        (benefit_id, category, used_at[:7]),
+        f"""SELECT COALESCE(SUM(used_value), 0) AS total FROM usage_logs
+           WHERE benefit_id = ? AND rate_category = ? AND substr(used_at, 1, 7) = ?{id_clause}""",
+        params,
     ).fetchone()
     return row["total"]
 
 
-def _plan_day_slot_used(conn, benefit_id, used_at):
+def _plan_day_slot_used(conn, benefit_id, used_at, before_log_id=None):
     """신한 Discount Plan+ "Plan Day 서비스"(매월 1일, Time Plan·Daily Plan 각각
     그날 첫 번째 할인 거래 1건에 할인율 2배) - 업종별이 아니라 혜택 전체
     기준으로 하루에 딱 1번만 적용되므로, 이 혜택에 오늘 이미 Plan Day
-    보너스가 적용된 기록이 있는지 확인한다."""
-    row = conn.execute(
-        "SELECT 1 FROM usage_logs WHERE benefit_id = ? AND used_at = ? AND memo LIKE '%Plan Day 2배%'",
-        (benefit_id, used_at),
-    ).fetchone()
+    보너스가 적용된 기록이 있는지 확인한다. before_log_id는 "다시 계산"
+    시 자신보다 먼저 들어온 기록 중에만 있었는지로 판단하기 위함(선착순
+    순서 재현 - _category_usage_count 설명 참고)."""
+    if before_log_id is not None:
+        row = conn.execute(
+            "SELECT 1 FROM usage_logs WHERE benefit_id = ? AND used_at = ? AND memo LIKE '%Plan Day 2배%' AND id < ?",
+            (benefit_id, used_at, before_log_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT 1 FROM usage_logs WHERE benefit_id = ? AND used_at = ? AND memo LIKE '%Plan Day 2배%'",
+            (benefit_id, used_at),
+        ).fetchone()
     return row is not None
 
 
@@ -2090,7 +2116,7 @@ def _perf_spend_for_card(conn, card, ref_date=None):
     )
 
 
-def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, merchant="", used_at="", category_override="", occurred_at=""):
+def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, merchant="", used_at="", category_override="", occurred_at="", exclude_log_id=None):
     """혜택의 calc_mode에 따라 입력값(결제금액 등)을 실제 한도 소진값으로 변환한다.
 
     "raw"는 입력값을 그대로 쓰고, 나머지는 결제금액을 자동으로 실제
@@ -2107,6 +2133,10 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
     Time Plan의 DAY/NIGHT처럼 "이 시간대 결제만" 적용되는 업종 조건을 확인하는 데
     쓴다 - 수기로 기록할 땐(occurred_at 없음) 시간 정보가 없어서 이 조건을
     건너뛴다(차단하지 않음).
+    exclude_log_id는 "다시 계산"(이미 기록된 usage_logs 행을 최신 전월실적/
+    구간표 기준으로 재계산)에서만 쓴다 - 일/월 횟수·업종별 월한도·Plan Day·
+    혜택 전체 월한도를 셀 때 그 행 자기 자신을 "이미 쓴 걸로" 중복으로 세지
+    않기 위함(새로 기록할 땐 그 행이 아직 없으므로 항상 None).
     """
     hour = None
     if occurred_at and len(occurred_at) >= 13:
@@ -2167,12 +2197,12 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
                 category = ""
         capped_note = ""
         if category and used_at and not block_reason:
-            if daily_limit and _category_usage_count(conn, benefit_id, category, used_at) >= daily_limit:
+            if daily_limit and _category_usage_count(conn, benefit_id, category, used_at, before_log_id=exclude_log_id) >= daily_limit:
                 block_reason = "일/월 횟수 초과"
-            elif monthly_limit and _category_usage_count(conn, benefit_id, category, used_at, monthly=True) >= monthly_limit:
+            elif monthly_limit and _category_usage_count(conn, benefit_id, category, used_at, monthly=True, before_log_id=exclude_log_id) >= monthly_limit:
                 block_reason = "일/월 횟수 초과"
             elif monthly_point_cap:
-                already = _category_month_earned(conn, benefit_id, category, used_at)
+                already = _category_month_earned(conn, benefit_id, category, used_at, before_log_id=exclude_log_id)
                 remaining = max(0, monthly_point_cap - already)
                 if remaining <= 0:
                     block_reason = "월적립한도 초과"
@@ -2193,14 +2223,14 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
             and not category.startswith("해외")
             and used_at
             and used_at.endswith("-01")
-            and not _plan_day_slot_used(conn, benefit_id, used_at)
+            and not _plan_day_slot_used(conn, benefit_id, used_at, before_log_id=exclude_log_id)
         ):
             percent *= 2
             plan_day_bonus = True
 
         earned = compute_percent_discount(raw_value, percent, cap)
         if category and used_at and monthly_point_cap:
-            already = _category_month_earned(conn, benefit_id, category, used_at)
+            already = _category_month_earned(conn, benefit_id, category, used_at, before_log_id=exclude_log_id)
             remaining = max(0, monthly_point_cap - already)
             if earned > remaining:
                 earned = remaining
@@ -2224,10 +2254,18 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
                 else:
                     overall_limit = benefit["limit_value"] or 0
                 if overall_limit and overall_limit > 0:
+                    # 여기도 위와 같은 이유(선착순 순서 재현)로 "자신보다 id가
+                    # 작은 것만" 합산한다 - 그냥 자기 자신만 빼면, 같은 달에
+                    # 재계산 대상이 여러 건일 때 서로가 서로의 한도를 깎아먹는
+                    # 모순이 생긴다.
+                    id_clause = " AND id < ?" if exclude_log_id is not None else ""
+                    params = [benefit_id, cyc_start.isoformat(), cyc_end.isoformat()]
+                    if exclude_log_id is not None:
+                        params.append(exclude_log_id)
                     already_used = conn.execute(
-                        """SELECT COALESCE(SUM(used_value), 0) AS total FROM usage_logs
-                           WHERE benefit_id = ? AND used_at >= ? AND used_at < ?""",
-                        (benefit_id, cyc_start.isoformat(), cyc_end.isoformat()),
+                        f"""SELECT COALESCE(SUM(used_value), 0) AS total FROM usage_logs
+                           WHERE benefit_id = ? AND used_at >= ? AND used_at < ?{id_clause}""",
+                        params,
                     ).fetchone()["total"]
                     overall_remaining = max(0, overall_limit - already_used)
                     if earned > overall_remaining:
@@ -2241,6 +2279,64 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
         return earned, " · ".join(parts), (category or ""), None
 
     return raw_value, memo, "", None
+
+
+def _recalculate_benefit_logs(conn, benefit_id):
+    """전월실적/구간표가 나중에 바뀌어도(예: 밀린 달치를 뒤늦게 백필하다가
+    아직 그 달 실적을 안 적어놔서 "전월실적 미달 0원"으로 찍힌 뒤, 나중에
+    실적을 등록/정정하는 경우), 이미 기록된 usage_logs는 그 당시 계산값에
+    그대로 멈춰있다 - 기록 시점에 딱 한 번 계산해서 저장해두는 구조라서다.
+    이 함수는 그 혜택의 모든 기록을 지금 등록된 최신 데이터(전월실적/
+    구간표/업종별 키워드 등)로 다시 계산해서, 값이 달라진 것만 갱신한다.
+    원래 매칭됐던 업종(rate_category)은 그대로 쓰고(재계산 때 가맹점명으로
+    새로 찾지 않음 - 업종 자체를 바꾸는 건 이 기능의 목적이 아니라
+    "업종 직접 선택" 수정으로 따로 할 일이다), 자유 메모(사용자가 직접
+    적어둔 텍스트)는 원래 계산 설명문과 합쳐져 저장돼 있어서 분리해 복원할
+    방법이 없어 재계산하면 비워진다."""
+    benefit = conn.execute("SELECT * FROM benefits WHERE id = ?", (benefit_id,)).fetchone()
+    if not benefit or benefit["calc_mode"] != "percent_discount":
+        return 0
+    logs = conn.execute(
+        "SELECT * FROM usage_logs WHERE benefit_id = ? ORDER BY used_at ASC, id ASC", (benefit_id,)
+    ).fetchall()
+    changed = 0
+    for log in logs:
+        raw_value = log["raw_value"] if log["raw_value"] is not None else log["used_value"]
+        occurred_at = ""
+        if log["source_inbox_id"]:
+            inbox_row = conn.execute(
+                "SELECT occurred_at FROM inbox_items WHERE id = ?", (log["source_inbox_id"],)
+            ).fetchone()
+            if inbox_row:
+                occurred_at = inbox_row["occurred_at"] or ""
+        new_value, new_memo, new_category, error = _apply_calc_mode(
+            conn, benefit_id, benefit, raw_value, False, "",
+            merchant=log["merchant"] or "", used_at=log["used_at"],
+            category_override=log["rate_category"] or "",
+            occurred_at=occurred_at, exclude_log_id=log["id"],
+        )
+        if error:
+            continue
+        if new_value != log["used_value"] or new_memo != log["memo"]:
+            conn.execute(
+                "UPDATE usage_logs SET used_value = ?, memo = ?, rate_category = ? WHERE id = ?",
+                (new_value, new_memo, new_category, log["id"]),
+            )
+            changed += 1
+    return changed
+
+
+@app.route("/api/benefits/<int:benefit_id>/recalculate", methods=["POST"])
+def recalculate_benefit(benefit_id):
+    conn = get_conn()
+    try:
+        changed = _recalculate_benefit_logs(conn, benefit_id)
+        conn.commit()
+    finally:
+        conn.close()
+    result = serialize_full()
+    result["recalculate_changed"] = changed
+    return jsonify(result)
 
 
 @app.route("/api/benefits/<int:benefit_id>/use", methods=["POST"])

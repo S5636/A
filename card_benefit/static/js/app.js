@@ -664,6 +664,7 @@
           <div class="benefit-buttons">
             <button class="icon-btn use-benefit" data-id="${b.id}" data-card-id="${card.id}" data-type="${b.limit_type}" title="사용 기록">➕</button>
             <button class="btn small toggle-log" data-id="${b.id}">내역</button>
+            ${b.calc_mode === "percent_discount" ? `<button class="icon-btn recalc-benefit" data-id="${b.id}" title="전월실적/구간표가 나중에 바뀐 기록을 최신 기준으로 다시 계산">🔄</button>` : ""}
             <button class="icon-btn edit-benefit" data-id="${b.id}" data-card-id="${card.id}">✏️</button>
             <button class="icon-btn delete-benefit" data-id="${b.id}">🗑️</button>
           </div>
@@ -732,6 +733,15 @@
         const c = state.cards.find((x) => x.id == btn.dataset.cardId);
         const b = c.benefits.find((x) => x.id == btn.dataset.id);
         openUseModal(b);
+      })
+    );
+    el.querySelectorAll(".recalc-benefit").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        state = await api(`/api/benefits/${btn.dataset.id}/recalculate`, { method: "POST" });
+        alert(state.recalculate_changed
+          ? `${state.recalculate_changed}건 금액이 최신 기준으로 바뀌었습니다.`
+          : "최신 기준으로 다시 계산했지만 바뀐 건 없습니다.");
+        render();
       })
     );
     el.querySelectorAll(".edit-benefit").forEach((btn) =>
