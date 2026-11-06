@@ -2187,6 +2187,12 @@
     }
     assigningItem = item;
     document.getElementById("assign-raw-text").textContent = item.raw_text;
+    // "업종 직접 선택"은 모달을 열 때마다 "자동인식"으로 초기화한다 - 안
+    // 그러면 이전에 다른 알림에서 수동으로 고른 업종이 그대로 남아있어서,
+    // 이번 알림은 가맹점명으로 충분히 자동인식 가능한데도 엉뚱한 업종으로
+    // 조용히 덮어써버리는 문제가 있었다(예: 아성다이소가 자동으로 "잡화"로
+    // 잡혀야 하는데, 직전에 다른 건에서 "쇼핑"을 골라놨던 게 그대로 남음).
+    document.getElementById("assign-category").value = "";
 
     try {
       const monthState = await fetchStateForMonth(itemYearMonth(item));
