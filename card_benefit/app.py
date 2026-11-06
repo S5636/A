@@ -866,6 +866,7 @@ def _serialize_cards(conn):
                 "end_hour": b["end_hour"],
                 "category_usage": category_usage,
                 "always_doubled": bool(b["always_doubled"]),
+                "plan_day_double": bool(b["plan_day_double"]),
                 "used": used,
                 "payment_sum": payment_sum,
                 "remaining": remaining,

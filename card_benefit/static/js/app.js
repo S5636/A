@@ -2143,6 +2143,16 @@
         preview.textContent = `할인 예상: 0원 (${label ? label + " " : ""}할인 적용 시간대가 아님)`;
         return;
       }
+      // Plan Day(매월 1일, Time Plan·Daily Plan 각각 그날 첫 거래 1건 2배 -
+      // 해외 영역 제외). 그날 이미 적용됐는지까지는 미리보기에서 확인 안
+      // 하고(실제 적용 여부는 기록 시 서버가 최종 확정), 조건만 맞으면
+      // "가능"으로 보여준다 - 다른 한도 조건들도 이 미리보기에선 다 그렇게
+      // 안내만 하고 최종 확정은 기록할 때 서버에서 함.
+      let planDayNote = "";
+      if (benefit.plan_day_double && label && label !== "해외" && occurredAt.slice(8, 10) === "01") {
+        percent *= 2;
+        planDayNote = " · Plan Day 2배 가능(그날 해당 혜택 첫 결제가 아니면 기록 시 정상 적용)";
+      }
       let earned = computePercentDiscount(amount, percent, cap);
       let note = "";
       // 업종별 월 적립한도(이미 이번달 그 업종에서 얼마 적립했는지)가 있으면
@@ -2164,7 +2174,7 @@
         }
       }
       preview.style.display = "block";
-      preview.textContent = `할인 예상: ${fmt(earned)}원 (${label ? label + " " : ""}${percent}%${cap ? `, ${fmt(cap)}원까지만 적용` : ""}${note})`;
+      preview.textContent = `할인 예상: ${fmt(earned)}원 (${label ? label + " " : ""}${percent}%${cap ? `, ${fmt(cap)}원까지만 적용` : ""}${note})${planDayNote}`;
       return;
     }
     preview.style.display = "none";
