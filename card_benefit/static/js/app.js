@@ -36,7 +36,6 @@
   let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [], suspected_duplicates: [] };
   let inboxOpen = false;
   let noBenefitOpen = false;
-  let recurringCardSummaryOpen = true;
   // null = 진짜 이번 달(필터 없음). "YYYY-MM" 문자열이면 카드 탭의 "사용내역"
   // 목록뿐 아니라 한도/잔여/전월실적까지 전부 그 달 기준으로 같이 바뀐다.
   // (배정 모달은 예외 - 알림 자체의 결제 달 기준으로 따로 불러옴, 아래 참고)
@@ -1168,41 +1167,37 @@
   }
 
   // 고정지출을 어느 카드로 몰아야 전월실적을 효율적으로 채울지 가늠할 수
-  // 있게, 카드별로 고정지출 합계를 묶어서 보여준다 - 지금 등록된 결제수단
-  // 기준으로 보여주기만 할 뿐(데이터는 안 건드림), 실제로 어디로 옮길지는
-  // 사용자가 직접 각 고정지출의 "결제수단"을 수정해서 정한다.
+  // 있게, 카드별로 고정지출 합계를 카드 점프 버튼이랑 똑같은 작은 알약
+  // 모양으로 보여준다 - 지금 등록된 결제수단 기준으로 보여주기만 할 뿐
+  // (데이터는 안 건드림), 실제로 어디로 옮길지는 사용자가 직접 각
+  // 고정지출의 "결제수단"을 수정해서 정한다.
   function renderRecurringCardSummary() {
-    const section = document.getElementById("recurring-card-summary-section");
     const listEl = document.getElementById("recurring-card-summary-list");
     const active = state.recurring_payments.filter((r) => r.active);
-    section.style.display = active.length ? "block" : "none";
 
-    const groups = new Map(); // label -> total
+    const groups = new Map(); // label -> { total, color }
     active.forEach((r) => {
-      let label;
+      let label, color;
       if (r.card_id) {
-        const card = state.cards.find((c) => c.id === r.card_id);
+        const idx = state.cards.findIndex((c) => c.id === r.card_id);
+        const card = idx >= 0 ? state.cards[idx] : null;
         label = card ? cardNickname(card) : "알 수 없는 카드";
+        color = idx >= 0 ? CARD_COLORS[idx % CARD_COLORS.length] : "var(--text-muted)";
       } else {
         label = r.payment_method || "현금/계좌 등";
+        color = "var(--text-muted)";
       }
-      groups.set(label, (groups.get(label) || 0) + (r.amount || 0));
+      const prev = groups.get(label);
+      groups.set(label, { total: (prev ? prev.total : 0) + (r.amount || 0), color });
     });
-    const sorted = [...groups.entries()].sort((a, b) => b[1] - a[1]);
-    const grandTotal = sorted.reduce((sum, [, v]) => sum + v, 0);
+    const sorted = [...groups.entries()].sort((a, b) => b[1].total - a[1].total);
 
-    listEl.style.display = recurringCardSummaryOpen ? "flex" : "none";
-    listEl.innerHTML = sorted.map(([label, total]) => `
-      <div class="recurring-card-summary-row">
-        <span class="recurring-card-summary-label">${escapeHtml(label)}</span>
-        <span class="recurring-card-summary-value">₩${fmt(total)}</span>
+    listEl.style.display = sorted.length ? "flex" : "none";
+    listEl.innerHTML = sorted.map(([label, { total, color }]) => `
+      <div class="jump-btn card-sum-pill" style="border-color:${color};color:${color};">
+        ${escapeHtml(label)}<br><span class="card-sum-pill-value">₩${fmt(total)}</span>
       </div>
-    `).join("") + `
-      <div class="recurring-card-summary-row recurring-card-summary-total">
-        <span class="recurring-card-summary-label">합계</span>
-        <span class="recurring-card-summary-value">₩${fmt(grandTotal)}</span>
-      </div>
-    `;
+    `).join("");
   }
 
   function recurringTemplate(item) {
@@ -1704,11 +1699,6 @@
   let dupOpen = false;
   document.getElementById("dup-toggle").addEventListener("click", () => {
     dupOpen = !dupOpen;
-    render();
-  });
-
-  document.getElementById("recurring-card-summary-toggle").addEventListener("click", () => {
-    recurringCardSummaryOpen = !recurringCardSummaryOpen;
     render();
   });
 

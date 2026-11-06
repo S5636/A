@@ -432,27 +432,8 @@ body { padding-bottom: 40px; }
 }
 .dup-group-title { font-size: 12px; font-weight: 700; color: var(--text-secondary); padding: 0 2px; }
 
-.recurring-card-summary { display: flex; flex-direction: column; gap: 4px; }
-.recurring-card-summary-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 12px;
-  background: var(--surface-2, rgba(255, 255, 255, 0.03));
-  border-radius: var(--radius-md);
-  font-size: 13px;
-}
-.recurring-card-summary-label { color: var(--text-secondary); font-weight: 600; }
-.recurring-card-summary-value { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
-.recurring-card-summary-total {
-  background: transparent;
-  border-top: 1px solid var(--border-strong);
-  border-radius: 0;
-  margin-top: 2px;
-  padding-top: 8px;
-}
-.recurring-card-summary-total .recurring-card-summary-label,
-.recurring-card-summary-total .recurring-card-summary-value { color: var(--accent-purple); }
+.card-sum-pill { text-align: center; line-height: 1.5; }
+.card-sum-pill-value { font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* ---------- 백업 / 일괄 업로드 ---------- */
 .backup-section { margin-bottom: 5px; }
