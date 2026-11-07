@@ -278,7 +278,7 @@ def set_setting(conn, key, value):
 
 
 _AMOUNT_RE = re.compile(r"([\d][\d,]*)\s*원")
-_LAST4_RE = re.compile(r"\((\d{4})\)")
+_LAST4_RE = re.compile(r"\(([\d*]{4})\)")
 _ISSUER_HINTS = [
     "신한카드", "KB국민카드", "국민카드", "삼성카드", "현대카드", "롯데카드", "하나카드",
     "우리카드", "NH농협카드", "농협카드", "비씨카드", "BC카드", "씨티카드",
@@ -703,10 +703,17 @@ def card_codes_match(a, b):
 
     한쪽이 다른 쪽의 접두(prefix)면 같은 카드로 본다 - 마스킹 방식에 따라
     자릿수가 다를 수 있어서다(예: 카드 등록 시 "839", 알림에서는 "8390").
+    씨티카드 폰 알림처럼 "0*0*"식으로 숫자 일부를 *로 가리는 마스킹도 있다
+    - 이땐 자릿수가 같다는 전제로 자리마다 비교해서, *가 있는 자리는
+    아무 숫자나 매치된 걸로 본다(예: "0*0*"는 "0104"와 같은 카드).
     """
     if not a or not b:
         return False
-    return a == b or a.startswith(b) or b.startswith(a)
+    if a == b:
+        return True
+    if "*" in a or "*" in b:
+        return len(a) == len(b) and all(x == "*" or y == "*" or x == y for x, y in zip(a, b))
+    return a.startswith(b) or b.startswith(a)
 
 
 def parse_amount_cell(value):
