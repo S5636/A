@@ -2449,6 +2449,30 @@ def regenerate_inbox_token():
     return jsonify({"token": token, "webhook_path": "/api/inbox"})
 
 
+def _try_cancel_matching_notification(conn, last4, amount):
+    """폰 알림으로 "매출취소" 같은 문구가 그대로 들어온 경우, 승인번호가 없어서
+    엑셀 업로드 때 쓰는 _resolve_cancellation(승인번호 매칭)을 못 쓴다. 대신
+    카드+금액이 똑같은 "아직 처리 안 된" 알림이 딱 하나뿐일 때만 그걸 취소
+    처리한다(후보가 여러 개면 어느 걸 취소해야 할지 애매해서 손대지 않고
+    사용자가 직접 판단하게 둔다 - 엉뚱한 결제를 잘못 취소시키는 것보다 안전)."""
+    if not amount:
+        return False
+    candidates = conn.execute(
+        "SELECT id, last4 FROM inbox_items WHERE amount = ? AND status = 'pending'", (amount,)
+    ).fetchall()
+    matches = [
+        r for r in candidates
+        if not last4 or not r["last4"] or card_codes_match(last4, r["last4"])
+    ]
+    if len(matches) == 1:
+        conn.execute(
+            "UPDATE inbox_items SET status = 'cancelled', recurring_id = NULL, insurance_id = NULL WHERE id = ?",
+            (matches[0]["id"],),
+        )
+        return True
+    return False
+
+
 @app.route("/api/inbox", methods=["POST"])
 def create_inbox_item():
     data = request.get_json(force=True, silent=True) or {}
@@ -2480,13 +2504,22 @@ def create_inbox_item():
             (text,),
         ).fetchone()
         if not recent_dup:
+            # "매출취소"/"승인취소"처럼 취소 자체를 알리는 문자는 혜택배정
+            # 큐에 멀쩡한 결제인 것처럼 쌓이면 안 된다. 승인번호가 없는
+            # 폰 알림이라 엑셀 업로드 때처럼 승인번호로는 못 엮고, 카드+금액이
+            # 똑같은 미처리 알림이 하나뿐이면 그걸 취소 처리한다.
+            is_cancel = is_cancelled_status(text)
+            if is_cancel:
+                _try_cancel_matching_notification(conn, parsed["last4"], parsed["amount"])
             cur = conn.execute(
-                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at, source)
-                   VALUES (?, ?, ?, ?, ?, ?, 'notification')""",
-                (text, parsed["amount"], parsed["last4"], parsed["issuer"], parsed["merchant"], occurred_at),
+                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at, source, status)
+                   VALUES (?, ?, ?, ?, ?, ?, 'notification', ?)""",
+                (text, parsed["amount"], parsed["last4"], parsed["issuer"], parsed["merchant"], occurred_at,
+                 "cancelled" if is_cancel else "pending"),
             )
-            _try_auto_match_recurring(conn, cur.lastrowid)
-            _try_auto_match_insurance(conn, cur.lastrowid)
+            if not is_cancel:
+                _try_auto_match_recurring(conn, cur.lastrowid)
+                _try_auto_match_insurance(conn, cur.lastrowid)
         conn.commit()
     finally:
         conn.close()
