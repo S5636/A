@@ -386,6 +386,7 @@
           <div class="inbox-item-sub">${it.occurred_at}${it.matched_card_name ? " · " + escapeHtml(shortCardName(it.matched_card_name)) : ""}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""}</div>
           ${it.matched_benefit_name ? `<div class="inbox-item-sub">🎯 ${escapeHtml(shortBenefitName(it.matched_benefit_name))}</div>` : ""}
         </div>
+        ${/취소|실패|거절/.test(it.raw_text || "") ? `<button class="btn secondary small cancel-notice" data-id="${it.id}">취소 처리</button>` : ""}
         <button class="btn small assign-inbox" data-id="${it.id}">혜택 선택</button>
       </div>
     `).join("");
@@ -394,6 +395,14 @@
       btn.addEventListener("click", () => {
         const item = state.inbox.find((x) => x.id == btn.dataset.id);
         openAssignModal(item);
+      })
+    );
+    inboxList.querySelectorAll(".cancel-notice").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("취소 문자로 처리할까요? 같은 카드·금액의 원래 결제(이미 혜택이 적립된 것 포함)를 찾아서 같이 취소 처리합니다.")) return;
+        state = await api(`/api/inbox/${btn.dataset.id}/resolve-cancellation`, { method: "POST" });
+        alert(state.cancellation_matched ? "원래 결제를 찾아서 같이 취소 처리했습니다." : "이 알림은 취소 처리했지만, 원래 결제는 못 찾았습니다(직접 확인 필요).");
+        render();
       })
     );
     wireBulkBar(inboxList, "inbox", ids, inboxActions);

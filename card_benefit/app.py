@@ -2449,7 +2449,7 @@ def regenerate_inbox_token():
     return jsonify({"token": token, "webhook_path": "/api/inbox"})
 
 
-def _try_cancel_matching_notification(conn, last4, amount):
+def _try_cancel_matching_notification(conn, last4, amount, exclude_id=None):
     """폰 알림으로 "매출취소" 같은 문구가 그대로 들어온 경우, 승인번호가 없어서
     엑셀 업로드 때 쓰는 _resolve_cancellation(승인번호 매칭)을 못 쓴다. 대신
     카드+금액이 똑같은, 아직 취소 처리 안 된 알림이 딱 하나뿐일 때만 그걸
@@ -2473,7 +2473,7 @@ def _try_cancel_matching_notification(conn, last4, amount):
     ).fetchall()
     matches = [
         r for r in candidates
-        if not last4 or not r["last4"] or card_codes_match(last4, r["last4"])
+        if r["id"] != exclude_id and (not last4 or not r["last4"] or card_codes_match(last4, r["last4"]))
     ]
     if len(matches) != 1:
         return False
@@ -2657,6 +2657,33 @@ def discard_inbox_item(item_id):
     finally:
         conn.close()
     return jsonify(serialize_full())
+
+
+@app.route("/api/inbox/<int:item_id>/resolve-cancellation", methods=["POST"])
+def resolve_cancellation_notice(item_id):
+    """"매출취소" 알림이 코드 업데이트 전에 이미 큐에 들어가버린 경우(또는
+    자동 처리 시점엔 후보가 여러 개라 건너뛰었던 경우)를 위해, 수동으로
+    다시 시도할 수 있게 한다. _try_cancel_matching_notification과 똑같은
+    로직을 쓰되, 이 알림 자신은 후보에서 빼고 찾는다. 원결제를 찾았든
+    못 찾았든 이 알림 자체는 취소 처리해서 큐에서 뺀다(사용자가 직접
+    "이건 취소 문자다"라고 확인한 거라서)."""
+    conn = get_conn()
+    try:
+        item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (item_id,)).fetchone()
+        if not item:
+            return jsonify({"error": "알림을 찾을 수 없습니다."}), 404
+        matched = _try_cancel_matching_notification(conn, item["last4"], item["amount"], exclude_id=item_id)
+        conn.execute(
+            "UPDATE inbox_items SET status = 'cancelled', recurring_id = NULL, insurance_id = NULL, "
+            "card_id = NULL, benefit_id = NULL WHERE id = ?",
+            (item_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    result = serialize_full()
+    result["cancellation_matched"] = matched
+    return jsonify(result)
 
 
 @app.route("/api/inbox/<int:item_id>/dup-ignore", methods=["POST"])
