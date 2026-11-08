@@ -2452,25 +2452,45 @@ def regenerate_inbox_token():
 def _try_cancel_matching_notification(conn, last4, amount):
     """폰 알림으로 "매출취소" 같은 문구가 그대로 들어온 경우, 승인번호가 없어서
     엑셀 업로드 때 쓰는 _resolve_cancellation(승인번호 매칭)을 못 쓴다. 대신
-    카드+금액이 똑같은 "아직 처리 안 된" 알림이 딱 하나뿐일 때만 그걸 취소
-    처리한다(후보가 여러 개면 어느 걸 취소해야 할지 애매해서 손대지 않고
-    사용자가 직접 판단하게 둔다 - 엉뚱한 결제를 잘못 취소시키는 것보다 안전)."""
+    카드+금액이 똑같은, 아직 취소 처리 안 된 알림이 딱 하나뿐일 때만 그걸
+    취소 처리한다(후보가 여러 개면 어느 걸 취소해야 할지 애매해서 손대지
+    않고 사용자가 직접 판단하게 둔다 - 엉뚱한 결제를 잘못 취소시키는 것보다
+    안전).
+
+    취소는 당일이 아니라 보름/한달 뒤에 들어오는 경우가 흔해서(그 사이에
+    이미 혜택 배정까지 끝났을 가능성이 높음), "아직 미처리(pending)"인
+    것만 찾으면 거의 못 찾는다. 그래서 상태 상관없이(배정 완료/혜택없음
+    처리된 것 포함) 찾되, 이미 혜택이 배정돼 적립 기록(usage_logs)까지
+    있었다면 그 기록도 같이 지운다 - 안 지우면 취소된 결제로 받은 적립이
+    그대로 남아있게 된다. 지운 뒤에는 그 혜택의 다른 기록들이 그동안 이
+    기록 때문에 월 한도 계산이 왜곡됐을 수 있어서(예: 이 기록이 한도를
+    먼저 차지해서 뒤에 들어온 멀쩡한 결제가 "한도초과"로 깎였을 수 있음)
+    다시 계산까지 돌린다."""
     if not amount:
         return False
     candidates = conn.execute(
-        "SELECT id, last4 FROM inbox_items WHERE amount = ? AND status = 'pending'", (amount,)
+        "SELECT id, last4, benefit_id FROM inbox_items WHERE amount = ? AND status != 'cancelled'", (amount,)
     ).fetchall()
     matches = [
         r for r in candidates
         if not last4 or not r["last4"] or card_codes_match(last4, r["last4"])
     ]
-    if len(matches) == 1:
-        conn.execute(
-            "UPDATE inbox_items SET status = 'cancelled', recurring_id = NULL, insurance_id = NULL WHERE id = ?",
-            (matches[0]["id"],),
-        )
-        return True
-    return False
+    if len(matches) != 1:
+        return False
+    target = matches[0]
+    affected_benefit_ids = {
+        row["benefit_id"] for row in
+        conn.execute("SELECT benefit_id FROM usage_logs WHERE source_inbox_id = ?", (target["id"],)).fetchall()
+    }
+    conn.execute("DELETE FROM usage_logs WHERE source_inbox_id = ?", (target["id"],))
+    conn.execute(
+        "UPDATE inbox_items SET status = 'cancelled', recurring_id = NULL, insurance_id = NULL, "
+        "card_id = NULL, benefit_id = NULL WHERE id = ?",
+        (target["id"],),
+    )
+    for benefit_id in affected_benefit_ids:
+        _recalculate_benefit_logs(conn, benefit_id)
+    return True
 
 
 @app.route("/api/inbox", methods=["POST"])
