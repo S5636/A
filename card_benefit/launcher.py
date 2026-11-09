@@ -109,6 +109,7 @@ def main():
     threading.Thread(target=open_browser_later, daemon=True).start()
 
     import app  # requirements 설치가 끝난 뒤에 import
+    app.start_stock_monitor()
     app.app.run(host="0.0.0.0", port=PORT, debug=False)
     return True
 

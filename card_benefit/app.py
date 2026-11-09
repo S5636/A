@@ -52,6 +52,90 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 app = Flask(__name__)
 
 
+def _fetch_stock_price(code):
+    """네이버 금융 비공식 실시간 시세 API로 KRX 종목 현재가를 가져온다.
+    공식 API가 아니라 언제든 응답 형식이 바뀌거나 막힐 수 있음 - 실패하면
+    조용히 None을 돌려줘서(예외를 올리지 않음) 호출하는 쪽(백그라운드
+    루프)이 그 종목만 건너뛰고 나머지는 계속 돌 수 있게 한다."""
+    import urllib.request
+
+    url = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return float(data["result"]["areas"][0]["datas"][0]["nv"])
+    except Exception:
+        return None
+
+
+def _send_windows_toast(title, message):
+    """윈도우 토스트 알림을 띄운다. winotify가 없거나(다른 OS 등) 실패하면
+    조용히 넘어간다 - 알림 하나 실패했다고 전체 가격 확인 루프가 멈추면
+    안 되므로."""
+    try:
+        from winotify import Notification
+        toast = Notification(app_id="CORESYNC", title=title, msg=message, duration="long")
+        toast.show()
+    except Exception:
+        pass
+
+
+def _is_krx_market_hours():
+    """평일 09:00~15:30(한국거래소 정규장)에만 시세를 확인한다 - 장 밖
+    시간엔 가격이 안 바뀌니 괜히 API를 두드릴 필요 없음."""
+    now = datetime.now()
+    if now.weekday() >= 5:
+        return False
+    return (9, 0) <= (now.hour, now.minute) <= (15, 30)
+
+
+def _check_stocks_and_notify():
+    conn = get_conn()
+    try:
+        stocks = conn.execute(
+            "SELECT * FROM stocks WHERE active = 1 AND code != ''"
+        ).fetchall()
+        for s in stocks:
+            price = _fetch_stock_price(s["code"])
+            if price is None:
+                continue
+            profit = (price - (s["buy_price"] or 0)) * (s["quantity"] or 0)
+            is_positive = 1 if profit > 0 else 0
+            if is_positive and not s["last_known_positive"]:
+                _send_windows_toast(
+                    f"📈 {s['name']} 플러스 전환",
+                    f"현재가 {price:,.0f}원 · 평가손익 +{profit:,.0f}원",
+                )
+            conn.execute(
+                "UPDATE stocks SET last_price = ?, last_checked_at = ?, last_known_positive = ? "
+                "WHERE id = ?",
+                (price, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), is_positive, s["id"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _stock_monitor_loop():
+    import time
+    while True:
+        try:
+            if _is_krx_market_hours():
+                _check_stocks_and_notify()
+        except Exception:
+            pass
+        time.sleep(300)
+
+
+def start_stock_monitor():
+    """launcher.py에서 서버 시작 직전에 호출한다(app.py를 import만 할 때는
+    백그라운드 스레드가 돌지 않게 - 테스트/마이그레이션 스크립트 실행
+    중에 괜히 네트워크를 두드리지 않도록)."""
+    import threading
+    threading.Thread(target=_stock_monitor_loop, daemon=True).start()
+
+
 def serialize_inbox(conn):
     rows = conn.execute(
         "SELECT * FROM inbox_items WHERE status = 'pending' ORDER BY occurred_at DESC, id DESC"
@@ -221,9 +305,42 @@ def serialize_full():
             "insurances": serialize_insurances(conn),
             "medical_expenses": serialize_medical_expenses(conn),
             "suspected_duplicates": find_suspected_duplicates(conn),
+            "stocks": serialize_stocks(conn),
         }
     finally:
         conn.close()
+
+
+def serialize_stocks(conn):
+    """화면에 뿌릴 땐 백그라운드 스레드가 미리 갱신해둔 last_price(캐시)를
+    그대로 쓴다 - 페이지 열 때마다 네이버 시세 API를 직접 호출하면
+    느려지거나 그 API가 막혔을 때 페이지 전체가 멈출 수 있어서."""
+    rows = conn.execute("SELECT * FROM stocks ORDER BY sort_order ASC, id ASC").fetchall()
+    result = []
+    for s in rows:
+        buy_price = s["buy_price"] or 0
+        quantity = s["quantity"] or 0
+        last_price = s["last_price"] or 0
+        profit = (last_price - buy_price) * quantity if last_price else None
+        profit_percent = (
+            round((last_price - buy_price) / buy_price * 100, 2)
+            if last_price and buy_price else None
+        )
+        result.append({
+            "id": s["id"],
+            "name": s["name"],
+            "code": s["code"],
+            "buy_price": buy_price,
+            "quantity": quantity,
+            "last_price": last_price or None,
+            "last_checked_at": s["last_checked_at"],
+            "profit": profit,
+            "profit_percent": profit_percent,
+            "active": bool(s["active"]),
+            "memo": s["memo"],
+            "sort_order": s["sort_order"],
+        })
+    return result
 
 
 def serialize_recurring_payments(conn):
@@ -1417,6 +1534,111 @@ def delete_card(card_id):
 
 
 # ---- 대출 ----
+
+
+@app.route("/api/stocks", methods=["POST"])
+def create_stock():
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    code = (data.get("code") or "").strip()
+    if not name:
+        return jsonify({"error": "종목명을 입력하세요."}), 400
+    try:
+        buy_price = float(data.get("buy_price") or 0)
+    except (TypeError, ValueError):
+        buy_price = 0
+    try:
+        quantity = float(data.get("quantity") or 0)
+    except (TypeError, ValueError):
+        quantity = 0
+
+    conn = get_conn()
+    try:
+        max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM stocks").fetchone()["m"]
+        conn.execute(
+            """INSERT INTO stocks (name, code, buy_price, quantity, active, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                name, code, buy_price, quantity,
+                1 if data.get("active", True) else 0,
+                (data.get("memo") or "").strip(),
+                max_order + 1,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/stocks/<int:stock_id>", methods=["PUT"])
+def update_stock(stock_id):
+    data = request.get_json(force=True) or {}
+    conn = get_conn()
+    try:
+        stock = conn.execute("SELECT * FROM stocks WHERE id = ?", (stock_id,)).fetchone()
+        if not stock:
+            return jsonify({"error": "종목을 찾을 수 없습니다."}), 404
+        name = (data.get("name") or stock["name"]).strip()
+        try:
+            buy_price = float(data.get("buy_price", stock["buy_price"]))
+        except (TypeError, ValueError):
+            buy_price = stock["buy_price"]
+        try:
+            quantity = float(data.get("quantity", stock["quantity"]))
+        except (TypeError, ValueError):
+            quantity = stock["quantity"]
+        try:
+            sort_order = int(data.get("sort_order", stock["sort_order"]))
+        except (TypeError, ValueError):
+            sort_order = stock["sort_order"]
+        active = 1 if data.get("active", bool(stock["active"])) else 0
+
+        # 매수가/수량을 사람이 직접 고치면 손익 부호가 달라질 수 있으니,
+        # 다음 백그라운드 확인 때 "방금 플러스로 바뀜" 알림이 잘못 뜨지
+        # 않도록 last_known_positive를 지금 값 기준으로 다시 계산해둔다.
+        last_price = stock["last_price"] or 0
+        profit = (last_price - buy_price) * quantity if last_price else 0
+        last_known_positive = 1 if profit > 0 else 0
+
+        conn.execute(
+            """UPDATE stocks SET name=?, code=?, buy_price=?, quantity=?, active=?, memo=?,
+               sort_order=?, last_known_positive=? WHERE id=?""",
+            (
+                name,
+                (data.get("code", stock["code"]) or "").strip(),
+                buy_price,
+                quantity,
+                active,
+                (data.get("memo", stock["memo"]) or "").strip(),
+                sort_order,
+                last_known_positive,
+                stock_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/stocks/<int:stock_id>", methods=["DELETE"])
+def delete_stock(stock_id):
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM stocks WHERE id = ?", (stock_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/stocks/refresh", methods=["POST"])
+def refresh_stocks():
+    """"지금 확인" 버튼 - 장 시간이 아니어도, 기다리지 않고 지금 바로
+    전 종목 시세를 확인한다(플러스 전환이면 토스트 알림도 똑같이 뜸)."""
+    _check_stocks_and_notify()
+    return jsonify(serialize_full())
 
 
 @app.route("/api/loans", methods=["POST"])

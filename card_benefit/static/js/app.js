@@ -33,7 +33,7 @@
     el.style.boxShadow = `0 0 7px -2px ${hexToRgba(NEON_YELLOW, 0.65)}`;
   }
 
-  let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [], suspected_duplicates: [] };
+  let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [], suspected_duplicates: [], stocks: [] };
   let inboxOpen = false;
   let noBenefitOpen = false;
   // null = 진짜 이번 달(필터 없음). "YYYY-MM" 문자열이면 카드 탭의 "사용내역"
@@ -176,11 +176,12 @@
     renderInsurance();
     renderMedical();
     renderDuplicates();
+    renderStocks();
     requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
   }
 
-  // ---- 탭(카드/대출/고정지출/보험) ----
-  const VIEW_NAMES = ["card", "loan", "recurring", "insurance"];
+  // ---- 탭(카드/대출/고정지출/보험/주식) ----
+  const VIEW_NAMES = ["card", "loan", "recurring", "insurance", "stock"];
   let activeView = "card";
   function applyActiveView() {
     document.querySelectorAll(".view-tab").forEach((b) => b.classList.toggle("active", b.dataset.view === activeView));
@@ -1682,6 +1683,127 @@
       body: JSON.stringify(payload),
     });
     insuranceModal.classList.remove("open");
+    render();
+  });
+
+  // ---- 주식 ----
+  function renderStocks() {
+    const list = document.getElementById("stock-list");
+    const emptyHint = document.getElementById("empty-stock-hint");
+    list.querySelectorAll(".card").forEach((el) => el.remove());
+    emptyHint.style.display = state.stocks.length ? "none" : "block";
+
+    const total = state.stocks
+      .filter((s) => s.active && s.profit != null)
+      .reduce((sum, s) => sum + s.profit, 0);
+    document.getElementById("stock-total-value").textContent = `${total >= 0 ? "+" : ""}₩${fmt(total)}`;
+
+    const checkedTimes = state.stocks.map((s) => s.last_checked_at).filter(Boolean).sort();
+    document.getElementById("stock-last-checked").textContent =
+      checkedTimes.length ? `마지막 확인 ${checkedTimes[checkedTimes.length - 1]}` : "";
+
+    state.stocks.forEach((s) => {
+      const el = document.createElement("div");
+      el.className = "card";
+      el.id = `stock-${s.id}`;
+      el.innerHTML = stockTemplate(s);
+      list.appendChild(el);
+      wireStock(el, s);
+    });
+  }
+
+  function stockTemplate(s) {
+    const profitColor = s.profit == null ? "var(--text-muted)" : s.profit > 0 ? "var(--neon-green)" : s.profit < 0 ? "var(--critical)" : "var(--text-muted)";
+    const profitText = s.profit == null
+      ? "시세 확인 전"
+      : `${s.profit >= 0 ? "+" : ""}${fmt(s.profit)}원 (${s.profit_percent >= 0 ? "+" : ""}${s.profit_percent}%)`;
+    return `
+      <div class="card-head">
+        <div class="card-head-left">
+          <div class="card-text-stack">
+            <div class="card-text-row">
+              <span class="card-title-scroll"><span class="card-title" style="${s.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(s.name)}</span></span>
+              <span class="card-head-right">
+                ${s.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">매도</span>`}
+                <span class="benefit-remaining amount-accent" style="color:${profitColor};">${profitText}</span>
+              </span>
+            </div>
+            <div class="card-text-row">
+              <span class="card-method-dim">${s.code ? escapeHtml(s.code) : "종목코드 미입력"} / 매수 ${fmt(s.buy_price)}원 x ${fmt(s.quantity)}주${s.last_price ? ` / 현재 ${fmt(s.last_price)}원` : ""}</span>
+              <span class="card-head-right">
+                <button class="icon-btn edit-stock" data-id="${s.id}" title="수정">✏️</button>
+                <button class="icon-btn delete-stock" data-id="${s.id}" title="삭제">🗑️</button>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      ${memoToggleTemplate(`stock-${s.id}`, s.memo)}
+    `;
+  }
+
+  function wireStock(el, s) {
+    el.querySelector(".edit-stock").addEventListener("click", () => openStockModal(s));
+    el.querySelector(".delete-stock").addEventListener("click", async () => {
+      if (!confirm(`"${s.name}"을(를) 삭제할까요?`)) return;
+      state = await api(`/api/stocks/${s.id}`, { method: "DELETE" });
+      render();
+    });
+    el.querySelectorAll(".memo-toggle").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.memoKey;
+        if (openMemoPanels.has(key)) openMemoPanels.delete(key);
+        else openMemoPanels.add(key);
+        render();
+      })
+    );
+  }
+
+  document.getElementById("btn-stock-refresh").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "확인 중...";
+    try {
+      state = await api("/api/stocks/refresh", { method: "POST" });
+      render();
+    } finally {
+      e.target.disabled = false;
+      e.target.textContent = "지금 확인";
+    }
+  });
+
+  const stockModal = document.getElementById("stock-modal");
+  let editingStockId = null;
+  function openStockModal(s) {
+    editingStockId = s ? s.id : null;
+    document.getElementById("stock-modal-title").textContent = s ? "종목 수정" : "종목 추가";
+    document.getElementById("stock-name").value = s ? s.name : "";
+    document.getElementById("stock-code").value = s ? s.code : "";
+    document.getElementById("stock-buy-price").value = s ? s.buy_price : "";
+    document.getElementById("stock-quantity").value = s ? s.quantity : "";
+    document.getElementById("stock-active").checked = s ? !!s.active : true;
+    document.getElementById("stock-memo").value = s ? s.memo : "";
+    stockModal.classList.add("open");
+  }
+  document.getElementById("btn-add-stock").addEventListener("click", () => openStockModal(null));
+  document.getElementById("stock-cancel").addEventListener("click", () => stockModal.classList.remove("open"));
+  document.getElementById("stock-save").addEventListener("click", async () => {
+    const payload = {
+      name: document.getElementById("stock-name").value.trim(),
+      code: document.getElementById("stock-code").value.trim(),
+      buy_price: document.getElementById("stock-buy-price").value || 0,
+      quantity: document.getElementById("stock-quantity").value || 0,
+      active: document.getElementById("stock-active").checked,
+      memo: document.getElementById("stock-memo").value.trim(),
+    };
+    if (!payload.name) { alert("종목명을 입력하세요."); return; }
+    const url = editingStockId ? `/api/stocks/${editingStockId}` : "/api/stocks";
+    const method = editingStockId ? "PUT" : "POST";
+    state = await api(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    stockModal.classList.remove("open");
     render();
   });
 

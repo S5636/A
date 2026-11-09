@@ -166,6 +166,25 @@ CREATE TABLE IF NOT EXISTS insurances (
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+-- 주식 보유 종목. 매수가 대비 평가손익이 마이너스에서 플러스로 바뀌는
+-- 순간을 잡아서 윈도우 토스트 알림을 보내기 위함(백그라운드 스레드가
+-- 주기적으로 네이버 금융 비공식 시세 API로 현재가를 갱신함). KRX 종목
+-- 코드(6자리 숫자)만 지원 - 해외주식은 아직 안 됨.
+CREATE TABLE IF NOT EXISTS stocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL DEFAULT '',            -- 종목명
+    code TEXT NOT NULL DEFAULT '',            -- 종목코드(KRX 6자리)
+    buy_price REAL NOT NULL DEFAULT 0,        -- 매수 평균단가
+    quantity REAL NOT NULL DEFAULT 0,         -- 보유 수량
+    last_price REAL NOT NULL DEFAULT 0,       -- 마지막으로 확인된 현재가(백그라운드 갱신)
+    last_checked_at TEXT DEFAULT '',          -- 마지막 시세 확인 시각
+    last_known_positive INTEGER NOT NULL DEFAULT 0,  -- 마지막으로 확인한 평가손익 부호(전환 감지용)
+    active INTEGER NOT NULL DEFAULT 1,
+    memo TEXT DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
 """
 
 
