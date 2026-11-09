@@ -262,16 +262,14 @@ def serialize_medical_expenses(conn):
 
 
 def find_suspected_duplicates(conn):
-    """같은 날 같은 가맹점에서 2번 이상 찍힌 알림을 묶어서 보여준다. 두 가지
-    경우를 다 포함한다 - (1) 같은 결제가 두 경로(폰 알림 자동수집 + 엑셀
+    """같은 날 같은 가맹점에서 금액까지 같게(또는 거의 같게) 2번 이상 찍힌
+    알림을 묶어서 보여준다 - 같은 결제가 두 경로(폰 알림 자동수집 + 엑셀
     명세서 업로드)로 각각 들어와서 실제로는 한 건인데 행이 두 개로 남은
-    경우(해외결제는 알림 시점 추정환율과 명세서 확정환율이 달라 금액이
-    완전히 똑같지 않을 수 있음), (2) 더모아처럼 "동일 가맹점 1일 1회만
-    적립"인 카드에서 같은 가맹점을 하루에 정말로 여러 번 결제해서, 먼저
-    들어온 것만 적립되고 나머지는 적립 대상에서 막힌 경우(이땐 금액이
-    서로 다른 게 보통이고, 중복 등록이 아니라 그 카드 정책상 원래 둘 다
-    못 받는 게 맞는 상황이다). 금액 비교는 일부러 안 한다 - 어느 쪽이든
-    "같은 날 같은 가맹점"이라는 사실 자체가 확인해볼 가치가 있어서다.
+    경우를 잡기 위함(해외결제는 알림 시점 추정환율과 명세서 확정환율이
+    달라 금액이 완전히 똑같지 않을 수 있어서 10%까지는 같은 걸로 본다).
+    금액이 다르면 같은 가맹점 같은 날이어도 묶지 않는다 - 하루에 같은
+    가맹점을 여러 번 들러 서로 다른 걸 사는 경우(예: 생활용품점)가 많아서,
+    금액 무시하고 다 묶으면 실제 중복이 아닌 게 너무 많이 걸림.
     날짜가 하루라도 벌어지면 절대 안 묶는다(LG U+ 소액결제처럼 매일 반복
     찍히는 정액 결제가 전부 딸려 들어오는 걸 막기 위함)."""
     rows = conn.execute(
@@ -301,7 +299,11 @@ def find_suspected_duplicates(conn):
     def is_pair(a, b):
         if not ((not a["last4"] or not b["last4"]) or card_codes_match(a["last4"], b["last4"])):
             return False
-        return a["occurred_at"][:10] == b["occurred_at"][:10]
+        if a["occurred_at"][:10] != b["occurred_at"][:10]:
+            return False
+        amt_a, amt_b = a["amount"], b["amount"]
+        bigger = max(amt_a, amt_b)
+        return bigger > 0 and abs(amt_a - amt_b) / bigger <= 0.1
 
     by_merchant = defaultdict(list)
     for r in rows:
@@ -659,21 +661,23 @@ def _nearest_payment_day_gap(payment_day, occurred_date):
     return best
 
 
-def _try_auto_match_loan(conn, inbox_id):
+def _mark_loan_paid_from_inbox(conn, loan_id, inbox_id):
+    conn.execute(
+        "UPDATE loans SET paid_check_month = ? WHERE id = ?",
+        (current_year_month(), loan_id),
+    )
+    conn.execute("UPDATE inbox_items SET status = 'no_benefit', card_id = NULL WHERE id = ?", (inbox_id,))
+
+
+def _try_auto_match_loan_account_text(conn, inbox_id):
     """"내 광주은행 통장 → 원리금441779"처럼 카드 결제가 아니라 계좌에서
     바로 빠져나가는 대출 원리금 자동이체 알림은, 혜택을 받을 수 있는
     거래가 아니라서 혜택배정 큐에 남아있을 이유가 없다. "통장"이 들어간
     알림(계좌 거래 알림의 특징적인 표현 - 카드 결제 알림과 구분하기 위함)
-    에서만 시도한다.
-    매칭 방법 두 가지(둘 중 하나만 모호하지 않게 맞아도 매칭):
-    1) 등록된 대출의 출금계좌(은행명)가 알림 문구에 들어있는 경우가
-       정확히 하나뿐이면 그 대출로 매칭(기존 방식, 금액이 아예 안 찍히는
-       계좌 알림도 처리 가능).
-    2) 알림에 금액이 찍혀 있으면, 그 금액이 월 상환액과 똑같고(1원 오차
-       없이) 알림 발생일이 그 대출 상환일(주말이면 앞뒤로 최대 3일까지
-       밀릴 수 있다고 보고) 근처인 대출이 정확히 하나뿐이면 매칭.
-    매칭되면 그 대출의 "당월 상환"을 자동으로 체크하고 이 알림은
-    "혜택 없음 처리됨"으로 큐에서 뺀다."""
+    에서만 시도하고, 등록된 대출의 출금계좌(은행명)가 알림 문구에 들어있는
+    경우가 정확히 하나뿐이면 그 대출로 매칭한다(금액이 아예 안 찍히는
+    계좌 알림도 처리 가능). 은행명 자체가 특정돼서 나오는 방식이라 가장
+    확실한 매칭이라 제일 먼저 시도한다."""
     item = conn.execute(
         "SELECT * FROM inbox_items WHERE id = ? AND status = 'pending'", (inbox_id,)
     ).fetchone()
@@ -682,33 +686,58 @@ def _try_auto_match_loan(conn, inbox_id):
     text = f"{item['merchant'] or ''} {item['raw_text'] or ''}"
     if "통장" not in text and "계좌" not in text:
         return False
-    loans = conn.execute("SELECT * FROM loans").fetchall()
-
-    account_matches = [l for l in loans if l["withdrawal_account"] and l["withdrawal_account"] in text]
-    matched = account_matches[0] if len(account_matches) == 1 else None
-
-    if matched is None and item["amount"]:
-        try:
-            occurred_date = date.fromisoformat((item["occurred_at"] or "")[:10])
-        except ValueError:
-            occurred_date = None
-        if occurred_date:
-            amount_matches = [
-                l for l in loans
-                if l["monthly_payment"] and abs(l["monthly_payment"] - item["amount"]) < 1
-                and _nearest_payment_day_gap(l["payment_day"], occurred_date) <= 3
-            ]
-            if len(amount_matches) == 1:
-                matched = amount_matches[0]
-
-    if matched is None:
+    loans = conn.execute(
+        "SELECT id, withdrawal_account FROM loans WHERE withdrawal_account != ''"
+    ).fetchall()
+    matches = [l for l in loans if l["withdrawal_account"] in text]
+    if len(matches) != 1:
         return False
-    conn.execute(
-        "UPDATE loans SET paid_check_month = ? WHERE id = ?",
-        (current_year_month(), matched["id"]),
-    )
-    conn.execute("UPDATE inbox_items SET status = 'no_benefit', card_id = NULL WHERE id = ?", (inbox_id,))
+    _mark_loan_paid_from_inbox(conn, matches[0]["id"], inbox_id)
     return True
+
+
+def _try_auto_match_loan_amount_date(conn, inbox_id):
+    """출금계좌 텍스트로 특정이 안 될 때 쓰는, 좀 더 느슨한 매칭이다.
+    금액이 그 대출 월 상환액과 똑같고(1원 오차 없이), 알림 발생일이 그
+    대출 상환일 근처(상환일이 주말이면 은행이 앞뒤로 날짜를 당기거나
+    미룰 수 있다고 보고 최대 3일까지)인 대출이 정확히 하나뿐이면 매칭.
+    이건 보험료 등 다른 계좌 자동이체랑 금액이 우연히 겹칠 위험이 있어서,
+    호출하는 쪽에서 반드시 고정지출/보험 매칭을 먼저 시도해 실패한
+    경우에만(더 구체적인 가맹점명 매칭이 없을 때만) 마지막 수단으로
+    불러야 한다."""
+    item = conn.execute(
+        "SELECT * FROM inbox_items WHERE id = ? AND status = 'pending'", (inbox_id,)
+    ).fetchone()
+    if not item or not item["amount"]:
+        return False
+    text = f"{item['merchant'] or ''} {item['raw_text'] or ''}"
+    if "통장" not in text and "계좌" not in text:
+        return False
+    try:
+        occurred_date = date.fromisoformat((item["occurred_at"] or "")[:10])
+    except ValueError:
+        return False
+    loans = conn.execute("SELECT * FROM loans").fetchall()
+    matches = [
+        l for l in loans
+        if l["monthly_payment"] and abs(l["monthly_payment"] - item["amount"]) < 1
+        and _nearest_payment_day_gap(l["payment_day"], occurred_date) <= 3
+    ]
+    if len(matches) != 1:
+        return False
+    _mark_loan_paid_from_inbox(conn, matches[0]["id"], inbox_id)
+    return True
+
+
+def _try_auto_match_loan(conn, inbox_id):
+    """대출 자동매칭 전체(은행명 텍스트 매칭 먼저, 안 되면 금액+날짜
+    매칭). "대출 탭 > 자동 매칭" 버튼처럼 대출 매칭만 단독으로 몰아서
+    다시 시도할 때 쓴다 - 실시간 알림 처리 때는 보험/고정지출 매칭과
+    순서를 맞춰야 해서 두 함수를 따로 쓴다."""
+    return (
+        _try_auto_match_loan_account_text(conn, inbox_id)
+        or _try_auto_match_loan_amount_date(conn, inbox_id)
+    )
 
 
 def _next_payment_date(payment_day):
@@ -2724,9 +2753,15 @@ def create_inbox_item():
                  "cancelled" if is_cancel else "pending"),
             )
             if not is_cancel:
-                if not _try_auto_match_loan(conn, cur.lastrowid):
-                    _try_auto_match_recurring(conn, cur.lastrowid)
-                    _try_auto_match_insurance(conn, cur.lastrowid)
+                # 대출 쪽은 은행명이 특정돼서 나오는 텍스트 매칭이 제일
+                # 확실해서 가장 먼저 시도. 그다음은 가맹점명까지 보는
+                # 고정지출/보험(더 구체적인 매칭). 대출 금액+날짜 매칭은
+                # 보험료 등 다른 계좌이체랑 금액이 우연히 겹칠 수 있는
+                # 가장 느슨한 방법이라 마지막 수단으로만 쓴다.
+                if not _try_auto_match_loan_account_text(conn, cur.lastrowid):
+                    if not _try_auto_match_recurring(conn, cur.lastrowid):
+                        if not _try_auto_match_insurance(conn, cur.lastrowid):
+                            _try_auto_match_loan_amount_date(conn, cur.lastrowid)
         conn.commit()
     finally:
         conn.close()
