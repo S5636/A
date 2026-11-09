@@ -4,6 +4,7 @@
 같은 와이파이(공유기)에 연결된 PC와 폰이 브라우저로 같은 서버(0.0.0.0)에
 접속해서 카드별 혜택의 이번 달 남은 한도를 같이 보고 같이 기록한다.
 """
+import calendar
 import json
 import os
 import re
@@ -636,15 +637,43 @@ def _try_auto_match_insurance(conn, inbox_id):
     return _try_auto_match(conn, inbox_id, "insurance_id", "insurances", "monthly_premium", "product_name")
 
 
+def _nearest_payment_day_gap(payment_day, occurred_date):
+    """occurred_date가 속한 달(과 전/다음달)의 payment_day 후보들 중
+    occurred_date와 가장 가까운 날짜까지 며칠 차이나는지 구한다. 상환일이
+    주말/공휴일이면 은행이 앞뒤로 날짜를 당기거나 미루는 걸 감안하기 위함."""
+    day = min(max(int(payment_day or 1), 1), 28)
+    best = None
+    for delta in (-1, 0, 1):
+        y, m = occurred_date.year, occurred_date.month + delta
+        while m < 1:
+            m += 12
+            y -= 1
+        while m > 12:
+            m -= 12
+            y += 1
+        last_day = calendar.monthrange(y, m)[1]
+        candidate = date(y, m, min(day, last_day))
+        gap = abs((candidate - occurred_date).days)
+        if best is None or gap < best:
+            best = gap
+    return best
+
+
 def _try_auto_match_loan(conn, inbox_id):
     """"내 광주은행 통장 → 원리금441779"처럼 카드 결제가 아니라 계좌에서
     바로 빠져나가는 대출 원리금 자동이체 알림은, 혜택을 받을 수 있는
     거래가 아니라서 혜택배정 큐에 남아있을 이유가 없다. "통장"이 들어간
     알림(계좌 거래 알림의 특징적인 표현 - 카드 결제 알림과 구분하기 위함)
-    에서만 시도하고, 등록된 대출의 출금계좌(은행명)가 알림 문구에 들어있는
-    경우가 정확히 하나뿐이면 그 대출의 "당월 상환"을 자동으로 체크하고
-    이 알림은 "혜택 없음 처리됨"으로 큐에서 뺀다. 계좌 알림엔 금액이 아예
-    안 찍히는 경우가 많아서(이체 참조번호만 나옴) 금액은 보지 않는다."""
+    에서만 시도한다.
+    매칭 방법 두 가지(둘 중 하나만 모호하지 않게 맞아도 매칭):
+    1) 등록된 대출의 출금계좌(은행명)가 알림 문구에 들어있는 경우가
+       정확히 하나뿐이면 그 대출로 매칭(기존 방식, 금액이 아예 안 찍히는
+       계좌 알림도 처리 가능).
+    2) 알림에 금액이 찍혀 있으면, 그 금액이 월 상환액과 똑같고(1원 오차
+       없이) 알림 발생일이 그 대출 상환일(주말이면 앞뒤로 최대 3일까지
+       밀릴 수 있다고 보고) 근처인 대출이 정확히 하나뿐이면 매칭.
+    매칭되면 그 대출의 "당월 상환"을 자동으로 체크하고 이 알림은
+    "혜택 없음 처리됨"으로 큐에서 뺀다."""
     item = conn.execute(
         "SELECT * FROM inbox_items WHERE id = ? AND status = 'pending'", (inbox_id,)
     ).fetchone()
@@ -653,15 +682,30 @@ def _try_auto_match_loan(conn, inbox_id):
     text = f"{item['merchant'] or ''} {item['raw_text'] or ''}"
     if "통장" not in text and "계좌" not in text:
         return False
-    loans = conn.execute(
-        "SELECT id, withdrawal_account FROM loans WHERE withdrawal_account != ''"
-    ).fetchall()
-    matches = [l for l in loans if l["withdrawal_account"] in text]
-    if len(matches) != 1:
+    loans = conn.execute("SELECT * FROM loans").fetchall()
+
+    account_matches = [l for l in loans if l["withdrawal_account"] and l["withdrawal_account"] in text]
+    matched = account_matches[0] if len(account_matches) == 1 else None
+
+    if matched is None and item["amount"]:
+        try:
+            occurred_date = date.fromisoformat((item["occurred_at"] or "")[:10])
+        except ValueError:
+            occurred_date = None
+        if occurred_date:
+            amount_matches = [
+                l for l in loans
+                if l["monthly_payment"] and abs(l["monthly_payment"] - item["amount"]) < 1
+                and _nearest_payment_day_gap(l["payment_day"], occurred_date) <= 3
+            ]
+            if len(amount_matches) == 1:
+                matched = amount_matches[0]
+
+    if matched is None:
         return False
     conn.execute(
         "UPDATE loans SET paid_check_month = ? WHERE id = ?",
-        (current_year_month(), matches[0]["id"]),
+        (current_year_month(), matched["id"]),
     )
     conn.execute("UPDATE inbox_items SET status = 'no_benefit', card_id = NULL WHERE id = ?", (inbox_id,))
     return True
