@@ -580,6 +580,12 @@
     <label>보험만기일 (선택, 종신이면 "종신"이라고 입력)
       <input type="text" id="insurance-maturity-date" placeholder="예: 2065-02-18 또는 종신">
     </label>
+    <label>현재 적립금액 (선택, 적금/적립식 예금을 같이 관리할 때만)
+      <input type="number" id="insurance-current-balance" min="0" step="1" placeholder="예: 1615000">
+    </label>
+    <label>적용이율 연% (선택, 적금/적립식 예금을 같이 관리할 때만)
+      <input type="number" id="insurance-interest-rate" min="0" step="0.01" placeholder="예: 3.9">
+    </label>
     <label>카드/계좌 알림에 찍히는 이름이 다르면 (선택)
       <input type="text" id="insurance-billing-alias" placeholder="예: MG손해보험이 '예별손해보험'으로 찍히는 경우">
     </label>

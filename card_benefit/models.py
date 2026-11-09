@@ -159,6 +159,8 @@ CREATE TABLE IF NOT EXISTS insurances (
     start_date TEXT DEFAULT '',              -- 계약일
     payment_end_date TEXT DEFAULT '',        -- 납입완료일
     maturity_date TEXT DEFAULT '',           -- 보험만기일(날짜 또는 '종신' 등 텍스트 그대로)
+    current_balance REAL NOT NULL DEFAULT 0,  -- 적금/적립식 예금처럼 같이 관리할 때: 현재까지 적립된 금액(원금 기준). 순수 보험은 0으로 둠
+    interest_rate REAL NOT NULL DEFAULT 0,    -- 적금/적립식 예금의 적용이율(연%). 순수 보험은 0으로 둠
     active INTEGER NOT NULL DEFAULT 1,       -- 0이면 해지
     memo TEXT DEFAULT '',                    -- 보장내용/약관/증권번호 등 자유 기록
     sort_order INTEGER NOT NULL DEFAULT 0,
@@ -232,6 +234,8 @@ def init_db():
         _ensure_column(conn, "inbox_items", "dup_ignored", "dup_ignored INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "benefits", "plan_day_double", "plan_day_double INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "loans", "repayment_start_date", "repayment_start_date TEXT DEFAULT ''")
+        _ensure_column(conn, "insurances", "current_balance", "current_balance REAL NOT NULL DEFAULT 0")
+        _ensure_column(conn, "insurances", "interest_rate", "interest_rate REAL NOT NULL DEFAULT 0")
 
         # recurring_id/insurance_id는 _ensure_column으로 나중에 추가된 컬럼이라
         # (예전 DB엔 처음부터 있던 게 아니라서) ON DELETE SET NULL 외래키 제약이

@@ -233,11 +233,66 @@ def serialize_recurring_payments(conn):
     return _attach_match_info(conn, rows, "recurring_id")
 
 
+def _savings_maturity_projection(insurance):
+    """적금/적립식 예금처럼 "보험" 테이블에 같이 등록해서 관리하는 항목은
+    (순수 보험엔 없는) current_balance(현재 적립금액)와 interest_rate(적용
+    이율)가 들어있을 때만, 지금 페이스(매달 monthly_premium만큼 입금)로
+    만기까지 넣으면 최종 얼마가 되는지 추정한다. 단리 기준(각 회차
+    입금액에 그 입금일부터 만기일까지 남은 일수만큼만 이자가 붙는다고
+    봄 - 적금 이자는 보통 만기에 한 번에 지급돼서 현재 잔액엔 이자가
+    아직 안 들어있다고 가정). 은행 계산방식이 다를 수 있어 "예상치".
+    current_balance나 interest_rate가 없거나 만기일을 날짜로 특정할 수
+    없으면(예: '종신') 계산 안 하고 None."""
+    balance = insurance["current_balance"] or 0
+    rate = insurance["interest_rate"] or 0
+    if balance <= 0 or rate <= 0:
+        return None
+    try:
+        maturity = date.fromisoformat((insurance["maturity_date"] or "")[:10])
+    except ValueError:
+        return None
+    today = date.today()
+    if maturity <= today:
+        return None
+    rate_frac = rate / 100
+
+    total_deposits = balance
+    interest = balance * rate_frac * (maturity - today).days / 365
+
+    monthly = insurance["monthly_premium"] or 0
+    if monthly > 0 and insurance["payment_day"]:
+        try:
+            payment_end = date.fromisoformat((insurance["payment_end_date"] or "")[:10])
+        except ValueError:
+            payment_end = maturity
+        last_deposit = min(payment_end, maturity)
+        cur = _next_payment_date(insurance["payment_day"])
+        guard = 0
+        while cur <= last_deposit:
+            days_left = (maturity - cur).days
+            interest += monthly * rate_frac * days_left / 365
+            total_deposits += monthly
+            cur = _add_month(cur, insurance["payment_day"])
+            guard += 1
+            if guard > 600:
+                break
+
+    return {
+        "maturity_date": maturity.isoformat(),
+        "total_deposits": round(total_deposits),
+        "estimated_interest": round(interest),
+        "maturity_amount": round(total_deposits + interest),
+    }
+
+
 def serialize_insurances(conn):
     rows = conn.execute(
         "SELECT * FROM insurances ORDER BY payment_day ASC, sort_order ASC, id ASC"
     ).fetchall()
-    return _attach_match_info(conn, rows, "insurance_id")
+    result = _attach_match_info(conn, rows, "insurance_id")
+    for item, row in zip(result, rows):
+        item["maturity_projection"] = _savings_maturity_projection(row)
+    return result
 
 
 def serialize_medical_expenses(conn):
@@ -1870,6 +1925,14 @@ def create_insurance():
         payment_day = int(data.get("payment_day") or 0)
     except (TypeError, ValueError):
         payment_day = 0
+    try:
+        current_balance = float(data.get("current_balance") or 0)
+    except (TypeError, ValueError):
+        current_balance = 0
+    try:
+        interest_rate = float(data.get("interest_rate") or 0)
+    except (TypeError, ValueError):
+        interest_rate = 0
     card_id = _parse_card_id(data.get("card_id"))
 
     conn = get_conn()
@@ -1878,8 +1941,8 @@ def create_insurance():
         conn.execute(
             """INSERT INTO insurances (company, product_name, insured_name, monthly_premium,
                payment_day, payment_method, card_id, start_date, payment_end_date, maturity_date,
-               active, memo, sort_order, billing_alias)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               current_balance, interest_rate, active, memo, sort_order, billing_alias)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 company,
                 product_name,
@@ -1891,6 +1954,8 @@ def create_insurance():
                 (data.get("start_date") or "").strip(),
                 (data.get("payment_end_date") or "").strip(),
                 (data.get("maturity_date") or "").strip(),
+                current_balance,
+                interest_rate,
                 1 if data.get("active", True) else 0,
                 (data.get("memo") or "").strip(),
                 max_order + 1,
@@ -1925,13 +1990,22 @@ def update_insurance(item_id):
             sort_order = int(data.get("sort_order", item["sort_order"]))
         except (TypeError, ValueError):
             sort_order = item["sort_order"]
+        try:
+            current_balance = float(data.get("current_balance", item["current_balance"]))
+        except (TypeError, ValueError):
+            current_balance = item["current_balance"]
+        try:
+            interest_rate = float(data.get("interest_rate", item["interest_rate"]))
+        except (TypeError, ValueError):
+            interest_rate = item["interest_rate"]
         active = 1 if data.get("active", bool(item["active"])) else 0
         card_id = _parse_card_id(data["card_id"]) if "card_id" in data else item["card_id"]
 
         conn.execute(
             """UPDATE insurances SET company=?, product_name=?, insured_name=?, monthly_premium=?,
                payment_day=?, payment_method=?, card_id=?, start_date=?, payment_end_date=?,
-               maturity_date=?, active=?, memo=?, sort_order=?, billing_alias=? WHERE id=?""",
+               maturity_date=?, current_balance=?, interest_rate=?, active=?, memo=?, sort_order=?,
+               billing_alias=? WHERE id=?""",
             (
                 (data.get("company", item["company"]) or "").strip(),
                 product_name,
@@ -1943,6 +2017,8 @@ def update_insurance(item_id):
                 (data.get("start_date", item["start_date"]) or "").strip(),
                 (data.get("payment_end_date", item["payment_end_date"]) or "").strip(),
                 (data.get("maturity_date", item["maturity_date"]) or "").strip(),
+                current_balance,
+                interest_rate,
                 active,
                 (data.get("memo", item["memo"]) or "").strip(),
                 sort_order,

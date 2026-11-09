@@ -1561,6 +1561,7 @@
         </div>
       </div>
       ${infoLine ? `<div class="perf-row-sub">${escapeHtml(infoLine)}</div>` : ""}
+      ${item.maturity_projection ? `<div class="perf-row-sub" style="color:var(--neon-green);">만기 예상액 ${fmt(item.maturity_projection.maturity_amount)}원 (납입 ${fmt(item.maturity_projection.total_deposits)} + 이자 ${fmt(item.maturity_projection.estimated_interest)}, 현재 페이스 기준 추정)</div>` : ""}
       ${memoToggleTemplate(`insurance-${item.id}`, item.memo)}
       ${matchHistoryTemplate(`insurance-${item.id}`, item.match_history, { showToggle: false })}
     `;
@@ -1644,6 +1645,8 @@
     document.getElementById("insurance-start-date").value = item ? item.start_date : "";
     document.getElementById("insurance-payment-end-date").value = item ? item.payment_end_date : "";
     document.getElementById("insurance-maturity-date").value = item ? item.maturity_date : "";
+    document.getElementById("insurance-current-balance").value = item && item.current_balance ? item.current_balance : "";
+    document.getElementById("insurance-interest-rate").value = item && item.interest_rate ? item.interest_rate : "";
     document.getElementById("insurance-billing-alias").value = item ? (item.billing_alias || "") : "";
     document.getElementById("insurance-active").checked = item ? !!item.active : true;
     document.getElementById("insurance-memo").value = item ? item.memo : "";
@@ -1664,6 +1667,8 @@
       start_date: document.getElementById("insurance-start-date").value.trim(),
       payment_end_date: document.getElementById("insurance-payment-end-date").value.trim(),
       maturity_date: document.getElementById("insurance-maturity-date").value.trim(),
+      current_balance: document.getElementById("insurance-current-balance").value || 0,
+      interest_rate: document.getElementById("insurance-interest-rate").value || 0,
       billing_alias: document.getElementById("insurance-billing-alias").value.trim(),
       active: document.getElementById("insurance-active").checked,
       memo: document.getElementById("insurance-memo").value.trim(),
