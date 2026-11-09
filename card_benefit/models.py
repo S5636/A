@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS loans (
     payment_months TEXT DEFAULT '',  -- 매달이 아니라 특정 달에만 내면 '1,4,7,10'처럼 쉼표구분 월 목록. 비어있으면 매달.
     withdrawal_account TEXT DEFAULT '',  -- 대출금이 빠져나가는 계좌/카드 (뒤 4자리 포함해서 표기)
     paid_check_month TEXT DEFAULT '',  -- 이번 달 상환 체크한 'YYYY-MM' (매달 자동으로 초기화됨)
+    repayment_start_date TEXT DEFAULT '',  -- 거치식(거치기간 후 원금균등 등) 대출의 실제 원금상환 시작일. 모르면 빈 값(추측 안 함)
     memo TEXT DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -230,6 +231,7 @@ def init_db():
         _ensure_column(conn, "insurances", "excluded_merchants", "excluded_merchants TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "dup_ignored", "dup_ignored INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "benefits", "plan_day_double", "plan_day_double INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "loans", "repayment_start_date", "repayment_start_date TEXT DEFAULT ''")
 
         # recurring_id/insurance_id는 _ensure_column으로 나중에 추가된 컬럼이라
         # (예전 DB엔 처음부터 있던 게 아니라서) ON DELETE SET NULL 외래키 제약이

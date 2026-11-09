@@ -783,7 +783,62 @@ def _installments_paid_before(start_date_str, payment_day, before_date):
     return count
 
 
-def _amortization_table(loan):
+def _amortization_equal_principal(loan):
+    """거치식원금균등분할(또는 거치기간 끝나고 원금균등으로 전환되는 대출):
+    repayment_start_date(실제 원금상환 시작일, 거치기간 종료 안내문 등으로
+    확인된 날짜)부터 end_date까지 남은 회차로 현재 잔액을 똑같이 나눠서
+    원금을 갚고, 이자는 매달 그때그때 남은 잔액 기준으로 계산한다(그래서
+    총 납입액은 점점 줄어듦). repayment_start_date를 모르면(등록 안 돼
+    있으면) 언제부터 원금을 갚기 시작하는지 추측할 수 없어서 아예 계산
+    안 한다."""
+    balance = loan["current_balance"] or 0
+    rate = loan["interest_rate"] or 0
+    if balance <= 0 or rate <= 0 or not loan["repayment_start_date"]:
+        return None
+    try:
+        repay_start = date.fromisoformat(loan["repayment_start_date"])
+        end = date.fromisoformat(loan["end_date"])
+    except (ValueError, TypeError):
+        return None
+    day = loan["payment_day"]
+    months = 0
+    cur = repay_start
+    while cur <= end:
+        months += 1
+        cur = _add_month(cur, day)
+        if months > 600:
+            return None
+    if months <= 0:
+        return None
+
+    next_date = _next_payment_date(day)
+    if next_date < repay_start:
+        return None  # 아직 거치기간 중(원금상환 전) - 보여줄 표가 없음
+    base = 0
+    cur = repay_start
+    while cur < next_date:
+        base += 1
+        cur = _add_month(cur, day)
+
+    monthly_rate = rate / 100 / 12
+    principal_per = round(balance / months)
+    rows = []
+    for seq in range(base + 1, months + 1):
+        interest = round(balance * monthly_rate)
+        principal = principal_per if seq < months else balance
+        if principal > balance:
+            principal = balance
+        balance -= principal
+        rows.append({
+            "seq": seq, "date": next_date.isoformat(),
+            "interest": interest, "principal": principal,
+            "balance": balance, "payment": principal + interest,
+        })
+        next_date = _add_month(next_date, day)
+    return rows
+
+
+def _amortization_equal_installment(loan):
     """원리금균등분할상환 대출만, 현재 등록된 잔액/금리/월상환액이 그대로
     유지된다고 가정하고 완납까지 회차별 이자/원금/잔액을 추정한다.
     - 금리나 월상환액이 없거나, 월상환액이 이자도 못 갚는 경우(거치기간 등
@@ -827,6 +882,15 @@ def _amortization_table(loan):
     else:
         return None
     return rows
+
+
+def _amortization_table(loan):
+    rtype = loan["repayment_type"] or ""
+    if rtype == "원리금균등분할상환":
+        return _amortization_equal_installment(loan)
+    if rtype in ("거치식원금균등분할", "원금균등상환"):
+        return _amortization_equal_principal(loan)
+    return None
 
 
 def serialize_loans(conn):
