@@ -667,6 +667,72 @@ def _try_auto_match_loan(conn, inbox_id):
     return True
 
 
+def _next_payment_date(payment_day):
+    """payment_day(1~31)를 기준으로 오늘 이후 가장 가까운 상환일을 구한다.
+    31일처럼 없는 달도 있으니 28일로 안전하게 자른다."""
+    day = min(max(int(payment_day or 1), 1), 28)
+    today = date.today()
+    candidate = date(today.year, today.month, day)
+    if candidate <= today:
+        y, m = today.year, today.month + 1
+        if m > 12:
+            y += 1
+            m = 1
+        candidate = date(y, m, day)
+    return candidate
+
+
+def _add_month(d, day):
+    y, m = d.year, d.month + 1
+    if m > 12:
+        y += 1
+        m = 1
+    return date(y, m, min(max(int(day or 1), 1), 28))
+
+
+def _amortization_table(loan):
+    """원리금균등분할상환 대출만, 현재 등록된 잔액/금리/월상환액이 그대로
+    유지된다고 가정하고 완납까지 회차별 이자/원금/잔액을 추정한다.
+    - 금리나 월상환액이 없거나, 월상환액이 이자도 못 갚는 경우(거치기간 등
+      실제로는 다른 방식으로 상환 중일 가능성)는 추정이 틀릴 수 있어 아예
+      보여주지 않는다(없는 데이터로 추측 금지).
+    """
+    if (loan["repayment_type"] or "") != "원리금균등분할상환":
+        return None
+    balance = loan["current_balance"] or 0
+    rate = loan["interest_rate"] or 0
+    installment = loan["monthly_payment"] or 0
+    if balance <= 0 or rate <= 0 or installment <= 0:
+        return None
+    monthly_rate = rate / 100 / 12
+    next_date = _next_payment_date(loan["payment_day"])
+    rows = []
+    for seq in range(1, 481):
+        interest = round(balance * monthly_rate)
+        if installment <= interest:
+            return None
+        principal = installment - interest
+        if principal >= balance:
+            principal = balance
+            balance = 0
+            rows.append({
+                "seq": seq, "date": next_date.isoformat(),
+                "interest": interest, "principal": principal,
+                "balance": balance, "payment": principal + interest,
+            })
+            break
+        balance -= principal
+        rows.append({
+            "seq": seq, "date": next_date.isoformat(),
+            "interest": interest, "principal": principal,
+            "balance": balance, "payment": installment,
+        })
+        next_date = _add_month(next_date, loan["payment_day"])
+    else:
+        return None
+    return rows
+
+
 def serialize_loans(conn):
     rows = conn.execute("SELECT * FROM loans ORDER BY sort_order ASC, id ASC").fetchall()
     result = []
@@ -717,6 +783,7 @@ def serialize_loans(conn):
             "days_left": days_left,
             "sort_order": loan["sort_order"],
             "payments": [dict(p) for p in payments],
+            "amortization": _amortization_table(loan),
         })
     return result
 

@@ -887,6 +887,20 @@
         `).join("")
       : `<div class="log-item"><span>상환 기록 없음</span></div>`;
 
+    const amortKey = `amort-${loan.id}`;
+    const amortOpen = openLogPanels.has(amortKey);
+    const amortRows = loan.amortization || [];
+    const amortHtml = amortRows.length
+      ? amortRows.map((r) => `
+          <div class="log-item">
+            <span>${r.seq}회 · ${r.date} · 이자 ${fmt(r.interest)} · 원금 ${fmt(r.principal)} → 잔액 ${fmt(r.balance)}</span>
+          </div>
+        `).join("")
+      : "";
+    const amortDoneLabel = amortRows.length
+      ? `${amortRows[amortRows.length - 1].date} 완납 예정(총 ${amortRows.length}회, 현재 조건 유지 가정)`
+      : "";
+
     const reorderHtml = showReorder ? `
       <div class="reorder-buttons">
         <button class="move-loan-up" data-id="${loan.id}" ${isFirst ? "disabled" : ""} title="위로">▲</button>
@@ -924,6 +938,7 @@
         <div class="benefit-buttons">
           <button class="icon-btn add-loan-payment" data-id="${loan.id}" title="상환 기록">➕</button>
           <button class="btn small toggle-loan-log" data-id="${loan.id}">내역</button>
+          ${amortRows.length ? `<button class="btn small toggle-loan-amort" data-id="${loan.id}">예상 상환표</button>` : ""}
         </div>
         <div class="benefit-buttons">
           <button class="icon-btn edit-loan" data-id="${loan.id}" title="대출 수정">✏️</button>
@@ -931,6 +946,12 @@
         </div>
       </div>
       <div class="log-list ${logsOpen ? "open" : ""}" data-log-for="${logKey}">${logsHtml}</div>
+      ${amortRows.length ? `
+        <div class="log-list ${amortOpen ? "open" : ""}" data-log-for="${amortKey}" style="max-height:220px;overflow-y:auto;">
+          <div class="log-item" style="color:var(--text-muted);">${amortDoneLabel}</div>
+          ${amortHtml}
+        </div>
+      ` : ""}
     `;
   }
 
@@ -959,6 +980,15 @@
       else openLogPanels.add(key);
       render();
     });
+    const amortBtn = el.querySelector(".toggle-loan-amort");
+    if (amortBtn) {
+      amortBtn.addEventListener("click", () => {
+        const key = `amort-${loan.id}`;
+        if (openLogPanels.has(key)) openLogPanels.delete(key);
+        else openLogPanels.add(key);
+        render();
+      });
+    }
     el.querySelectorAll(".memo-toggle").forEach((btn) =>
       btn.addEventListener("click", () => {
         const key = btn.dataset.memoKey;
