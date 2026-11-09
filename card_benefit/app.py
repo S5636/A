@@ -690,6 +690,26 @@ def _add_month(d, day):
     return date(y, m, min(max(int(day or 1), 1), 28))
 
 
+def _installments_paid_before(start_date_str, payment_day, before_date):
+    """대출 시작일(start_date) 다음 상환일부터 payment_day 주기로 세어
+    before_date(배타) 전까지 몇 번 냈는지 구한다. 첫 상환일은 보통 실행일
+    한 달 뒤로 본다. 이걸로 "실제 몇 회차"인지 계산(앱 안 쓰기 시작한
+    날짜부터가 아니라 대출 자체가 시작된 날부터 세야 맞음)."""
+    try:
+        start = date.fromisoformat(start_date_str)
+    except (ValueError, TypeError):
+        return None
+    day = min(max(int(payment_day or 1), 1), 28)
+    cur = _add_month(start, day)
+    count = 0
+    while cur < before_date:
+        count += 1
+        cur = _add_month(cur, day)
+        if count > 600:
+            return None
+    return count
+
+
 def _amortization_table(loan):
     """원리금균등분할상환 대출만, 현재 등록된 잔액/금리/월상환액이 그대로
     유지된다고 가정하고 완납까지 회차별 이자/원금/잔액을 추정한다.
@@ -706,8 +726,11 @@ def _amortization_table(loan):
         return None
     monthly_rate = rate / 100 / 12
     next_date = _next_payment_date(loan["payment_day"])
+    already_paid = _installments_paid_before(loan["start_date"], loan["payment_day"], next_date)
+    base = already_paid if already_paid is not None else 0
     rows = []
     for seq in range(1, 481):
+        real_seq = base + seq
         interest = round(balance * monthly_rate)
         if installment <= interest:
             return None
@@ -716,14 +739,14 @@ def _amortization_table(loan):
             principal = balance
             balance = 0
             rows.append({
-                "seq": seq, "date": next_date.isoformat(),
+                "seq": real_seq, "date": next_date.isoformat(),
                 "interest": interest, "principal": principal,
                 "balance": balance, "payment": principal + interest,
             })
             break
         balance -= principal
         rows.append({
-            "seq": seq, "date": next_date.isoformat(),
+            "seq": real_seq, "date": next_date.isoformat(),
             "interest": interest, "principal": principal,
             "balance": balance, "payment": installment,
         })
