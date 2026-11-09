@@ -690,8 +690,35 @@ def _try_auto_match_recurring(conn, inbox_id):
     return _try_auto_match(conn, inbox_id, "recurring_id", "recurring_payments", "amount", "name")
 
 
+def _bump_didimssi_on_match(conn, inbox_id):
+    """"디딤씨앗 적립예금"(매달 5만원 입금) 알림이 새로 매칭될 때마다,
+    정부도 똑같이 5만원 매칭해준다고 보고 현재 적립액에 10만원(내
+    5만원 + 정부 5만원)씩 자동으로 더한다. "고양시청 납부" 고정지출은
+    결제수단이 "현금"이라 애초에 알림 자동매칭 대상에서 빠지기 때문에
+    (is_cash_only), 실제 매칭은 이 보험 항목(결제수단 계좌이체)으로
+    들어온다. 이자/운용수익까지 정확히 추적하는 건 포기하고(사용자가
+    "정확하지 않아도 된다"고 함) 매달 자동으로 커지게만 해둔다.
+    _try_auto_match_insurance가 방금 실제로 새로 매칭했을 때만 호출되므로
+    (이미 매칭된 건 다시 안 걸림) 한 건당 한 번만 더해진다."""
+    item = conn.execute("SELECT insurance_id FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
+    if not item or not item["insurance_id"]:
+        return
+    ins = conn.execute(
+        "SELECT product_name FROM insurances WHERE id = ?", (item["insurance_id"],)
+    ).fetchone()
+    if not ins or ins["product_name"] != "디딤씨앗 적립예금":
+        return
+    conn.execute(
+        "UPDATE insurances SET current_balance = current_balance + 100000 WHERE id = ?",
+        (item["insurance_id"],),
+    )
+
+
 def _try_auto_match_insurance(conn, inbox_id):
-    return _try_auto_match(conn, inbox_id, "insurance_id", "insurances", "monthly_premium", "product_name")
+    matched = _try_auto_match(conn, inbox_id, "insurance_id", "insurances", "monthly_premium", "product_name")
+    if matched:
+        _bump_didimssi_on_match(conn, inbox_id)
+    return matched
 
 
 def _nearest_payment_day_gap(payment_day, occurred_date):
