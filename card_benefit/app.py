@@ -636,6 +636,37 @@ def _try_auto_match_insurance(conn, inbox_id):
     return _try_auto_match(conn, inbox_id, "insurance_id", "insurances", "monthly_premium", "product_name")
 
 
+def _try_auto_match_loan(conn, inbox_id):
+    """"내 광주은행 통장 → 원리금441779"처럼 카드 결제가 아니라 계좌에서
+    바로 빠져나가는 대출 원리금 자동이체 알림은, 혜택을 받을 수 있는
+    거래가 아니라서 혜택배정 큐에 남아있을 이유가 없다. "통장"이 들어간
+    알림(계좌 거래 알림의 특징적인 표현 - 카드 결제 알림과 구분하기 위함)
+    에서만 시도하고, 등록된 대출의 출금계좌(은행명)가 알림 문구에 들어있는
+    경우가 정확히 하나뿐이면 그 대출의 "당월 상환"을 자동으로 체크하고
+    이 알림은 "혜택 없음 처리됨"으로 큐에서 뺀다. 계좌 알림엔 금액이 아예
+    안 찍히는 경우가 많아서(이체 참조번호만 나옴) 금액은 보지 않는다."""
+    item = conn.execute(
+        "SELECT * FROM inbox_items WHERE id = ? AND status = 'pending'", (inbox_id,)
+    ).fetchone()
+    if not item:
+        return False
+    text = f"{item['merchant'] or ''} {item['raw_text'] or ''}"
+    if "통장" not in text and "계좌" not in text:
+        return False
+    loans = conn.execute(
+        "SELECT id, withdrawal_account FROM loans WHERE withdrawal_account != ''"
+    ).fetchall()
+    matches = [l for l in loans if l["withdrawal_account"] in text]
+    if len(matches) != 1:
+        return False
+    conn.execute(
+        "UPDATE loans SET paid_check_month = ? WHERE id = ?",
+        (current_year_month(), matches[0]["id"]),
+    )
+    conn.execute("UPDATE inbox_items SET status = 'no_benefit', card_id = NULL WHERE id = ?", (inbox_id,))
+    return True
+
+
 def serialize_loans(conn):
     rows = conn.execute("SELECT * FROM loans ORDER BY sort_order ASC, id ASC").fetchall()
     result = []
@@ -1542,6 +1573,27 @@ def unlink_match(inbox_id):
     finally:
         conn.close()
     return jsonify(serialize_full())
+
+
+@app.route("/api/loans/auto-match", methods=["POST"])
+def auto_match_all_loans():
+    """큐에 쌓여있는 계좌 거래 알림들에 대해 대출 상환 자동 매칭을 한 번에
+    다시 시도한다 - 기능이 켜지기 전에 이미 들어와버린 알림들을 위함."""
+    conn = get_conn()
+    try:
+        pending_ids = [
+            r["id"] for r in conn.execute("SELECT id FROM inbox_items WHERE status = 'pending'")
+        ]
+        matched = 0
+        for iid in pending_ids:
+            if _try_auto_match_loan(conn, iid):
+                matched += 1
+        conn.commit()
+    finally:
+        conn.close()
+    result = serialize_full()
+    result["auto_match_count"] = matched
+    return jsonify(result)
 
 
 @app.route("/api/recurring/auto-match", methods=["POST"])
@@ -2538,8 +2590,9 @@ def create_inbox_item():
                  "cancelled" if is_cancel else "pending"),
             )
             if not is_cancel:
-                _try_auto_match_recurring(conn, cur.lastrowid)
-                _try_auto_match_insurance(conn, cur.lastrowid)
+                if not _try_auto_match_loan(conn, cur.lastrowid):
+                    _try_auto_match_recurring(conn, cur.lastrowid)
+                    _try_auto_match_insurance(conn, cur.lastrowid)
         conn.commit()
     finally:
         conn.close()

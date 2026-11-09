@@ -1273,6 +1273,12 @@
     render();
     alert(`${result.auto_match_count || 0}건 자동 매칭됐습니다.`);
   });
+  document.getElementById("btn-loan-automatch").addEventListener("click", async () => {
+    const result = await api("/api/loans/auto-match", { method: "POST" });
+    state = result;
+    render();
+    alert(`${result.auto_match_count || 0}건 자동 매칭됐습니다(해당 대출 "당월 상환" 체크, 알림은 큐에서 제외).`);
+  });
 
   async function openMatchModal(entityType, item, label) {
     document.getElementById("match-modal-title").textContent = `"${label}" 결제 확인`;
