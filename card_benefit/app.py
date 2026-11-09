@@ -922,6 +922,14 @@ def serialize_loans(conn):
         current_ym = date.today().strftime("%Y-%m")
         paid_this_month = loan["paid_check_month"] == current_ym
 
+        amortization = _amortization_table(loan)
+        # 거치기간 끝나고 원금균등으로 전환되거나 하면 실제 납입액이 매달
+        # 바뀌어서(원리금균등은 고정) 등록된 monthly_payment 하나로는 못
+        # 따라감. 예상 상환표가 있으면 그 다음 회차 납입액을 "당월 상환
+        # 금액"으로 쓴다 - 매번 수동으로 고쳐줄 필요 없이 항상 최신으로
+        # 맞게. 상환표가 없는 대출(만기일시 등)은 등록된 값 그대로 둠.
+        due_amount = amortization[0]["payment"] if amortization else loan["monthly_payment"]
+
         result.append({
             "id": loan["id"],
             "name": loan["name"],
@@ -934,6 +942,7 @@ def serialize_loans(conn):
             "end_date": loan["end_date"],
             "payment_day": loan["payment_day"],
             "monthly_payment": loan["monthly_payment"],
+            "due_amount": due_amount,
             "payment_months": loan["payment_months"],
             "due_this_month": due_this_month,
             "withdrawal_account": loan["withdrawal_account"],
@@ -943,7 +952,7 @@ def serialize_loans(conn):
             "days_left": days_left,
             "sort_order": loan["sort_order"],
             "payments": [dict(p) for p in payments],
-            "amortization": _amortization_table(loan),
+            "amortization": amortization,
         })
     return result
 

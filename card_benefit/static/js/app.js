@@ -835,9 +835,9 @@
     document.getElementById("loan-total-balance-value").textContent =
       `₩${fmt(state.loans.reduce((sum, l) => sum + (l.current_balance || 0), 0))}`;
     document.getElementById("loan-total-monthly-value").textContent =
-      `₩${fmt(state.loans.filter((l) => l.due_this_month).reduce((sum, l) => sum + (l.monthly_payment || 0), 0))}`;
+      `₩${fmt(state.loans.filter((l) => l.due_this_month).reduce((sum, l) => sum + (l.due_amount || 0), 0))}`;
     document.getElementById("loan-unpaid-total").textContent =
-      `미체크 ₩${fmt(state.loans.filter((l) => l.due_this_month && !l.paid_this_month).reduce((sum, l) => sum + (l.monthly_payment || 0), 0))}`;
+      `미체크 ₩${fmt(state.loans.filter((l) => l.due_this_month && !l.paid_this_month).reduce((sum, l) => sum + (l.due_amount || 0), 0))}`;
 
     const loans = sortedLoans();
     loans.forEach((loan, idx) => {
@@ -873,7 +873,7 @@
       loan.withdrawal_account ? escapeHtml(loan.withdrawal_account) : "",
     ].filter(Boolean).join(" / ");
     const dueText = loan.due_this_month
-      ? (loan.monthly_payment ? fmt(loan.monthly_payment) + "원" : "미입력")
+      ? (loan.due_amount ? fmt(loan.due_amount) + "원" : "미입력")
       : "당월 해당 없음";
     const quarterMonths = (loan.payment_months || "").split(",").map((m) => m.trim()).filter(Boolean);
     const isMaturingSoon = loan.days_left != null && loan.days_left <= 30;
@@ -1185,7 +1185,7 @@
     emptyHint.style.display = state.recurring_payments.length ? "none" : "block";
 
     const total = state.recurring_payments.filter((r) => r.active).reduce((sum, r) => sum + (r.amount || 0), 0);
-    const loanTotal = state.loans.filter((l) => l.due_this_month).reduce((sum, l) => sum + (l.monthly_payment || 0), 0);
+    const loanTotal = state.loans.filter((l) => l.due_this_month).reduce((sum, l) => sum + (l.due_amount || 0), 0);
     document.getElementById("recurring-total-value").textContent = `₩${fmt(total)}`;
     document.getElementById("recurring-grand-total-value").textContent = `₩${fmt(total + loanTotal)}`;
 
