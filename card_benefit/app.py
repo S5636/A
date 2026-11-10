@@ -140,7 +140,7 @@ def serialize_inbox(conn):
     rows = conn.execute(
         "SELECT * FROM inbox_items WHERE status = 'pending' ORDER BY occurred_at DESC, id DESC"
     ).fetchall()
-    cards_with_code = conn.execute("SELECT id, name, last4 FROM cards WHERE last4 != ''").fetchall()
+    cards_with_code = conn.execute("SELECT id, name, issuer, last4 FROM cards WHERE last4 != ''").fetchall()
     benefits_by_card = {}
     for b in conn.execute(
         "SELECT id, card_id, name, merchant_keywords, calc_mode, always_doubled, rate_table FROM benefits"
@@ -165,6 +165,24 @@ def serialize_inbox(conn):
                     matched_benefit = b
                     matched_doubled = b["calc_mode"] == "change_under_1000"
                     break
+
+        # "[신한카드 자동납부 정상승인] ... [신한카드 1544-7000]"처럼 계좌/
+        # 자동납부 알림은 카드 뒷자리가 괄호로 안 찍혀서(끝에 붙은 "1544-7000"
+        # 같은 번호는 카드번호가 아니라 카드사 고객센터 전화번호라 last4로
+        # 쓰면 안 됨) last4로 카드를 못 찾는다. 이럴 땐 발급사(issuer)가 같은
+        # 카드들 중 가맹점 키워드가 매칭되는 카드+혜택이 "정확히 하나"일
+        # 때만 그걸로 특정한다 - 후보가 둘 이상이면(여러 카드가 같은 키워드를
+        # 등록해놨을 수 있음) 어느 카드인지 알 길이 없으니 손대지 않는다.
+        if not card and r["issuer"] and r["merchant"]:
+            candidates = [
+                (c, b)
+                for c in cards_with_code if c["issuer"] == r["issuer"]
+                for b in benefits_by_card.get(c["id"], [])
+                if match_benefit_keyword(r["merchant"], b["merchant_keywords"])
+            ]
+            if len(candidates) == 1:
+                card, matched_benefit = candidates[0]
+                matched_doubled = matched_benefit["calc_mode"] == "change_under_1000"
 
         # 더모아 안내장상 "이동통신요금 자동이체"만 특별적립(2배) 대상이고,
         # "즉시납부"(그때그때 수동으로 낸 것)는 자동이체가 아니라서 2배 대상이
