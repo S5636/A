@@ -966,11 +966,17 @@ def _mark_loan_paid_from_inbox(conn, loan_id, inbox_id, amount=None):
     남기고 잔액도 반영해야 한다(안 그러면 수동으로 "+기록" 누른 것만
     내역/잔액에 반영되고, 자동으로 확인된 건 체크박스만 켜진 채 내역엔
     아무것도 안 남아서 사용자 입장에서 "확인은 됐는데 기록이 없다"가 됨).
-    이자만 내는 "만기일시상환"은 원금이 안 줄어서 잔액 그대로 기록하고,
-    원리금균등/원금균등처럼 상환표가 있는 대출은 그 표의 이번 회차 원금만큼
-    잔액을 줄인다(상환표 자체가 현재 등록된 금리/월상환액 기준 추정이라,
-    등록값이 실제랑 다르면 이 잔액도 그만큼 어긋날 수 있음 - 그래도 아예
-    안 줄이는 것보단 낫다)."""
+    이자만 내는 "만기일시상환"은 원금이 안 줄어서 잔액 그대로 기록한다.
+    원리금균등/원금균등 대출은 "등록된 월상환액 기준 예상 상환표"가 아니라
+    이번에 실제로 들어온 알림 금액(amount)에서 이자(잔액×금리로 계산,
+    결제수단과 무관하게 항상 같음)를 뺀 나머지를 원금 상환분으로 본다 -
+    잔액이 부족해서 일부만 빠지고 나중에 나머지가 재입금되는 경우처럼
+    실제 금액이 등록된 월상환액과 다를 수 있어서, 등록값 기준 예상표를
+    그대로 믿고 잔액을 줄이면 실제보다 더 줄이거나 덜 줄이는 사고가 날 수
+    있다(실제로 한 번 그렇게 틀렸음 - 등록값 기준으로 계산했다가 분할
+    입금된 금액을 전체 월상환액인 것처럼 잘못 처리한 적 있음). 알림 금액이
+    이자도 못 채우면(그만큼도 못 미치는 분할 입금 등) 원금은 안 줄이고
+    금액만 기록한다."""
     conn.execute(
         "UPDATE loans SET paid_check_month = ? WHERE id = ?",
         (current_year_month(), loan_id),
@@ -980,13 +986,20 @@ def _mark_loan_paid_from_inbox(conn, loan_id, inbox_id, amount=None):
     inbox_item = conn.execute("SELECT occurred_at FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
     paid_amount = amount if amount is not None else (loan["monthly_payment"] or 0)
     paid_at = (inbox_item["occurred_at"] or "")[:10] if inbox_item and inbox_item["occurred_at"] else date.today().isoformat()
-    table = _amortization_table(loan)
-    balance_after = table[0]["balance"] if table else loan["current_balance"]
+    rtype = loan["repayment_type"] or ""
+    balance = loan["current_balance"] or 0
+    rate = loan["interest_rate"] or 0
+    if rtype in ("원리금균등분할상환", "거치식원금균등분할", "원금균등상환") and balance > 0 and rate > 0:
+        interest = round(balance * rate / 100 / 12)
+        principal = max(0, min(balance, paid_amount - interest))
+        balance_after = balance - principal
+    else:
+        balance_after = balance
     conn.execute(
         "INSERT INTO loan_payments (loan_id, paid_at, amount, balance_after, memo) VALUES (?, ?, ?, ?, ?)",
         (loan_id, paid_at, paid_amount, balance_after, "알림 자동확인"),
     )
-    if table:
+    if balance_after != balance:
         conn.execute("UPDATE loans SET current_balance = ? WHERE id = ?", (balance_after, loan_id))
 
 
@@ -999,7 +1012,7 @@ def _try_auto_match_loan_account_text(conn, inbox_id):
     정확히 하나뿐이면 그 대출로 매칭한다(금액이 아예 안 찍히는 계좌 알림도
     처리 가능). 출금계좌가 같아서(같은 통장에서 여러 대출이 같이 빠지는
     경우, 예: 케이뱅크 대출 2개가 같은 듀얼K통장에서 빠짐) 후보가 둘 이상
-    나오면, 알림 문구의 "이자상환"/"원리금상환" 표현으로 대출 종류
+    나오면, 알림 문구의 "이자상환"/"원리금상환"/"원금상환" 표현으로 대출 종류
     (만기일시=이자만 나감 / 원리금균등 등=원금+이자 같이 나감)를 구분해서
     한 번 더 좁힌다. 계좌/문구로 특정되는 가장 확실한 매칭이라 제일 먼저
     시도한다."""
@@ -1020,7 +1033,7 @@ def _try_auto_match_loan_account_text(conn, inbox_id):
             narrowed = [l for l in matches if (l["repayment_type"] or "") == "만기일시상환"]
             if len(narrowed) == 1:
                 matches = narrowed
-        elif "원리금상환" in text:
+        elif "원리금상환" in text or "원금상환" in text:
             narrowed = [l for l in matches if (l["repayment_type"] or "") != "만기일시상환"]
             if len(narrowed) == 1:
                 matches = narrowed
