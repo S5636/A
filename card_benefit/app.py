@@ -960,12 +960,34 @@ def _nearest_payment_day_gap(payment_day, occurred_date):
     return best
 
 
-def _mark_loan_paid_from_inbox(conn, loan_id, inbox_id):
+def _mark_loan_paid_from_inbox(conn, loan_id, inbox_id, amount=None):
+    """대출 상환 알림이 자동매칭되면, 그 달 "당월 상환 금액" 체크만 켜고
+    끝내던 걸 수정 - 실제 알림으로 확인된 결제니까 "내역"(loan_payments)에도
+    남기고 잔액도 반영해야 한다(안 그러면 수동으로 "+기록" 누른 것만
+    내역/잔액에 반영되고, 자동으로 확인된 건 체크박스만 켜진 채 내역엔
+    아무것도 안 남아서 사용자 입장에서 "확인은 됐는데 기록이 없다"가 됨).
+    이자만 내는 "만기일시상환"은 원금이 안 줄어서 잔액 그대로 기록하고,
+    원리금균등/원금균등처럼 상환표가 있는 대출은 그 표의 이번 회차 원금만큼
+    잔액을 줄인다(상환표 자체가 현재 등록된 금리/월상환액 기준 추정이라,
+    등록값이 실제랑 다르면 이 잔액도 그만큼 어긋날 수 있음 - 그래도 아예
+    안 줄이는 것보단 낫다)."""
     conn.execute(
         "UPDATE loans SET paid_check_month = ? WHERE id = ?",
         (current_year_month(), loan_id),
     )
     conn.execute("UPDATE inbox_items SET status = 'no_benefit', card_id = NULL WHERE id = ?", (inbox_id,))
+    loan = conn.execute("SELECT * FROM loans WHERE id = ?", (loan_id,)).fetchone()
+    inbox_item = conn.execute("SELECT occurred_at FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
+    paid_amount = amount if amount is not None else (loan["monthly_payment"] or 0)
+    paid_at = (inbox_item["occurred_at"] or "")[:10] if inbox_item and inbox_item["occurred_at"] else date.today().isoformat()
+    table = _amortization_table(loan)
+    balance_after = table[0]["balance"] if table else loan["current_balance"]
+    conn.execute(
+        "INSERT INTO loan_payments (loan_id, paid_at, amount, balance_after, memo) VALUES (?, ?, ?, ?, ?)",
+        (loan_id, paid_at, paid_amount, balance_after, "알림 자동확인"),
+    )
+    if table:
+        conn.execute("UPDATE loans SET current_balance = ? WHERE id = ?", (balance_after, loan_id))
 
 
 def _try_auto_match_loan_account_text(conn, inbox_id):
@@ -973,10 +995,14 @@ def _try_auto_match_loan_account_text(conn, inbox_id):
     바로 빠져나가는 대출 원리금 자동이체 알림은, 혜택을 받을 수 있는
     거래가 아니라서 혜택배정 큐에 남아있을 이유가 없다. "통장"이 들어간
     알림(계좌 거래 알림의 특징적인 표현 - 카드 결제 알림과 구분하기 위함)
-    에서만 시도하고, 등록된 대출의 출금계좌(은행명)가 알림 문구에 들어있는
-    경우가 정확히 하나뿐이면 그 대출로 매칭한다(금액이 아예 안 찍히는
-    계좌 알림도 처리 가능). 은행명 자체가 특정돼서 나오는 방식이라 가장
-    확실한 매칭이라 제일 먼저 시도한다."""
+    에서만 시도하고, 등록된 대출의 출금계좌가 알림 문구에 들어있는 경우가
+    정확히 하나뿐이면 그 대출로 매칭한다(금액이 아예 안 찍히는 계좌 알림도
+    처리 가능). 출금계좌가 같아서(같은 통장에서 여러 대출이 같이 빠지는
+    경우, 예: 케이뱅크 대출 2개가 같은 듀얼K통장에서 빠짐) 후보가 둘 이상
+    나오면, 알림 문구의 "이자상환"/"원리금상환" 표현으로 대출 종류
+    (만기일시=이자만 나감 / 원리금균등 등=원금+이자 같이 나감)를 구분해서
+    한 번 더 좁힌다. 계좌/문구로 특정되는 가장 확실한 매칭이라 제일 먼저
+    시도한다."""
     item = conn.execute(
         "SELECT * FROM inbox_items WHERE id = ? AND status = 'pending'", (inbox_id,)
     ).fetchone()
@@ -986,12 +1012,21 @@ def _try_auto_match_loan_account_text(conn, inbox_id):
     if "통장" not in text and "계좌" not in text:
         return False
     loans = conn.execute(
-        "SELECT id, withdrawal_account FROM loans WHERE withdrawal_account != ''"
+        "SELECT * FROM loans WHERE withdrawal_account != ''"
     ).fetchall()
     matches = [l for l in loans if l["withdrawal_account"] in text]
+    if len(matches) > 1:
+        if "이자상환" in text:
+            narrowed = [l for l in matches if (l["repayment_type"] or "") == "만기일시상환"]
+            if len(narrowed) == 1:
+                matches = narrowed
+        elif "원리금상환" in text:
+            narrowed = [l for l in matches if (l["repayment_type"] or "") != "만기일시상환"]
+            if len(narrowed) == 1:
+                matches = narrowed
     if len(matches) != 1:
         return False
-    _mark_loan_paid_from_inbox(conn, matches[0]["id"], inbox_id)
+    _mark_loan_paid_from_inbox(conn, matches[0]["id"], inbox_id, item["amount"])
     return True
 
 
@@ -1024,7 +1059,7 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
     ]
     if len(matches) != 1:
         return False
-    _mark_loan_paid_from_inbox(conn, matches[0]["id"], inbox_id)
+    _mark_loan_paid_from_inbox(conn, matches[0]["id"], inbox_id, item["amount"])
     return True
 
 
