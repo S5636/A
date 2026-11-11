@@ -651,6 +651,9 @@
     <label class="checkbox-row">
       <input type="checkbox" id="stock-active" checked> 보유 중 (매도했으면 체크 해제)
     </label>
+    <label id="stock-sell-price-row" style="display:none;">매도가 (원) - 이 가격으로 손익이 고정됩니다
+      <input type="number" id="stock-sell-price" min="0" step="1" placeholder="예: 65000">
+    </label>
     <label>메모 (선택)
       <textarea id="stock-memo" rows="3" placeholder="매수 이유, 목표가 등"></textarea>
     </label>

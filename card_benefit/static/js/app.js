@@ -1750,21 +1750,21 @@
             <div class="card-text-row">
               <span class="card-title-scroll"><span class="card-title" style="${s.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(s.name)}</span></span>
               <span class="card-head-right">
+                <button class="icon-btn edit-stock" data-id="${s.id}" title="수정">✏️</button>
+                <button class="icon-btn delete-stock" data-id="${s.id}" title="삭제">🗑️</button>
+              </span>
+            </div>
+            <div class="card-text-row">
+              <span class="card-method-dim card-title-scroll">${s.broker ? escapeHtml(s.broker) + " · " : ""}매수 ${fmt(s.buy_price)}원 x ${fmt(s.quantity)}주${s.code ? ` (${escapeHtml(s.code)})` : ""}</span>
+              <span class="card-head-right">
                 ${s.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">매도</span>`}
                 <span class="benefit-remaining amount-accent">${s.last_price ? fmt(s.last_price) + "원" : "시세 확인 전"}</span>
               </span>
             </div>
             <div class="card-text-row">
-              <span class="card-method-dim">${s.broker ? escapeHtml(s.broker) + " · " : ""}매수 ${fmt(s.buy_price)}원 x ${fmt(s.quantity)}주${s.code ? ` (${escapeHtml(s.code)})` : ""}</span>
-              <span class="card-head-right">
-                <span style="color:${profitColor};font-weight:700;">${profitText}</span>
-              </span>
-            </div>
-            <div class="card-text-row">
               <span></span>
               <span class="card-head-right">
-                <button class="icon-btn edit-stock" data-id="${s.id}" title="수정">✏️</button>
-                <button class="icon-btn delete-stock" data-id="${s.id}" title="삭제">🗑️</button>
+                <span style="color:${profitColor};font-weight:700;">${profitText}</span>
               </span>
             </div>
           </div>
@@ -1805,11 +1805,16 @@
     document.getElementById("stock-buy-price").value = s ? s.buy_price : "";
     document.getElementById("stock-quantity").value = s ? s.quantity : "";
     document.getElementById("stock-active").checked = s ? !!s.active : true;
+    document.getElementById("stock-sell-price").value = s && s.sell_price ? s.sell_price : "";
+    document.getElementById("stock-sell-price-row").style.display = (s && !s.active) ? "" : "none";
     document.getElementById("stock-memo").value = s ? s.memo : "";
     stockModal.classList.add("open");
   }
   document.getElementById("btn-add-stock").addEventListener("click", () => openStockModal(null));
   document.getElementById("stock-cancel").addEventListener("click", () => stockModal.classList.remove("open"));
+  document.getElementById("stock-active").addEventListener("change", (e) => {
+    document.getElementById("stock-sell-price-row").style.display = e.target.checked ? "none" : "";
+  });
   document.getElementById("stock-save").addEventListener("click", async () => {
     const payload = {
       name: document.getElementById("stock-name").value.trim(),
@@ -1817,6 +1822,7 @@
       broker: document.getElementById("stock-broker").value.trim(),
       buy_price: document.getElementById("stock-buy-price").value || 0,
       quantity: document.getElementById("stock-quantity").value || 0,
+      sell_price: document.getElementById("stock-sell-price").value || 0,
       active: document.getElementById("stock-active").checked,
       memo: document.getElementById("stock-memo").value.trim(),
     };

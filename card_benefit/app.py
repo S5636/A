@@ -52,21 +52,61 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 app = Flask(__name__)
 
 
+def _log_stock_fetch_error(code, source, error):
+    """시세 가져오기 실패 원인을 앱 폴더의 stock_fetch_error.log에 남긴다.
+    실제로 돌아가는 PC에서만 재현되는 네트워크 문제라서, 로그 없이는
+    왜 안 되는지 추측만 하게 된다."""
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stock_fetch_error.log")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(
+                f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{code}] {source} 실패 - "
+                f"{type(error).__name__}: {error}\n"
+            )
+    except Exception:
+        pass
+
+
 def _fetch_stock_price(code):
-    """네이버 금융 비공식 실시간 시세 API로 KRX 종목 현재가를 가져온다.
-    공식 API가 아니라 언제든 응답 형식이 바뀌거나 막힐 수 있음 - 실패하면
-    조용히 None을 돌려줘서(예외를 올리지 않음) 호출하는 쪽(백그라운드
-    루프)이 그 종목만 건너뛰고 나머지는 계속 돌 수 있게 한다."""
+    """KRX 종목 현재가를 가져온다. 둘 다 비공식 방식이라 언제든 막힐 수
+    있어서 순서대로 시도한다:
+    1) 네이버 금융 실시간 시세 API(JSON, 빠름)
+    2) 네이버 금융 종목 상세 페이지(HTML) 긁기 - 1번이 막혀도 될 때가
+       있어서 대비용.
+    둘 다 실패하면 None을 돌려주고(예외를 올리지 않음, 호출하는 쪽이
+    그 종목만 건너뛰고 계속 돌 수 있게) 실패 원인을 로그로 남긴다."""
     import urllib.request
 
-    url = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Referer": "https://finance.naver.com/",
+    }
+
+    url1 = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        req = urllib.request.Request(url1, headers=headers)
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         return float(data["result"]["areas"][0]["datas"][0]["nv"])
-    except Exception:
-        return None
+    except Exception as e1:
+        _log_stock_fetch_error(code, "실시간 API", e1)
+
+    url2 = f"https://finance.naver.com/item/main.naver?code={code}"
+    try:
+        from bs4 import BeautifulSoup
+        req = urllib.request.Request(url2, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            raw = resp.read()
+        soup = BeautifulSoup(raw, "lxml")
+        tag = soup.select_one("#_nowVal") or soup.select_one(".no_today .blind")
+        if tag:
+            return float(tag.get_text(strip=True).replace(",", ""))
+        _log_stock_fetch_error(code, "페이지 긁기", Exception("가격 요소를 못 찾음"))
+    except Exception as e2:
+        _log_stock_fetch_error(code, "페이지 긁기", e2)
+
+    return None
 
 
 def _send_windows_toast(title, message):
@@ -338,11 +378,17 @@ def serialize_stocks(conn):
     for s in rows:
         buy_price = s["buy_price"] or 0
         quantity = s["quantity"] or 0
-        last_price = s["last_price"] or 0
-        profit = (last_price - buy_price) * quantity if last_price else None
+        sell_price = s["sell_price"] or 0
+        # 매도한(active=0) 종목은 매도가가 등록돼 있으면 그 가격으로 손익을
+        # 고정한다 - 안 그러면 시세가 계속 바뀌는 것처럼 보여서 이미 판
+        # 종목의 손익이 헷갈리게 움직인다(백그라운드도 active=1만 확인하니
+        # last_price 자체는 매도 시점 이후로 안 바뀌지만, 명시적으로 고정해두는
+        # 쪽이 안전).
+        effective_price = sell_price if (not s["active"] and sell_price) else (s["last_price"] or 0)
+        profit = (effective_price - buy_price) * quantity if effective_price else None
         profit_percent = (
-            round((last_price - buy_price) / buy_price * 100, 2)
-            if last_price and buy_price else None
+            round((effective_price - buy_price) / buy_price * 100, 2)
+            if effective_price and buy_price else None
         )
         result.append({
             "id": s["id"],
@@ -351,7 +397,8 @@ def serialize_stocks(conn):
             "broker": s["broker"],
             "buy_price": buy_price,
             "quantity": quantity,
-            "last_price": last_price or None,
+            "sell_price": sell_price or None,
+            "last_price": effective_price or None,
             "last_checked_at": s["last_checked_at"],
             "profit": profit,
             "profit_percent": profit_percent,
@@ -1592,15 +1639,19 @@ def create_stock():
         quantity = float(data.get("quantity") or 0)
     except (TypeError, ValueError):
         quantity = 0
+    try:
+        sell_price = float(data.get("sell_price") or 0)
+    except (TypeError, ValueError):
+        sell_price = 0
 
     conn = get_conn()
     try:
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM stocks").fetchone()["m"]
         conn.execute(
-            """INSERT INTO stocks (name, code, broker, buy_price, quantity, active, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO stocks (name, code, broker, buy_price, quantity, sell_price, active, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                name, code, (data.get("broker") or "").strip(), buy_price, quantity,
+                name, code, (data.get("broker") or "").strip(), buy_price, quantity, sell_price,
                 1 if data.get("active", True) else 0,
                 (data.get("memo") or "").strip(),
                 max_order + 1,
@@ -1633,24 +1684,30 @@ def update_stock(stock_id):
             sort_order = int(data.get("sort_order", stock["sort_order"]))
         except (TypeError, ValueError):
             sort_order = stock["sort_order"]
+        try:
+            sell_price = float(data.get("sell_price", stock["sell_price"]))
+        except (TypeError, ValueError):
+            sell_price = stock["sell_price"]
         active = 1 if data.get("active", bool(stock["active"])) else 0
 
         # 매수가/수량을 사람이 직접 고치면 손익 부호가 달라질 수 있으니,
         # 다음 백그라운드 확인 때 "방금 플러스로 바뀜" 알림이 잘못 뜨지
         # 않도록 last_known_positive를 지금 값 기준으로 다시 계산해둔다.
-        last_price = stock["last_price"] or 0
-        profit = (last_price - buy_price) * quantity if last_price else 0
+        # 매도 처리(active=0)면 매도가 기준으로, 아니면 시세 기준으로.
+        ref_price = sell_price if (not active and sell_price) else (stock["last_price"] or 0)
+        profit = (ref_price - buy_price) * quantity if ref_price else 0
         last_known_positive = 1 if profit > 0 else 0
 
         conn.execute(
-            """UPDATE stocks SET name=?, code=?, broker=?, buy_price=?, quantity=?, active=?, memo=?,
-               sort_order=?, last_known_positive=? WHERE id=?""",
+            """UPDATE stocks SET name=?, code=?, broker=?, buy_price=?, quantity=?, sell_price=?,
+               active=?, memo=?, sort_order=?, last_known_positive=? WHERE id=?""",
             (
                 name,
                 (data.get("code", stock["code"]) or "").strip(),
                 (data.get("broker", stock["broker"]) or "").strip(),
                 buy_price,
                 quantity,
+                sell_price,
                 active,
                 (data.get("memo", stock["memo"]) or "").strip(),
                 sort_order,
