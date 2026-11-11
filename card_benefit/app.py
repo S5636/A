@@ -83,6 +83,11 @@ def _fetch_stock_price(code):
     고칠 수 있다."""
     import urllib.request
 
+    # KRX 종목은 공식적으로 "A"+6자리(예: A271160)로도 많이 표기되지만
+    # (공모주 안내 등에서 흔히 이 형식으로 나옴), 네이버 금융 쪽 URL/API는
+    # 앞의 "A" 없이 순수 6자리만 받는다. 앞에 A가 붙어 있으면 떼고 쓴다.
+    code = re.sub(r"^[Aa]", "", code or "")
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
