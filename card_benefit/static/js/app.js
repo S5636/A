@@ -1445,7 +1445,7 @@
 
   function openRecurringModal(item) {
     editingRecurringId = item ? item.id : null;
-    document.getElementById("recurring-modal-title").textContent = item ? "고정지출 수정" : "고정지출 추가";
+    document.getElementById("recurring-modal-title").textContent = item ? "지출 수정" : "지출 추가";
     document.getElementById("recurring-name").value = item ? item.name : "";
     document.getElementById("recurring-category").value = item ? item.category : "";
     document.getElementById("recurring-amount").value = item ? item.amount : "";
@@ -1946,7 +1946,7 @@
     });
     dupList.querySelectorAll(".dup-delete").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        if (!confirm("이 알림 기록을 삭제할까요? (이미 혜택/고정지출/보험에 배정된 실제 기록은 남고, 알림 큐의 이 항목만 지워집니다)")) return;
+        if (!confirm("이 알림 기록을 삭제할까요? (이미 혜택/지출/보험에 배정된 실제 기록은 남고, 알림 큐의 이 항목만 지워집니다)")) return;
         state = await api(`/api/inbox/${btn.dataset.id}`, { method: "DELETE" });
         render();
       });

@@ -24,7 +24,7 @@
       <button id="btn-webhook-info" class="btn secondary small" title="폰 결제 알림 자동수집 설정">🔔 자동수집 설정</button>
       <button id="btn-add-card" class="btn small view-only-card">+ 카드 추가</button>
       <button id="btn-add-loan" class="btn small view-only-loan" style="display:none;">+ 대출 추가</button>
-      <button id="btn-add-recurring" class="btn small view-only-recurring" style="display:none;">+ 고정지출 추가</button>
+      <button id="btn-add-recurring" class="btn small view-only-recurring" style="display:none;">+ 지출 추가</button>
       <button id="btn-add-insurance" class="btn small view-only-insurance" style="display:none;">+ 보험 추가</button>
       <button id="btn-add-stock" class="btn small view-only-stock" style="display:none;">+ 종목 추가</button>
     </div>
@@ -33,7 +33,7 @@
   <nav class="view-tabs">
     <button class="view-tab active" data-view="card">💳 카드</button>
     <button class="view-tab" data-view="loan">🏦 대출</button>
-    <button class="view-tab" data-view="recurring">🔁 고정지출</button>
+    <button class="view-tab" data-view="recurring">🔁 지출</button>
     <button class="view-tab" data-view="insurance">🏥 보험</button>
     <button class="view-tab" data-view="stock">📈 주식</button>
   </nav>
@@ -134,7 +134,7 @@
     <section class="monthly-summary">
       <div class="summary-boxes">
         <div class="summary-box summary-earn">
-          <div class="summary-label">고정지출만 합계</div>
+          <div class="summary-label">지출만 합계</div>
           <div class="summary-value" id="recurring-total-value">0원</div>
         </div>
         <div class="summary-box summary-cashback">
@@ -156,7 +156,7 @@
       <span id="recurring-unmatched-total" style="margin-left:auto; font-weight:700; color:var(--accent-purple);"></span>
     </div>
     <main id="recurring-list" class="card-list">
-      <p class="empty-hint" id="empty-recurring-hint">아직 등록된 고정지출이 없습니다. "고정지출 추가"를 눌러 시작하세요.</p>
+      <p class="empty-hint" id="empty-recurring-hint">아직 등록된 지출이 없습니다. "지출 추가"를 눌러 시작하세요.</p>
     </main>
   </div>
 
@@ -208,7 +208,6 @@
       </select>
       <button class="btn small" id="btn-stock-refresh">지금 확인</button>
     </div>
-    <p class="hint">매수가 대비 평가손익이 마이너스에서 플러스로 바뀌는 순간, 이 앱을 PC에서 켜둔 상태면 윈도우 알림이 뜹니다(평일 09:00~15:30 중 5분마다 자동 확인). KRX 종목 코드(6자리)만 지원합니다.</p>
     <main id="stock-list" class="card-list">
       <p class="empty-hint" id="empty-stock-hint">아직 등록된 종목이 없습니다. "종목 추가"를 눌러 시작하세요.</p>
     </main>
@@ -530,7 +529,7 @@
 <!-- 고정지출(구독/자동이체) 추가/수정 모달 -->
 <div class="modal-backdrop" id="recurring-modal">
   <div class="modal">
-    <h2 id="recurring-modal-title">고정지출 추가</h2>
+    <h2 id="recurring-modal-title">지출 추가</h2>
     <label>이름
       <input type="text" id="recurring-name" placeholder="예: 넷플릭스, 아파트관리비">
     </label>
