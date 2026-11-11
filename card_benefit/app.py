@@ -98,13 +98,11 @@ def _fetch_stock_price(code):
         data = json.loads(raw1)
         # 2026-11-11: 실제 PC 로그로 확인된 진짜 응답 모양은 예전에 가정했던
         # data["result"]["areas"][0]["datas"][0]["nv"]가 아니라 최상위
-        # data["datas"][0] 형태(네이버가 API를 바꾼 듯). 그 안의 정확한 가격
-        # 필드 이름은 응답 일부만 봐서 아직 확정 못 함 - 틀린 필드를 추측해서
-        # 엉뚱한 값을 진짜 가격처럼 보여주면 안 되므로, 여기서는 구조까지만
-        # 맞추고 실제 키 목록을 그대로 예외 메시지에 남긴다. 다음 로그에서
-        # 그 키 목록을 보고 정확한 필드 이름으로 고친다.
-        item_data = data["datas"][0]
-        raise KeyError(f"가격 필드 이름 미확인, 실제 키 목록: {sorted(item_data.keys())}")
+        # data["datas"][0] 형태(네이버가 API를 바꾼 것). 가격 필드는
+        # "closePriceRaw"(콤마 없는 순수 숫자 문자열) - 이름과 달리 전일종가가
+        # 아니라 실시간 현재가임(같이 찍히는 compareToPreviousClosePrice/
+        # fluctuationsRatio 값으로 역산해서 실제 로그 응답에서 직접 확인함).
+        return float(data["datas"][0]["closePriceRaw"])
     except Exception as e1:
         _log_stock_fetch_error(code, "실시간 API", e1, raw1)
 
