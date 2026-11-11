@@ -1748,21 +1748,18 @@
         <div class="card-head-left">
           <div class="card-text-stack">
             <div class="card-text-row">
-              <span class="card-title-scroll"><span class="card-title" style="${s.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(s.name)}</span></span>
-              <span class="card-head-right">
+              <span style="display:flex;align-items:center;gap:4px;min-width:0;flex:1;">
+                <span class="card-title-scroll"><span class="card-title" style="${s.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(s.name)}</span></span>
                 <button class="icon-btn edit-stock" data-id="${s.id}" title="수정">✏️</button>
                 <button class="icon-btn delete-stock" data-id="${s.id}" title="삭제">🗑️</button>
               </span>
-            </div>
-            <div class="card-text-row">
-              <span class="card-method-dim card-title-scroll">${s.broker ? escapeHtml(s.broker) + " · " : ""}매수 ${fmt(s.buy_price)}원 x ${fmt(s.quantity)}주${s.code ? ` (${escapeHtml(s.code)})` : ""}</span>
               <span class="card-head-right">
                 ${s.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">매도</span>`}
                 <span class="benefit-remaining amount-accent">${s.last_price ? fmt(s.last_price) + "원" : "시세 확인 전"}</span>
               </span>
             </div>
             <div class="card-text-row">
-              <span></span>
+              <span class="card-method-dim card-title-scroll">${s.broker ? escapeHtml(s.broker) + " · " : ""}매수 ${fmt(s.buy_price)}원 x ${fmt(s.quantity)}주${s.code ? ` (${escapeHtml(s.code)})` : ""}</span>
               <span class="card-head-right">
                 <span style="color:${profitColor};font-weight:700;">${profitText}</span>
               </span>

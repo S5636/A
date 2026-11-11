@@ -52,16 +52,19 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 app = Flask(__name__)
 
 
-def _log_stock_fetch_error(code, source, error):
+def _log_stock_fetch_error(code, source, error, raw=""):
     """시세 가져오기 실패 원인을 앱 폴더의 stock_fetch_error.log에 남긴다.
-    실제로 돌아가는 PC에서만 재현되는 네트워크 문제라서, 로그 없이는
-    왜 안 되는지 추측만 하게 된다."""
+    실제로 돌아가는 PC에서만 재현되는 문제라서, "실패했다"는 사실만으론
+    뭘 고쳐야 할지 알 수 없다 - 서버가 실제로 뭘 돌려줬는지(raw, 앞부분만)
+    같이 남겨야 파싱 로직을 실제 응답에 맞게 고칠 수 있다."""
     try:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stock_fetch_error.log")
+        snippet = (raw or "").strip().replace("\n", " ")[:300]
         with open(path, "a", encoding="utf-8") as f:
             f.write(
                 f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{code}] {source} 실패 - "
-                f"{type(error).__name__}: {error}\n"
+                f"{type(error).__name__}: {error}"
+                f"{' | 응답: ' + snippet if snippet else ''}\n"
             )
     except Exception:
         pass
@@ -74,7 +77,10 @@ def _fetch_stock_price(code):
     2) 네이버 금융 종목 상세 페이지(HTML) 긁기 - 1번이 막혀도 될 때가
        있어서 대비용.
     둘 다 실패하면 None을 돌려주고(예외를 올리지 않음, 호출하는 쪽이
-    그 종목만 건너뛰고 계속 돌 수 있게) 실패 원인을 로그로 남긴다."""
+    그 종목만 건너뛰고 계속 돌 수 있게) 실패 원인과 함께 실제 응답
+    내용(일부)을 로그로 남긴다 - "실패했다"는 것만으론 뭘 고쳐야 할지
+    알 수 없고, 서버가 실제로 뭘 돌려줬는지 봐야 파싱 로직을 맞게
+    고칠 수 있다."""
     import urllib.request
 
     headers = {
@@ -84,27 +90,31 @@ def _fetch_stock_price(code):
     }
 
     url1 = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code}"
+    raw1 = ""
     try:
         req = urllib.request.Request(url1, headers=headers)
         with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            raw1 = resp.read().decode("utf-8", errors="replace")
+        data = json.loads(raw1)
         return float(data["result"]["areas"][0]["datas"][0]["nv"])
     except Exception as e1:
-        _log_stock_fetch_error(code, "실시간 API", e1)
+        _log_stock_fetch_error(code, "실시간 API", e1, raw1)
 
     url2 = f"https://finance.naver.com/item/main.naver?code={code}"
+    raw2 = ""
     try:
         from bs4 import BeautifulSoup
         req = urllib.request.Request(url2, headers=headers)
         with urllib.request.urlopen(req, timeout=5) as resp:
-            raw = resp.read()
-        soup = BeautifulSoup(raw, "lxml")
+            raw_bytes = resp.read()
+        raw2 = raw_bytes.decode("utf-8", errors="replace")
+        soup = BeautifulSoup(raw_bytes, "lxml")
         tag = soup.select_one("#_nowVal") or soup.select_one(".no_today .blind")
         if tag:
             return float(tag.get_text(strip=True).replace(",", ""))
-        _log_stock_fetch_error(code, "페이지 긁기", Exception("가격 요소를 못 찾음"))
+        _log_stock_fetch_error(code, "페이지 긁기", Exception("가격 요소를 못 찾음"), raw2)
     except Exception as e2:
-        _log_stock_fetch_error(code, "페이지 긁기", e2)
+        _log_stock_fetch_error(code, "페이지 긁기", e2, raw2)
 
     return None
 
