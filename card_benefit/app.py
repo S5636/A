@@ -59,7 +59,7 @@ def _log_stock_fetch_error(code, source, error, raw=""):
     같이 남겨야 파싱 로직을 실제 응답에 맞게 고칠 수 있다."""
     try:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stock_fetch_error.log")
-        snippet = (raw or "").strip().replace("\n", " ")[:300]
+        snippet = (raw or "").strip().replace("\n", " ")[:4000]
         with open(path, "a", encoding="utf-8") as f:
             f.write(
                 f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{code}] {source} 실패 - "
@@ -96,7 +96,15 @@ def _fetch_stock_price(code):
         with urllib.request.urlopen(req, timeout=5) as resp:
             raw1 = resp.read().decode("utf-8", errors="replace")
         data = json.loads(raw1)
-        return float(data["result"]["areas"][0]["datas"][0]["nv"])
+        # 2026-11-11: 실제 PC 로그로 확인된 진짜 응답 모양은 예전에 가정했던
+        # data["result"]["areas"][0]["datas"][0]["nv"]가 아니라 최상위
+        # data["datas"][0] 형태(네이버가 API를 바꾼 듯). 그 안의 정확한 가격
+        # 필드 이름은 응답 일부만 봐서 아직 확정 못 함 - 틀린 필드를 추측해서
+        # 엉뚱한 값을 진짜 가격처럼 보여주면 안 되므로, 여기서는 구조까지만
+        # 맞추고 실제 키 목록을 그대로 예외 메시지에 남긴다. 다음 로그에서
+        # 그 키 목록을 보고 정확한 필드 이름으로 고친다.
+        item_data = data["datas"][0]
+        raise KeyError(f"가격 필드 이름 미확인, 실제 키 목록: {sorted(item_data.keys())}")
     except Exception as e1:
         _log_stock_fetch_error(code, "실시간 API", e1, raw1)
 
@@ -112,7 +120,19 @@ def _fetch_stock_price(code):
         tag = soup.select_one("#_nowVal") or soup.select_one(".no_today .blind")
         if tag:
             return float(tag.get_text(strip=True).replace(",", ""))
-        _log_stock_fetch_error(code, "페이지 긁기", Exception("가격 요소를 못 찾음"), raw2)
+        # 긁으려던 선택자가 페이지 맨 앞부분(head/css 등)보다 훨씬 뒤에 있을
+        # 수 있어서, 앞부분만 자르는 raw 스니펫으로는 안 보일 수 있다. 그래서
+        # 그 선택자들이 전체 문서 "어디에든" 있긴 한지부터 따로 확인해서
+        # 남긴다 - 있는데도 못 찾은 거면 선택자가 틀린 거고, 아예 없으면
+        # 이 페이지는 가격을 자바스크립트로 나중에 채우는 방식이라 긁기
+        # 자체가 안 되는 페이지라는 뜻.
+        has_nowval = "_nowVal" in raw2
+        has_no_today = "no_today" in raw2
+        _log_stock_fetch_error(
+            code, "페이지 긁기",
+            Exception(f"가격 요소를 못 찾음 (문서 내 _nowVal 존재={has_nowval}, no_today 존재={has_no_today})"),
+            raw2,
+        )
     except Exception as e2:
         _log_stock_fetch_error(code, "페이지 긁기", e2, raw2)
 
