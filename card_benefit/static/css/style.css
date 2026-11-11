@@ -247,6 +247,7 @@ body { padding-bottom: 40px; }
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
+  text-overflow: clip;
   white-space: nowrap;
   scrollbar-width: none;
   -ms-overflow-style: none;
