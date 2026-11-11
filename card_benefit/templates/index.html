@@ -199,8 +199,14 @@
       </div>
     </section>
     <div class="sort-row">
+      <label for="stock-sort-select">정렬</label>
+      <select id="stock-sort-select">
+        <option value="rate_desc">수익률 높은순</option>
+        <option value="rate_asc">수익률 낮은순</option>
+        <option value="amount">평가손익 금액순</option>
+        <option value="name">이름순</option>
+      </select>
       <button class="btn small" id="btn-stock-refresh">지금 확인</button>
-      <span id="stock-last-checked" style="margin-left:auto; font-size:11.5px; color:var(--text-muted);"></span>
     </div>
     <p class="hint">매수가 대비 평가손익이 마이너스에서 플러스로 바뀌는 순간, 이 앱을 PC에서 켜둔 상태면 윈도우 알림이 뜹니다(평일 09:00~15:30 중 5분마다 자동 확인). KRX 종목 코드(6자리)만 지원합니다.</p>
     <main id="stock-list" class="card-list">
@@ -632,6 +638,9 @@
     </label>
     <label>종목코드 (KRX 6자리)
       <input type="text" id="stock-code" placeholder="예: 005930" maxlength="6">
+    </label>
+    <label>증권사 (선택)
+      <input type="text" id="stock-broker" placeholder="예: 대신증권">
     </label>
     <label>매수 평균단가 (원)
       <input type="number" id="stock-buy-price" min="0" step="1" placeholder="예: 70000">

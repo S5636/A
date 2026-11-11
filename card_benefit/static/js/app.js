@@ -1694,6 +1694,31 @@
   });
 
   // ---- 주식 ----
+  // 국내 주식 표기 관행: 상승(플러스)=빨강, 하락(마이너스)=파랑(미국식 빨강/초록과 반대).
+  const STOCK_UP_COLOR = "var(--critical)";
+  const STOCK_DOWN_COLOR = "var(--series-1)";
+
+  let stockSort = "rate_desc";
+  const stockSortSelect = document.getElementById("stock-sort-select");
+  stockSortSelect.addEventListener("change", () => {
+    stockSort = stockSortSelect.value;
+    render();
+  });
+
+  function sortedStocks() {
+    const items = state.stocks.slice();
+    if (stockSort === "rate_asc") {
+      items.sort((a, b) => (a.profit_percent ?? -Infinity) - (b.profit_percent ?? -Infinity));
+    } else if (stockSort === "amount") {
+      items.sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity));
+    } else if (stockSort === "name") {
+      items.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    } else {
+      items.sort((a, b) => (b.profit_percent ?? -Infinity) - (a.profit_percent ?? -Infinity));
+    }
+    return items;
+  }
+
   function renderStocks() {
     const list = document.getElementById("stock-list");
     const emptyHint = document.getElementById("empty-stock-hint");
@@ -1703,11 +1728,7 @@
     const total = sumBy(state.stocks, (s) => s.active && s.profit != null, "profit");
     document.getElementById("stock-total-value").textContent = `${total >= 0 ? "+" : ""}₩${fmt(total)}`;
 
-    const checkedTimes = state.stocks.map((s) => s.last_checked_at).filter(Boolean).sort();
-    document.getElementById("stock-last-checked").textContent =
-      checkedTimes.length ? `마지막 확인 ${checkedTimes[checkedTimes.length - 1]}` : "";
-
-    state.stocks.forEach((s) => {
+    sortedStocks().forEach((s) => {
       const el = document.createElement("div");
       el.className = "card";
       el.id = `stock-${s.id}`;
@@ -1718,7 +1739,7 @@
   }
 
   function stockTemplate(s) {
-    const profitColor = s.profit == null ? "var(--text-muted)" : s.profit > 0 ? "var(--neon-green)" : s.profit < 0 ? "var(--critical)" : "var(--text-muted)";
+    const profitColor = s.profit == null ? "var(--text-muted)" : s.profit > 0 ? STOCK_UP_COLOR : s.profit < 0 ? STOCK_DOWN_COLOR : "var(--text-muted)";
     const profitText = s.profit == null
       ? "시세 확인 전"
       : `${s.profit >= 0 ? "+" : ""}${fmt(s.profit)}원 (${s.profit_percent >= 0 ? "+" : ""}${s.profit_percent}%)`;
@@ -1730,11 +1751,17 @@
               <span class="card-title-scroll"><span class="card-title" style="${s.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(s.name)}</span></span>
               <span class="card-head-right">
                 ${s.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">매도</span>`}
-                <span class="benefit-remaining amount-accent" style="color:${profitColor};">${profitText}</span>
+                <span class="benefit-remaining amount-accent">${s.last_price ? fmt(s.last_price) + "원" : "시세 확인 전"}</span>
               </span>
             </div>
             <div class="card-text-row">
-              <span class="card-method-dim">${s.code ? escapeHtml(s.code) : "종목코드 미입력"} / 매수 ${fmt(s.buy_price)}원 x ${fmt(s.quantity)}주${s.last_price ? ` / 현재 ${fmt(s.last_price)}원` : ""}</span>
+              <span class="card-method-dim">${s.broker ? escapeHtml(s.broker) + " · " : ""}매수 ${fmt(s.buy_price)}원 x ${fmt(s.quantity)}주${s.code ? ` (${escapeHtml(s.code)})` : ""}</span>
+              <span class="card-head-right">
+                <span style="color:${profitColor};font-weight:700;">${profitText}</span>
+              </span>
+            </div>
+            <div class="card-text-row">
+              <span></span>
               <span class="card-head-right">
                 <button class="icon-btn edit-stock" data-id="${s.id}" title="수정">✏️</button>
                 <button class="icon-btn delete-stock" data-id="${s.id}" title="삭제">🗑️</button>
@@ -1743,7 +1770,6 @@
           </div>
         </div>
       </div>
-      ${memoToggleTemplate(`stock-${s.id}`, s.memo)}
     `;
   }
 
@@ -1754,14 +1780,6 @@
       state = await api(`/api/stocks/${s.id}`, { method: "DELETE" });
       render();
     });
-    el.querySelectorAll(".memo-toggle").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        const key = btn.dataset.memoKey;
-        if (openMemoPanels.has(key)) openMemoPanels.delete(key);
-        else openMemoPanels.add(key);
-        render();
-      })
-    );
   }
 
   document.getElementById("btn-stock-refresh").addEventListener("click", async (e) => {
@@ -1783,6 +1801,7 @@
     document.getElementById("stock-modal-title").textContent = s ? "종목 수정" : "종목 추가";
     document.getElementById("stock-name").value = s ? s.name : "";
     document.getElementById("stock-code").value = s ? s.code : "";
+    document.getElementById("stock-broker").value = s ? (s.broker || "") : "";
     document.getElementById("stock-buy-price").value = s ? s.buy_price : "";
     document.getElementById("stock-quantity").value = s ? s.quantity : "";
     document.getElementById("stock-active").checked = s ? !!s.active : true;
@@ -1795,6 +1814,7 @@
     const payload = {
       name: document.getElementById("stock-name").value.trim(),
       code: document.getElementById("stock-code").value.trim(),
+      broker: document.getElementById("stock-broker").value.trim(),
       buy_price: document.getElementById("stock-buy-price").value || 0,
       quantity: document.getElementById("stock-quantity").value || 0,
       active: document.getElementById("stock-active").checked,

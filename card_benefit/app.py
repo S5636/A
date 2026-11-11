@@ -348,6 +348,7 @@ def serialize_stocks(conn):
             "id": s["id"],
             "name": s["name"],
             "code": s["code"],
+            "broker": s["broker"],
             "buy_price": buy_price,
             "quantity": quantity,
             "last_price": last_price or None,
@@ -1596,10 +1597,10 @@ def create_stock():
     try:
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM stocks").fetchone()["m"]
         conn.execute(
-            """INSERT INTO stocks (name, code, buy_price, quantity, active, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO stocks (name, code, broker, buy_price, quantity, active, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                name, code, buy_price, quantity,
+                name, code, (data.get("broker") or "").strip(), buy_price, quantity,
                 1 if data.get("active", True) else 0,
                 (data.get("memo") or "").strip(),
                 max_order + 1,
@@ -1642,11 +1643,12 @@ def update_stock(stock_id):
         last_known_positive = 1 if profit > 0 else 0
 
         conn.execute(
-            """UPDATE stocks SET name=?, code=?, buy_price=?, quantity=?, active=?, memo=?,
+            """UPDATE stocks SET name=?, code=?, broker=?, buy_price=?, quantity=?, active=?, memo=?,
                sort_order=?, last_known_positive=? WHERE id=?""",
             (
                 name,
                 (data.get("code", stock["code"]) or "").strip(),
+                (data.get("broker", stock["broker"]) or "").strip(),
                 buy_price,
                 quantity,
                 active,
