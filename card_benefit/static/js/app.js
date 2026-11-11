@@ -204,6 +204,18 @@
     })
   );
 
+  // 주식탭은 서버가 5분마다 백그라운드로 시세를 갱신해도, 브라우저 화면은
+  // "지금 확인"을 누르거나 새로고침해야만 그 값을 보여줬다(수동 갱신만
+  // 되고 화면 자동 갱신은 없었음) - 주식탭을 보고 있는 동안만 30초마다
+  // 서버 상태를 다시 읽어와서 화면도 같이 갱신한다(이 호출 자체는 DB만
+  // 읽는 거라 네이버에 새로 요청을 보내진 않음, 서버 백그라운드 스레드가
+  // 이미 갱신해둔 값을 화면에 반영만 함).
+  setInterval(async () => {
+    if (activeView !== "stock") return;
+    state = await api("/api/state");
+    render();
+  }, 30000);
+
   // ---- 최상단 적립/캐시백/혜택률 합계 ----
   function renderMonthlySummary() {
     const section = document.getElementById("monthly-summary");
@@ -1569,6 +1581,7 @@
         </div>
       </div>
       ${infoLine ? `<div class="perf-row-sub">${escapeHtml(infoLine)}</div>` : ""}
+      ${item.current_balance ? `<div class="perf-row-sub" style="color:var(--neon-green);">현재 적립액 ${fmt(item.current_balance)}원</div>` : ""}
       ${item.maturity_projection ? `<div class="perf-row-sub" style="color:var(--neon-green);">만기 예상액 ${fmt(item.maturity_projection.maturity_amount)}원 (납입 ${fmt(item.maturity_projection.total_deposits)} + 이자 ${fmt(item.maturity_projection.estimated_interest)}, 현재 페이스 기준 추정)</div>` : ""}
       ${memoToggleTemplate(`insurance-${item.id}`, item.memo)}
       ${matchHistoryTemplate(`insurance-${item.id}`, item.match_history, { showToggle: false })}
