@@ -100,6 +100,13 @@
     return Number(n).toLocaleString("ko-KR");
   }
 
+  // 대출/고정지출/보험/주식/병원비 요약 박스들이 전부 "조건에 맞는 것만
+  // 골라서 특정 필드 합산" 패턴이라 공용 헬퍼로 뺌(예전엔 탭마다 따로
+  // filter+reduce를 베껴 썼음).
+  function sumBy(list, pred, field) {
+    return list.reduce((sum, x) => (pred(x) ? sum + (x[field] || 0) : sum), 0);
+  }
+
   function shortDate(iso) {
     return (iso || "").replaceAll("-", "").slice(2);
   }
@@ -834,11 +841,11 @@
     emptyLoanHint.style.display = state.loans.length ? "none" : "block";
 
     document.getElementById("loan-total-balance-value").textContent =
-      `₩${fmt(state.loans.reduce((sum, l) => sum + (l.current_balance || 0), 0))}`;
+      `₩${fmt(sumBy(state.loans, () => true, "current_balance"))}`;
     document.getElementById("loan-total-monthly-value").textContent =
-      `₩${fmt(state.loans.filter((l) => l.due_this_month).reduce((sum, l) => sum + (l.due_amount || 0), 0))}`;
+      `₩${fmt(sumBy(state.loans, (l) => l.due_this_month, "due_amount"))}`;
     document.getElementById("loan-unpaid-total").textContent =
-      `미체크 ₩${fmt(state.loans.filter((l) => l.due_this_month && !l.paid_this_month).reduce((sum, l) => sum + (l.due_amount || 0), 0))}`;
+      `미체크 ₩${fmt(sumBy(state.loans, (l) => l.due_this_month && !l.paid_this_month, "due_amount"))}`;
 
     const loans = sortedLoans();
     loans.forEach((loan, idx) => {
@@ -1185,13 +1192,13 @@
     list.querySelectorAll(".card").forEach((el) => el.remove());
     emptyHint.style.display = state.recurring_payments.length ? "none" : "block";
 
-    const total = state.recurring_payments.filter((r) => r.active).reduce((sum, r) => sum + (r.amount || 0), 0);
-    const loanTotal = state.loans.filter((l) => l.due_this_month).reduce((sum, l) => sum + (l.due_amount || 0), 0);
+    const total = sumBy(state.recurring_payments, (r) => r.active, "amount");
+    const loanTotal = sumBy(state.loans, (l) => l.due_this_month, "due_amount");
     document.getElementById("recurring-total-value").textContent = `₩${fmt(total)}`;
     document.getElementById("recurring-grand-total-value").textContent = `₩${fmt(total + loanTotal)}`;
 
     document.getElementById("recurring-unmatched-total").textContent =
-      `미확인 ₩${fmt(state.recurring_payments.filter((r) => r.active && !r.matched_this_month).reduce((sum, r) => sum + (r.amount || 0), 0))}`;
+      `미확인 ₩${fmt(sumBy(state.recurring_payments, (r) => r.active && !r.matched_this_month, "amount"))}`;
 
     renderRecurringCardSummary();
 
@@ -1513,11 +1520,11 @@
     list.querySelectorAll(".card").forEach((el) => el.remove());
     emptyHint.style.display = state.insurances.length ? "none" : "block";
 
-    const total = state.insurances.filter((r) => r.active).reduce((sum, r) => sum + (r.monthly_premium || 0), 0);
+    const total = sumBy(state.insurances, (r) => r.active, "monthly_premium");
     document.getElementById("insurance-total-value").textContent = `₩${fmt(total)}`;
 
     document.getElementById("insurance-unmatched-total").textContent =
-      `미확인 ₩${fmt(state.insurances.filter((r) => r.active && !r.matched_this_month).reduce((sum, r) => sum + (r.monthly_premium || 0), 0))}`;
+      `미확인 ₩${fmt(sumBy(state.insurances, (r) => r.active && !r.matched_this_month, "monthly_premium"))}`;
 
     sortedInsurances().forEach((item, idx) => {
       const el = document.createElement("div");
@@ -1693,9 +1700,7 @@
     list.querySelectorAll(".card").forEach((el) => el.remove());
     emptyHint.style.display = state.stocks.length ? "none" : "block";
 
-    const total = state.stocks
-      .filter((s) => s.active && s.profit != null)
-      .reduce((sum, s) => sum + s.profit, 0);
+    const total = sumBy(state.stocks, (s) => s.active && s.profit != null, "profit");
     document.getElementById("stock-total-value").textContent = `${total >= 0 ? "+" : ""}₩${fmt(total)}`;
 
     const checkedTimes = state.stocks.map((s) => s.last_checked_at).filter(Boolean).sort();
@@ -1823,7 +1828,7 @@
     document.getElementById("medical-count").textContent = items.length ? `${items.length}건` : "";
     medicalList.style.display = medicalOpen ? "flex" : "none";
 
-    const unclaimedTotal = items.filter((m) => !m.claimed).reduce((sum, m) => sum + (m.amount || 0), 0);
+    const unclaimedTotal = sumBy(items, (m) => !m.claimed, "amount");
     document.getElementById("medical-unclaimed-total").textContent = `청구 안 한 병원비 합계 ₩${fmt(unclaimedTotal)}`;
 
     const medicalActions = [

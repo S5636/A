@@ -946,15 +946,37 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
     return True
 
 
-def _try_auto_match_loan(conn, inbox_id):
-    """대출 자동매칭 전체(은행명 텍스트 매칭 먼저, 안 되면 금액+날짜
-    매칭). "대출 탭 > 자동 매칭" 버튼처럼 대출 매칭만 단독으로 몰아서
-    다시 시도할 때 쓴다 - 실시간 알림 처리 때는 보험/고정지출 매칭과
-    순서를 맞춰야 해서 두 함수를 따로 쓴다."""
+def _try_auto_match_all(conn, inbox_id):
+    """대출/고정지출/보험 자동매칭 전체를 정해진 우선순위로 한 번에
+    시도한다: 대출 은행명 텍스트(가장 확실) → 고정지출 → 보험(가맹점명까지
+    보는 구체적 매칭) → 대출 금액+날짜(가장 느슨함, 보험료 등과 금액이
+    우연히 겹칠 수 있어서 마지막 수단). 실시간 알림 처리/엑셀 업로드/
+    대출·고정지출·보험 탭의 "자동 매칭" 버튼이 전부 이 함수 하나만 쓴다 -
+    예전엔 호출하는 곳마다 순서가 다르거나(엑셀 업로드는 대출 매칭 자체가
+    빠져있었음) 자기 탭만 보고 재시도해서, 같은 알림이 어느 경로로
+    처리되느냐에 따라 다르게(엉뚱하게) 배정될 수 있었다. 입구를 하나로
+    합쳐서 그런 사고를 구조적으로 막는다."""
     return (
         _try_auto_match_loan_account_text(conn, inbox_id)
+        or _try_auto_match_recurring(conn, inbox_id)
+        or _try_auto_match_insurance(conn, inbox_id)
         or _try_auto_match_loan_amount_date(conn, inbox_id)
     )
+
+
+def _auto_match_all_pending(conn):
+    """큐에 남아있는(아직 뭔가에 매칭 안 된) 알림 전체에 _try_auto_match_all을
+    한 번씩 다시 돌린다. 대출/고정지출/보험 탭의 "자동 매칭" 버튼이 전부
+    이 함수를 호출한다 - 어느 버튼을 눌러도 결과가 같다. 이미 매칭된
+    항목은 각 하위 매칭 함수가 자체적으로 걸러내므로(상태/FK 확인), 범위를
+    넓게 잡아도 안전하다."""
+    ids = [r["id"] for r in conn.execute("SELECT id FROM inbox_items WHERE status != 'cancelled'")]
+    matched = 0
+    for iid in ids:
+        if _try_auto_match_all(conn, iid):
+            matched += 1
+    conn.commit()
+    return matched
 
 
 def _next_payment_date(payment_day):
@@ -2135,18 +2157,12 @@ def unlink_match(inbox_id):
 
 @app.route("/api/loans/auto-match", methods=["POST"])
 def auto_match_all_loans():
-    """큐에 쌓여있는 계좌 거래 알림들에 대해 대출 상환 자동 매칭을 한 번에
-    다시 시도한다 - 기능이 켜지기 전에 이미 들어와버린 알림들을 위함."""
+    """큐에 남은 알림 전체에 대출/고정지출/보험 자동매칭을 한 번에 다시
+    시도한다(대출 탭 버튼이지만 고정지출/보험 탭 버튼과 동작은 완전히
+    같음 - _auto_match_all_pending 참고)."""
     conn = get_conn()
     try:
-        pending_ids = [
-            r["id"] for r in conn.execute("SELECT id FROM inbox_items WHERE status = 'pending'")
-        ]
-        matched = 0
-        for iid in pending_ids:
-            if _try_auto_match_loan(conn, iid):
-                matched += 1
-        conn.commit()
+        matched = _auto_match_all_pending(conn)
     finally:
         conn.close()
     result = serialize_full()
@@ -2156,20 +2172,12 @@ def auto_match_all_loans():
 
 @app.route("/api/recurring/auto-match", methods=["POST"])
 def auto_match_all_recurring():
-    """쌓여있는 과거 알림까지 포함해서, 금액+결제수단(카드 뒷자리)이 애매하지
-    않게 정확히 일치하는 것만 한 번에 자동으로 매칭한다."""
+    """큐에 남은 알림 전체에 대출/고정지출/보험 자동매칭을 한 번에 다시
+    시도한다(고정지출 탭 버튼이지만 대출/보험 탭 버튼과 동작은 완전히
+    같음 - _auto_match_all_pending 참고)."""
     conn = get_conn()
     try:
-        pending_ids = [
-            r["id"] for r in conn.execute(
-                "SELECT id FROM inbox_items WHERE recurring_id IS NULL"
-            )
-        ]
-        matched = 0
-        for iid in pending_ids:
-            if _try_auto_match_recurring(conn, iid):
-                matched += 1
-        conn.commit()
+        matched = _auto_match_all_pending(conn)
     finally:
         conn.close()
     result = serialize_full()
@@ -2365,18 +2373,12 @@ def unmatch_insurance(item_id):
 
 @app.route("/api/insurances/auto-match", methods=["POST"])
 def auto_match_all_insurances():
+    """큐에 남은 알림 전체에 대출/고정지출/보험 자동매칭을 한 번에 다시
+    시도한다(보험 탭 버튼이지만 대출/고정지출 탭 버튼과 동작은 완전히
+    같음 - _auto_match_all_pending 참고)."""
     conn = get_conn()
     try:
-        pending_ids = [
-            r["id"] for r in conn.execute(
-                "SELECT id FROM inbox_items WHERE insurance_id IS NULL AND recurring_id IS NULL"
-            )
-        ]
-        matched = 0
-        for iid in pending_ids:
-            if _try_auto_match_insurance(conn, iid):
-                matched += 1
-        conn.commit()
+        matched = _auto_match_all_pending(conn)
     finally:
         conn.close()
     result = serialize_full()
@@ -3169,15 +3171,7 @@ def create_inbox_item():
                  "cancelled" if is_cancel else "pending"),
             )
             if not is_cancel:
-                # 대출 쪽은 은행명이 특정돼서 나오는 텍스트 매칭이 제일
-                # 확실해서 가장 먼저 시도. 그다음은 가맹점명까지 보는
-                # 고정지출/보험(더 구체적인 매칭). 대출 금액+날짜 매칭은
-                # 보험료 등 다른 계좌이체랑 금액이 우연히 겹칠 수 있는
-                # 가장 느슨한 방법이라 마지막 수단으로만 쓴다.
-                if not _try_auto_match_loan_account_text(conn, cur.lastrowid):
-                    if not _try_auto_match_recurring(conn, cur.lastrowid):
-                        if not _try_auto_match_insurance(conn, cur.lastrowid):
-                            _try_auto_match_loan_amount_date(conn, cur.lastrowid)
+                _try_auto_match_all(conn, cur.lastrowid)
         conn.commit()
     finally:
         conn.close()
@@ -3735,11 +3729,10 @@ def _import_statement(ws, header_info):
             else:
                 queued += 1
                 # 폰 알림으로 실시간으로 들어올 때와 똑같이, 엑셀로 한번에
-                # 올린 지난 내역도 여기서 바로 고정지출/보험 자동매칭을
-                # 시도한다. 몇 달치를 한 번에 올려도 각 건이 해당하는 달에
-                # 바로 매칭되게 하려는 것.
-                _try_auto_match_recurring(conn, cur.lastrowid)
-                _try_auto_match_insurance(conn, cur.lastrowid)
+                # 올린 지난 내역도 여기서 바로 대출/고정지출/보험 자동매칭을
+                # 시도한다(전에는 대출 매칭이 빠져있었음). 몇 달치를 한 번에
+                # 올려도 각 건이 해당하는 달에 바로 매칭되게 하려는 것.
+                _try_auto_match_all(conn, cur.lastrowid)
         conn.commit()
     finally:
         conn.close()
