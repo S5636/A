@@ -5,6 +5,7 @@ Windows 콘솔 코드페이지에 따라 명령어가 깨져서 해석되는 문
 .bat은 최대한 아무 내용도 없게(순수 영문) 두고 이 스크립트가 안내/설치/실행을 전담한다."""
 import hashlib
 import os
+import re
 import subprocess
 import sys
 import time
@@ -13,6 +14,93 @@ import webbrowser
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _SETUP_MARKER = os.path.join(BASE_DIR, ".setup_done")
+
+# 자동 업데이트(사용자 요청: "업데이트 패치로 내놓으라고 코어싱크는
+# 그렇게하고있잖아" - 매번 zip 받아서 수동으로 덮어쓰는 대신, 켤 때마다
+# 최신 코드인지 자동으로 확인하고 다르면 스스로 받아서 적용한다). 저장소
+# 자체가 공개 저장소라(raw.githubusercontent.com 확인됨) 별도 인증 없이
+# 받을 수 있다.
+_REPO_OWNER = "S5636"
+_REPO_NAME = "A"
+_REPO_BRANCH = "claude/online-shop-margin-dashboard-uiyvbc"
+_VERSION_URL = (
+    f"https://raw.githubusercontent.com/{_REPO_OWNER}/{_REPO_NAME}/{_REPO_BRANCH}/BUILD_VERSION.txt"
+)
+_ZIP_URL = f"https://github.com/{_REPO_OWNER}/{_REPO_NAME}/archive/refs/heads/{_REPO_BRANCH}.zip"
+
+# 절대 덮어쓰면 안 되는 사용자 데이터/세션 - Margin_Board.zip을 만들 때 쓰는
+# 제외 목록과 반드시 똑같이 맞춘다(한쪽만 빼먹으면 실제 데이터가 날아가는
+# 사고로 이어질 수 있음).
+_UPDATE_PROTECTED_NAMES = {
+    "shop_data.db", "fees_config.json", "settings.json",
+    "ownerclan_profile", "ownerclan_profile_whale", "ownerclan_profile_chrome",
+    ".setup_done", ".git",
+}
+_UPDATE_PROTECTED_PATTERN = re.compile(r"^\.stock_recalc_v\d+_done$")
+
+
+def _is_update_protected(top_level_name):
+    return top_level_name in _UPDATE_PROTECTED_NAMES or bool(_UPDATE_PROTECTED_PATTERN.match(top_level_name))
+
+
+def _local_version():
+    try:
+        with open(os.path.join(BASE_DIR, "BUILD_VERSION.txt"), "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def _apply_update_from(extracted_root):
+    """extracted_root(압축 푼 최신 소스 폴더) 안의 파일들을 BASE_DIR 위에
+    그대로 덮어쓴다 - 단, 최상위가 보호 목록에 있는 항목은 완전히 건너뛴다."""
+    import shutil
+    for name in os.listdir(extracted_root):
+        if _is_update_protected(name):
+            continue
+        src = os.path.join(extracted_root, name)
+        dst = os.path.join(BASE_DIR, name)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
+
+
+def _check_and_apply_update():
+    try:
+        import urllib.request
+        remote_version = urllib.request.urlopen(_VERSION_URL, timeout=10).read().decode("utf-8").strip()
+    except Exception as e:
+        print(f"[안내] 업데이트 확인에 실패했습니다(무시하고 지금 버전으로 계속 진행합니다): {type(e).__name__}: {e}")
+        return
+    local_version = _local_version()
+    if not remote_version or remote_version == local_version:
+        return
+    print(f"[안내] 새 버전을 발견했습니다 (현재: {local_version or '(없음)'} → 최신: {remote_version}) - 자동으로 업데이트합니다...")
+    try:
+        import tempfile
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = os.path.join(tmp, "update.zip")
+            import urllib.request
+            urllib.request.urlretrieve(_ZIP_URL, zip_path)
+            with zipfile.ZipFile(zip_path) as zf:
+                zf.extractall(tmp)
+            # GitHub 저장소 압축파일은 맨 위가 "<repo>-<branch 이름을 정리한
+            # 형태>/" 폴더 하나로 감싸여 있다 - 그 폴더를 찾아서 그 "안의"
+            # 내용을 기준으로 복사한다.
+            extracted_root = None
+            for name in os.listdir(tmp):
+                full = os.path.join(tmp, name)
+                if os.path.isdir(full):
+                    extracted_root = full
+                    break
+            if extracted_root is None:
+                raise RuntimeError("다운로드한 압축파일 안에서 소스 폴더를 찾지 못했습니다.")
+            _apply_update_from(extracted_root)
+        print("[안내] 업데이트 적용 완료.")
+    except Exception as e:
+        print(f"[안내] 업데이트 적용에 실패했습니다(무시하고 지금 버전으로 계속 진행합니다): {type(e).__name__}: {e}")
 
 
 def open_browser_later():
@@ -35,6 +123,10 @@ def main():
     print("============================================")
     print("  이유상점 Margin Board")
     print("============================================")
+    print()
+
+    print("업데이트를 확인하는 중...")
+    _check_and_apply_update()
     print()
 
     # pip install/playwright install을 매번 무조건 실행하면, pip이 로컬에 이미
