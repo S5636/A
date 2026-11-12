@@ -1163,6 +1163,33 @@ def apply_startup_data_fixes():
                 (inet["id"], this_ym),
             )
 
+        # 하나증권 "종합위탁" 계좌 보유종목 4개 신규 등록. 종목코드는
+        # WebSearch로 실제 확인(추측 안 함). 매수가는 캡처에 안 나와서
+        # 평가금액/등락률로 역산(= 평가금액 / (1+등락률/100)) - 다른
+        # 보유종목들도 같은 방식으로 등록해둔 전례 있음(정확한 매수가는
+        # 아니고 추정치).
+        new_stocks = [
+            ("해성디에스", "195870", 47825, 1),
+            ("명인제약", "317450", 57989, 1),
+            ("KB제29호스팩", "478390", 2001, 5),
+            ("팬오션", "028670", 5478, 1),
+        ]
+        max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM stocks").fetchone()["m"]
+        stocks_added = 0
+        for name, code, buy_price, qty in new_stocks:
+            exists = conn.execute("SELECT 1 FROM stocks WHERE name = ?", (name,)).fetchone()
+            if exists:
+                continue
+            max_order += 1
+            conn.execute(
+                "INSERT INTO stocks (name, code, buy_price, quantity, broker, active, memo, sort_order) "
+                "VALUES (?, ?, ?, ?, '하나증권', 1, '매수가는 평가금액/등락률로 역산한 추정치', ?)",
+                (name, code, buy_price, qty, max_order),
+            )
+            stocks_added += 1
+        if stocks_added:
+            print(f"하나증권 종합위탁 계좌 보유종목 {stocks_added}개 신규 등록")
+
         conn.commit()
     except Exception:
         pass
