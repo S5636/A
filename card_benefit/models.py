@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS recurring_payments (
     card_id INTEGER REFERENCES cards(id) ON DELETE SET NULL,  -- 등록된 카드로 낼 때는 여기로 연결
                                          -- (카드탭에서 이름을 바꿔도 자동으로 같이 바뀜)
     payment_day INTEGER NOT NULL DEFAULT 0,  -- 매월 며칠(1~31, 0=미정)
+    billing_cycle TEXT DEFAULT '월간',   -- 구독 결제 주기('월간'/'연간')
     active INTEGER NOT NULL DEFAULT 1,  -- 0이면 해지/중단했지만 기록은 남겨둔 것
     memo TEXT DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
@@ -259,6 +260,7 @@ def init_db():
         _ensure_column(conn, "insurances", "interest_rate", "interest_rate REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "stocks", "broker", "broker TEXT DEFAULT ''")
         _ensure_column(conn, "stocks", "sell_price", "sell_price REAL NOT NULL DEFAULT 0")
+        _ensure_column(conn, "recurring_payments", "billing_cycle", "billing_cycle TEXT DEFAULT '월간'")
 
         # recurring_id/insurance_id는 _ensure_column으로 나중에 추가된 컬럼이라
         # (예전 DB엔 처음부터 있던 게 아니라서) ON DELETE SET NULL 외래키 제약이

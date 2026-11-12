@@ -558,6 +558,12 @@
     <label>매월 결제일 (선택)
       <input type="number" id="recurring-day" min="0" max="31" placeholder="예: 5">
     </label>
+    <label id="recurring-billing-cycle-row" style="display:none;">구독 기간
+      <select id="recurring-billing-cycle">
+        <option value="월간">월간</option>
+        <option value="연간">연간</option>
+      </select>
+    </label>
     <label>카드/계좌 알림에 찍히는 이름이 다르면 (선택)
       <input type="text" id="recurring-billing-alias" placeholder="예: 한국전력 자동이체가 '한전 저압'으로 찍히는 경우">
     </label>

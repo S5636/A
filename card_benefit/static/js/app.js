@@ -130,6 +130,30 @@
     return shortCardName(card.name);
   }
 
+  // 구독 항목 이름 옆에 작은 브랜드 배지를 붙여서(실제 로고 이미지가
+  // 아니라 서비스별 고유 색+글자 - 외부 이미지를 받아올 필요 없이
+  // 가볍게 구분만 되면 됨) 지출 목록에서 구독인지 한눈에 보이게 한다.
+  const SUBSCRIPTION_LOGOS = [
+    [/넷플릭스|netflix/i, "N", "#E50914"],
+    [/디즈니|disney/i, "D", "#113CCF"],
+    [/네이버/i, "N", "#03C75A"],
+    [/쿠팡|coupang/i, "C", "#0070F3"],
+    [/토스|toss/i, "T", "#3182F6"],
+    [/왓챠|watcha/i, "W", "#FF0558"],
+    [/웨이브|wavve/i, "W", "#1C1C84"],
+    [/티빙|tving/i, "T", "#E6263D"],
+    [/유튜브|youtube/i, "Y", "#FF0000"],
+    [/애플|apple/i, "A", "#555555"],
+    [/스포티파이|spotify/i, "S", "#1DB954"],
+  ];
+  function subscriptionBadge(category, name) {
+    if (category !== "구독") return "";
+    const found = SUBSCRIPTION_LOGOS.find(([pattern]) => pattern.test(name || ""));
+    if (!found) return "";
+    const [, letter, color] = found;
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;background:${color};color:#fff;font-size:10px;font-weight:800;flex-shrink:0;">${letter}</span>`;
+  }
+
   function shortBenefitName(name) {
     return (name || "").replace(/\s*\([^)]*\)/g, "").trim();
   }
@@ -1268,9 +1292,9 @@
           ${item.payment_day ? `<div class="loan-day-badge" title="매월 결제일">${item.payment_day}</div>` : ""}
           <div class="card-text-stack">
             <div class="card-text-row">
-              <span class="card-title-scroll"><span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.name)}</span></span>
+              <span class="card-title-scroll" style="display:flex;align-items:center;gap:4px;">${subscriptionBadge(item.category, item.name)}<span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.name)}</span></span>
               <span class="card-head-right">
-                ${item.category ? `<span class="loan-type-badge">${escapeHtml(item.category)}</span>` : ""}
+                ${item.category ? `<span class="loan-type-badge">${escapeHtml(item.category)}${item.category === "구독" && item.billing_cycle === "연간" ? " · 연간" : ""}</span>` : ""}
                 ${item.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">중단</span>`}
                 ${item.active ? `<span class="match-badge" data-id="${item.id}" title="${item.matched_this_month ? `확인됨: ${item.matched_merchant ? escapeHtml(item.matched_merchant) + " " : ""}${fmt(item.matched_amount)}원` : "이번 달 결제 확인 안 됨 - 눌러서 매칭"}">${item.matched_this_month ? "✅" : "❓"}</span>` : ""}
                 <span class="benefit-remaining amount-accent">${amountText}원</span>
@@ -1471,12 +1495,18 @@
     }
 
     document.getElementById("recurring-day").value = item && item.payment_day ? item.payment_day : "";
+    document.getElementById("recurring-billing-cycle").value = item ? (item.billing_cycle || "월간") : "월간";
+    document.getElementById("recurring-billing-cycle-row").style.display =
+      document.getElementById("recurring-category").value === "구독" ? "" : "none";
     document.getElementById("recurring-billing-alias").value = item ? (item.billing_alias || "") : "";
     document.getElementById("recurring-active").checked = item ? !!item.active : true;
     document.getElementById("recurring-memo").value = item ? item.memo : "";
     recurringModal.classList.add("open");
   }
   document.getElementById("btn-add-recurring").addEventListener("click", () => openRecurringModal(null));
+  document.getElementById("recurring-category").addEventListener("change", (e) => {
+    document.getElementById("recurring-billing-cycle-row").style.display = e.target.value === "구독" ? "" : "none";
+  });
   document.getElementById("recurring-cancel").addEventListener("click", () => recurringModal.classList.remove("open"));
   document.getElementById("recurring-save").addEventListener("click", async () => {
     const isCardChoice = methodSelect.value.startsWith("card:");
@@ -1487,6 +1517,7 @@
       card_id: isCardChoice ? Number(methodSelect.value.slice(5)) : null,
       payment_method: isCardChoice ? "" : (methodSelect.value === CUSTOM_METHOD ? methodInput.value.trim() : methodSelect.value),
       payment_day: document.getElementById("recurring-day").value || 0,
+      billing_cycle: document.getElementById("recurring-billing-cycle").value,
       billing_alias: document.getElementById("recurring-billing-alias").value.trim(),
       active: document.getElementById("recurring-active").checked,
       memo: document.getElementById("recurring-memo").value.trim(),
