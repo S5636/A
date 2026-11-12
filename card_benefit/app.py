@@ -1032,6 +1032,44 @@ def _try_auto_match_recurring(conn, inbox_id):
     return _try_auto_match(conn, inbox_id, "recurring_id", "recurring_payments", "amount", "name")
 
 
+def apply_startup_data_fixes():
+    """매번 update.py를 따로 보내서 실행하던 "데이터 보정"(사용자 실제
+    데이터를 한 번 바로잡는 것 - 예: 틀린 금액 고치기, 구분용 별칭
+    등록하기)도, 이제 코드처럼 서버 시작할 때마다 자동으로 실행되게
+    한다(launcher.py의 self_update()가 이 app.py 자체를 깃허브에서 받아
+    오므로, 여기에 새 보정을 추가하고 푸시만 하면 다음에 껐다 켤 때
+    자동으로 적용됨 - update.py를 따로 안 받아도 됨). 각 보정은 전부
+    "지금 값이 다를 때만 고친다" 식으로 짜여 있어서(이미 맞으면 아무
+    일도 안 함) 매번 실행돼도 안전하다. 실패해도(예: 이미 지워진 행)
+    서버 시작 자체가 막히면 안 되므로 전체를 try로 감싼다."""
+    try:
+        conn = get_conn()
+    except Exception:
+        return
+    try:
+        placeholder_memo = "금액/결제일/결제카드 직접 입력해주세요"
+        conn.execute(
+            "UPDATE recurring_payments SET memo = '' WHERE memo = ? "
+            "AND name IN ('넷플릭스', '네이버멤버십', '쿠팡와우')",
+            (placeholder_memo,),
+        )
+
+        hanjeon_101 = conn.execute(
+            "SELECT id, billing_alias FROM recurring_payments WHERE name = 'HL 한국전력 101호'"
+        ).fetchone()
+        if hanjeon_101 and hanjeon_101["billing_alias"] != "저압":
+            conn.execute(
+                "UPDATE recurring_payments SET billing_alias = '저압' WHERE id = ?",
+                (hanjeon_101["id"],),
+            )
+
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
 def _bump_didimssi_on_match(conn, inbox_id):
     """"디딤씨앗 적립예금"(매달 내가 5만원 입금) 알림이 새로 매칭될 때마다
     정부도 5만원 매칭해준다고 보고 현재 적립액에 10만원(내 5만원+정부
@@ -4165,6 +4203,7 @@ def import_usage():
 
 
 init_db()
+apply_startup_data_fixes()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
