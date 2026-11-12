@@ -980,107 +980,6 @@
     renderFeeTable(fees);
   }
 
-  // ================= TAB: 고정지출(구독관리) =================
-  // 실제 브랜드 로고 이미지 대신(저작권 걱정 없이) 브랜드 색상 + 글자
-  // 하나로 된 작은 배지를 이름 앞에 붙인다 - 모르는 이름이면 첫 글자로.
-  const FIXED_EXPENSE_LOGOS = {
-    '넷플릭스': { text: 'N', bg: '#E50914' },
-    '디즈니+': { text: 'D+', bg: '#113CCF' },
-    '네이버멤버십': { text: 'N', bg: '#03C75A' },
-    '쿠팡': { text: 'C', bg: '#1F5CDB' },
-    '토스': { text: 'T', bg: '#0064FF' },
-  };
-  function fixedExpenseLogo(name) {
-    const hit = FIXED_EXPENSE_LOGOS[(name || '').trim()];
-    if (hit) return hit;
-    const ch = (name || '').trim().slice(0, 1) || '?';
-    return { text: ch, bg: '#555' };
-  }
-
-  function esc(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
-
-  function renderFixedTable(rows) {
-    const tbody = document.querySelector('#fixed-table tbody');
-    tbody.innerHTML = '';
-    rows.forEach((row) => {
-      const tr = document.createElement('tr');
-      const logo = fixedExpenseLogo(row.name);
-      tr.innerHTML = `
-        <td style="display:flex; align-items:center; gap:8px;">
-          <span class="fixed-logo-badge" style="flex:0 0 auto; width:22px; height:22px; border-radius:6px; background:${logo.bg}; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">${logo.text}</span>
-          <input data-field="name" value="${esc(row.name)}" style="flex:1;">
-        </td>
-        <td><select data-field="cycle">
-          <option value="월간"${row.cycle === '월간' ? ' selected' : ''}>월간</option>
-          <option value="연간"${row.cycle === '연간' ? ' selected' : ''}>연간</option>
-        </select></td>
-        <td><input data-field="amount" type="number" value="${row.amount || 0}"></td>
-        <td><input data-field="payment_day" type="number" min="1" max="31" value="${row.payment_day == null ? '' : row.payment_day}" placeholder="일"></td>
-        <td><input data-field="payment_card" value="${esc(row.payment_card)}"></td>
-        <td><input data-field="memo" value="${esc(row.memo)}" style="width:100%;"></td>
-        <td><button class="btn secondary" data-action="remove" style="padding:4px 8px;">✕</button></td>
-      `;
-      tr.querySelector('[data-field="name"]').addEventListener('input', (e) => {
-        const badge = tr.querySelector('.fixed-logo-badge');
-        const l = fixedExpenseLogo(e.target.value);
-        badge.style.background = l.bg;
-        badge.textContent = l.text;
-      });
-      tr.querySelector('[data-action="remove"]').addEventListener('click', () => {
-        tr.remove();
-        updateFixedTotalNote();
-      });
-      tbody.appendChild(tr);
-    });
-    updateFixedTotalNote();
-  }
-
-  function collectFixedTable() {
-    const out = [];
-    document.querySelectorAll('#fixed-table tbody tr').forEach((tr) => {
-      const get = (f) => tr.querySelector(`[data-field="${f}"]`).value;
-      const name = get('name').trim();
-      if (!name) return;
-      out.push({
-        name,
-        cycle: get('cycle'),
-        amount: parseFloat(get('amount')) || 0,
-        payment_day: get('payment_day') ? parseInt(get('payment_day'), 10) : null,
-        payment_card: get('payment_card').trim(),
-        memo: get('memo').trim(),
-      });
-    });
-    return out;
-  }
-
-  function updateFixedTotalNote() {
-    const rows = collectFixedTable();
-    const monthlyTotal = rows.reduce((sum, r) => sum + (r.cycle === '연간' ? r.amount / 12 : r.amount), 0);
-    const note = document.getElementById('fixed-total-note');
-    if (note) {
-      note.textContent = `월 환산 합계: 약 ${Math.round(monthlyTotal).toLocaleString()}원 (연간 항목은 ÷12로 환산, 항목 ${rows.length}개)`;
-    }
-  }
-  document.querySelector('#fixed-table tbody').addEventListener('input', updateFixedTotalNote);
-
-  async function loadFixedExpenses() {
-    const rows = await api('/api/fixed_expenses');
-    renderFixedTable(rows);
-  }
-
-  document.getElementById('btn-fixed-add').addEventListener('click', () => {
-    const rows = collectFixedTable();
-    rows.push({ name: '', cycle: '월간', amount: 0, payment_day: null, payment_card: '', memo: '' });
-    renderFixedTable(rows);
-  });
-
-  document.getElementById('btn-fixed-save').addEventListener('click', async () => {
-    const rows = collectFixedTable();
-    await api('/api/fixed_expenses', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows) });
-    await loadFixedExpenses();
-    toast('고정지출이 저장되었습니다.', 'ok');
-  });
-
   // ================= TAB 3: 부가세 통합 =================
   const vatState = { year: NOW.getFullYear(), half: (NOW.getMonth() + 1) <= 6 ? 1 : 2 };
   let vatMarkets = [];
@@ -1303,7 +1202,6 @@
     if (name === 'vat') { loadVatMarkets(); loadVatView(); }
     if (name === 'upload') { loadSettingsLinks(); }
     if (name === 'fees') { loadFees(); }
-    if (name === 'fixed') { loadFixedExpenses(); }
   }
 
   document.querySelectorAll('.tab-btn').forEach(btn => {

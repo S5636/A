@@ -169,29 +169,6 @@ def init_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS vat_summary (
         market TEXT, year INTEGER, month INTEGER, category TEXT, amount INTEGER,
         PRIMARY KEY (market, year, month, category))""")
-    # 고정지출(구독관리) - 사용자 요청: "고정지출에서 구독관리 같이해야겠다
-    # 구독 기간 결제일 결제카드 메모 설명 이런거 넣고". amount/payment_day는
-    # 숫자 계산(월 환산 합계 등)에 바로 쓰려고 TEXT가 아니라 숫자 타입으로 둔다.
-    cur.execute("""CREATE TABLE IF NOT EXISTS fixed_expenses (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, cycle TEXT DEFAULT '월간',
-        amount INTEGER DEFAULT 0, payment_day INTEGER, payment_card TEXT DEFAULT '',
-        memo TEXT DEFAULT '')""")
-    # 처음 쓰는 사람이 매번 이름부터 직접 치는 수고를 덜 수 있게(사용자 요청:
-    # "넷플릭스/디즈니/네이버멤버십/쿠팡/토스 기초넣어주고"), 테이블이
-    # 완전히 비어있을 때만(한 번도 안 써봤을 때만) 흔한 구독 5개를 이름만
-    # 채운 빈 행으로 미리 넣어둔다 - 금액/결제일/카드는 사용자가 실제
-    # 값으로 채워야 의미가 있어서 0/빈칸으로 둔다. 사용자가 전부 지워버린
-    # 뒤에는(테이블은 비어있지만 "써본 적"은 있음) 다시 자동으로 채우면
-    # 안 되므로, 이 자동 채우기 자체가 한 번만 일어났는지 별도 마커로 기억한다.
-    try:
-        fe_seed_marker = os.path.join(BASE_DIR, '.fixed_expenses_seeded')
-        if not os.path.exists(fe_seed_marker):
-            for name in ('넷플릭스', '디즈니+', '네이버멤버십', '쿠팡', '토스'):
-                cur.execute("INSERT INTO fixed_expenses (name, cycle, amount) VALUES (?, '월간', 0)", (name,))
-            with open(fe_seed_marker, 'w', encoding='utf-8') as f:
-                f.write('done')
-    except Exception:
-        pass
     # 판매사상품코드+주문된 옵션 단위 오너클랜 재고상태('정상'/'품절'/'확인실패')
     # 캐시 (STOCK 버튼). 처음엔 상품코드 단위로만 확인해서 옵션이 여러 개인
     # 상품은 하나라도 살아있으면 무조건 '정상'으로 잘못 나오는 문제가 있었다
@@ -1099,58 +1076,6 @@ def api_fees_save():
 @app.route('/api/fees/default')
 def api_fees_default():
     return jsonify(ce.DEFAULT_FEES)
-
-
-# ---------------------------------------------------------------------------
-# 고정지출(구독관리)
-# ---------------------------------------------------------------------------
-
-@app.route('/api/fixed_expenses')
-def api_fixed_expenses_list():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT id, name, cycle, amount, payment_day, payment_card, memo FROM fixed_expenses ORDER BY id ASC")
-    rows = [
-        {'id': r[0], 'name': r[1], 'cycle': r[2], 'amount': r[3], 'payment_day': r[4],
-         'payment_card': r[5], 'memo': r[6]}
-        for r in cur.fetchall()
-    ]
-    conn.close()
-    return jsonify(rows)
-
-
-@app.route('/api/fixed_expenses', methods=['POST'])
-def api_fixed_expenses_save():
-    # fees 저장(표 전체를 한 번에 저장)과 같은 방식 - 화면에서 행을
-    # 추가/삭제/수정한 뒤 전체를 한 번에 통째로 다시 쓴다. id가 있는 행은
-    # 기존 행을 가리키는 참고용일 뿐, 실제로는 매번 전부 지우고 다시
-    # 넣은 뒤 새 id를 돌려준다 - 삭제된 행은 이 목록에서 그냥 빠져있으면
-    # 된다(별도 삭제 API 불필요).
-    body = request.get_json(force=True) or []
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("DELETE FROM fixed_expenses")
-    for row in body:
-        name = str(row.get('name') or '').strip()
-        if not name:
-            continue
-        cycle = str(row.get('cycle') or '월간').strip()
-        try:
-            amount = int(float(row.get('amount') or 0))
-        except Exception:
-            amount = 0
-        try:
-            payment_day = int(row.get('payment_day')) if row.get('payment_day') not in (None, '') else None
-        except Exception:
-            payment_day = None
-        payment_card = str(row.get('payment_card') or '').strip()
-        memo = str(row.get('memo') or '').strip()
-        cur.execute(
-            "INSERT INTO fixed_expenses (name, cycle, amount, payment_day, payment_card, memo) VALUES (?, ?, ?, ?, ?, ?)",
-            (name, cycle, amount, payment_day, payment_card, memo))
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True})
 
 
 # ---------------------------------------------------------------------------
