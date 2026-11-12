@@ -209,6 +209,97 @@ def start_stock_monitor():
     threading.Thread(target=_stock_monitor_loop, daemon=True).start()
 
 
+# 구독(지출탭 category='구독') 항목 이름 옆에 실제 브랜드 로고를 붙이고
+# 싶은데, 로고 이미지를 미리 앱 안에 박아두는 대신(저작권 있는 이미지라
+# 서버에 넣어두기보다, 공개된 아이콘 모음에서 실행 중인 PC가 직접 받게
+# 하는 게 낫다고 판단) 앱이 실제로 돌아가는 PC에서 1회 자동으로 받아서
+# static/img/sub_logos/ 밑에 캐시해둔다 - 한 번 받으면 그다음부터는 로컬
+# 파일을 그대로 쓰므로 매번 인터넷에 안 나간다. simple-icons(MIT 라이선스
+# 공개 아이콘 모음)의 SVG를 쓴다.
+SUBSCRIPTION_LOGO_SLUGS = [
+    (re.compile(r"넷플릭스|netflix", re.I), "netflix"),
+    (re.compile(r"디즈니|disney", re.I), "disneyplus"),
+    (re.compile(r"네이버", re.I), "naver"),
+    (re.compile(r"쿠팡|coupang", re.I), "coupang"),
+    (re.compile(r"토스|toss", re.I), "toss"),
+    (re.compile(r"왓챠|watcha", re.I), "watcha"),
+    (re.compile(r"웨이브|wavve", re.I), "wavve"),
+    (re.compile(r"티빙|tving", re.I), "tving"),
+    (re.compile(r"유튜브|youtube", re.I), "youtube"),
+    (re.compile(r"애플|apple", re.I), "apple"),
+    (re.compile(r"스포티파이|spotify", re.I), "spotify"),
+]
+
+
+def _log_subscription_logo_error(slug, error):
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stock_fetch_error.log")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(
+                f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [구독로고:{slug}] 받기 실패 - "
+                f"{type(error).__name__}: {error}\n"
+            )
+    except Exception:
+        pass
+
+
+def _fetch_subscription_logos_once():
+    """등록된 구독 항목 이름에 맞는 로고 slug들을 추려서, 아직 로컬에
+    없는 것만 simple-icons CDN에서 받아 캐시한다. 실패해도(인터넷 안 되는
+    PC, CDN 차단 등) 조용히 넘어간다 - 로고는 있으면 좋은 장식일 뿐,
+    실패했다고 앱이 멈추면 안 되고, 프론트는 파일이 없으면 색깔 글자
+    배지로 알아서 대체 표시한다."""
+    import urllib.request
+
+    try:
+        conn = get_conn()
+        try:
+            names = [
+                r["name"] for r in conn.execute(
+                    "SELECT DISTINCT name FROM recurring_payments WHERE category = '구독'"
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+    except Exception:
+        return
+
+    needed_slugs = set()
+    for name in names:
+        for pattern, slug in SUBSCRIPTION_LOGO_SLUGS:
+            if pattern.search(name or ""):
+                needed_slugs.add(slug)
+                break
+
+    logo_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "img", "sub_logos")
+    os.makedirs(logo_dir, exist_ok=True)
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    for slug in needed_slugs:
+        dest = os.path.join(logo_dir, f"{slug}.svg")
+        if os.path.exists(dest):
+            continue
+        url = f"https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/{slug}.svg"
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = resp.read()
+            with open(dest, "wb") as f:
+                f.write(data)
+        except Exception as e:
+            _log_subscription_logo_error(slug, e)
+
+
+def start_subscription_logo_fetch():
+    """launcher.py에서 start_stock_monitor()와 같이 서버 시작 직전에
+    한 번만 호출한다(루프 아님 - 로고는 자주 안 바뀌니 매번 다시 받을
+    필요 없음). 새 구독을 추가했을 때 로고가 아직 없으면 서버를
+    재시작해야 받아오지만(바로 그 순간 받아오게 만들면 매 페이지 요청마다
+    인터넷에 나가는 걸 걱정해야 해서 이 정도로 충분함), 그 전까지는 색깔
+    글자 배지로 보임."""
+    import threading
+    threading.Thread(target=_fetch_subscription_logos_once, daemon=True).start()
+
+
 def serialize_inbox(conn):
     rows = conn.execute(
         "SELECT * FROM inbox_items WHERE status = 'pending' ORDER BY occurred_at DESC, id DESC"

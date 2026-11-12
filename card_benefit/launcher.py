@@ -110,6 +110,7 @@ def main():
 
     import app  # requirements 설치가 끝난 뒤에 import
     app.start_stock_monitor()
+    app.start_subscription_logo_fetch()
     app.app.run(host="0.0.0.0", port=PORT, debug=False)
     return True
 

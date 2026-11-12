@@ -130,28 +130,32 @@
     return shortCardName(card.name);
   }
 
-  // 구독 항목 이름 옆에 작은 브랜드 배지를 붙여서(실제 로고 이미지가
-  // 아니라 서비스별 고유 색+글자 - 외부 이미지를 받아올 필요 없이
-  // 가볍게 구분만 되면 됨) 지출 목록에서 구독인지 한눈에 보이게 한다.
+  // 구독 항목 이름 옆에 실제 브랜드 로고를 붙인다 - 서버(앱이 돌아가는
+  // PC)가 simple-icons CDN에서 받아서 static/img/sub_logos/에 캐시해둔
+  // svg 파일을 <img>로 먼저 시도하고, 아직 못 받았거나(막 추가해서
+  // 서버 재시작 전) 실패했으면 색깔 글자 배지로 자동 대체한다.
   const SUBSCRIPTION_LOGOS = [
-    [/넷플릭스|netflix/i, "N", "#E50914"],
-    [/디즈니|disney/i, "D", "#113CCF"],
-    [/네이버/i, "N", "#03C75A"],
-    [/쿠팡|coupang/i, "C", "#0070F3"],
-    [/토스|toss/i, "T", "#3182F6"],
-    [/왓챠|watcha/i, "W", "#FF0558"],
-    [/웨이브|wavve/i, "W", "#1C1C84"],
-    [/티빙|tving/i, "T", "#E6263D"],
-    [/유튜브|youtube/i, "Y", "#FF0000"],
-    [/애플|apple/i, "A", "#555555"],
-    [/스포티파이|spotify/i, "S", "#1DB954"],
+    [/넷플릭스|netflix/i, "netflix", "N", "#E50914"],
+    [/디즈니|disney/i, "disneyplus", "D", "#113CCF"],
+    [/네이버/i, "naver", "N", "#03C75A"],
+    [/쿠팡|coupang/i, "coupang", "C", "#0070F3"],
+    [/토스|toss/i, "toss", "T", "#3182F6"],
+    [/왓챠|watcha/i, "watcha", "W", "#FF0558"],
+    [/웨이브|wavve/i, "wavve", "W", "#1C1C84"],
+    [/티빙|tving/i, "tving", "T", "#E6263D"],
+    [/유튜브|youtube/i, "youtube", "Y", "#FF0000"],
+    [/애플|apple/i, "apple", "A", "#555555"],
+    [/스포티파이|spotify/i, "spotify", "S", "#1DB954"],
   ];
   function subscriptionBadge(category, name) {
     if (category !== "구독") return "";
     const found = SUBSCRIPTION_LOGOS.find(([pattern]) => pattern.test(name || ""));
     if (!found) return "";
-    const [, letter, color] = found;
-    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;background:${color};color:#fff;font-size:10px;font-weight:800;flex-shrink:0;">${letter}</span>`;
+    const [, slug, letter, color] = found;
+    const fallback = `<span style="display:none;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;background:${color};color:#fff;font-size:10px;font-weight:800;">${letter}</span>`;
+    return `<span style="display:inline-flex;width:16px;height:16px;flex-shrink:0;">` +
+      `<img src="/static/img/sub_logos/${slug}.svg" style="width:16px;height:16px;object-fit:contain;background:#fff;border-radius:4px;padding:1px;" ` +
+      `onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';">${fallback}</span>`;
   }
 
   function shortBenefitName(name) {
