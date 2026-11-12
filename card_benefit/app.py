@@ -1007,6 +1007,20 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
             for tok in _safe_name_tokens(rp[name_column]) + _safe_name_tokens(rp["billing_alias"])
         )
     ]
+    if len(name_matches) > 1:
+        # 이름 토큰(3자 이상)까지 같은 게 두 개 이상이면(예: "한국전력
+        # 101호"/"102호"가 둘 다 "한국전력"에서 걸림, last4도 없는 계좌
+        # 자동이체 알림이라 카드로도 못 가름) billing_alias를 "토큰"이
+        # 아니라 "통째로 한 덩어리"로 봐서 한 번 더 좁힌다 - 예: 101호에
+        # "저압"을 alias로 넣어두면("저압"은 2자라 토큰 기준에서 걸러지는
+        # 글자라 위 1차 매칭엔 안 쓰였음) "한국전력 저압 자동이체" 알림만
+        # 정확히 집어낼 수 있다.
+        narrowed = [
+            rp for rp in name_matches
+            if rp["billing_alias"] and rp["billing_alias"].lower() in merchant_lower
+        ]
+        if len(narrowed) == 1:
+            name_matches = narrowed
     if len(name_matches) != 1:
         return False
 
