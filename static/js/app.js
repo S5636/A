@@ -1248,6 +1248,15 @@
     }
     if (!data.pending) return;
     toast(data.message || '신규주문이 있습니다.', 'ok');
+    // 백그라운드에서 30분마다 자동 수집된 주문이 화면(BOARD 표)엔 바로
+    // 안 보여서(사용자가 실제로 겪음: "새로고침하니까 있네" - DB엔 이미
+    // 들어갔는데 화면이 그 시점 데이터를 그대로 들고 있어서 새로고침
+    // 전까진 안 보였다) 신규주문 알림이 뜬 김에 BOARD 표도 같이 다시
+    // 불러온다 - 그 탭을 이미 한 번이라도 연 적 있을 때만(안 열어본
+    // 탭까지 미리 불러올 필요는 없음).
+    if (state.loadedTabs.has('dashboard')) {
+      try { await loadDashOrders(); } catch (_) {}
+    }
     if ('Notification' in window && Notification.permission === 'granted') {
       try {
         const n = new Notification('이유상점 Margin Board - 신규주문', { body: data.message || '신규주문이 있습니다.' });
