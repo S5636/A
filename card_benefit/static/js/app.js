@@ -1335,6 +1335,7 @@
           </div>
         </div>
       </div>
+      ${item.usage_period ? `<div class="perf-row-sub">사용기간 ${escapeHtml(item.usage_period)}</div>` : ""}
       ${memoToggleTemplate(`recurring-${item.id}`, item.memo)}
       ${matchHistoryTemplate(`recurring-${item.id}`, item.match_history, { showToggle: false })}
     `;
@@ -1522,6 +1523,7 @@
     document.getElementById("recurring-billing-cycle").value = item ? (item.billing_cycle || "월간") : "월간";
     document.getElementById("recurring-billing-cycle-row").style.display =
       document.getElementById("recurring-category").value === "구독" ? "" : "none";
+    document.getElementById("recurring-usage-period").value = item ? (item.usage_period || "") : "";
     document.getElementById("recurring-billing-alias").value = item ? (item.billing_alias || "") : "";
     document.getElementById("recurring-active").checked = item ? !!item.active : true;
     document.getElementById("recurring-memo").value = item ? item.memo : "";
@@ -1542,6 +1544,7 @@
       payment_method: isCardChoice ? "" : (methodSelect.value === CUSTOM_METHOD ? methodInput.value.trim() : methodSelect.value),
       payment_day: document.getElementById("recurring-day").value || 0,
       billing_cycle: document.getElementById("recurring-billing-cycle").value,
+      usage_period: document.getElementById("recurring-usage-period").value.trim(),
       billing_alias: document.getElementById("recurring-billing-alias").value.trim(),
       active: document.getElementById("recurring-active").checked,
       memo: document.getElementById("recurring-memo").value.trim(),

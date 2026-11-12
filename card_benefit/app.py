@@ -2152,8 +2152,8 @@ def create_recurring_payment():
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM recurring_payments").fetchone()["m"]
         conn.execute(
             """INSERT INTO recurring_payments (name, category, amount, payment_method, card_id,
-               payment_day, billing_cycle, active, memo, sort_order, billing_alias)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               payment_day, billing_cycle, usage_period, active, memo, sort_order, billing_alias)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (data.get("category") or "").strip(),
@@ -2162,6 +2162,7 @@ def create_recurring_payment():
                 card_id,
                 payment_day,
                 (data.get("billing_cycle") or "월간").strip(),
+                (data.get("usage_period") or "").strip(),
                 1 if data.get("active", True) else 0,
                 (data.get("memo") or "").strip(),
                 max_order + 1,
@@ -2197,7 +2198,8 @@ def update_recurring_payment(item_id):
 
         conn.execute(
             """UPDATE recurring_payments SET name=?, category=?, amount=?, payment_method=?,
-               card_id=?, payment_day=?, billing_cycle=?, active=?, memo=?, billing_alias=? WHERE id=?""",
+               card_id=?, payment_day=?, billing_cycle=?, usage_period=?, active=?, memo=?,
+               billing_alias=? WHERE id=?""",
             (
                 name,
                 (data.get("category", item["category"]) or "").strip(),
@@ -2206,6 +2208,7 @@ def update_recurring_payment(item_id):
                 card_id,
                 payment_day,
                 (data.get("billing_cycle", item["billing_cycle"]) or "월간").strip(),
+                (data.get("usage_period", item["usage_period"]) or "").strip(),
                 active,
                 (data.get("memo", item["memo"]) or "").strip(),
                 (data.get("billing_alias", item["billing_alias"]) or "").strip(),
