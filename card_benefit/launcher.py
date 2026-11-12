@@ -17,6 +17,30 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _SETUP_MARKER = os.path.join(BASE_DIR, ".setup_done")
 PORT = 5050
 
+# 깃허브 저장소에서 최신 코드를 직접 받아온다(매번 update.py를 따로
+# 받아서 실행하지 않아도, 껐다 켜기만 하면 자동으로 최신 버전이 되게).
+# 이 저장소/브랜치에 새 코드를 올릴 때마다 여기서 그대로 받아가므로,
+# 브랜치 이름이 바뀌면(예: 나중에 main으로 합쳐지면) 이 값도 맞춰 바꿔야 함.
+_UPDATE_OWNER = "S5636"
+_UPDATE_REPO = "A"
+_UPDATE_BRANCH = "claude/card-benefit-check-program-xpvbd6"
+_UPDATE_SUBDIR = "card_benefit"
+_UPDATE_FILES = [
+    "app.py",
+    "models.py",
+    "launcher.py",
+    "static/css/style.css",
+    "static/js/app.js",
+    "static/img/logo.png",
+    "static/img/wordmark.png",
+    "static/img/icon-192.png",
+    "static/img/icon-512.png",
+    "static/img/apple-touch-icon.png",
+    "static/manifest.json",
+    "templates/index.html",
+    "requirements.txt",
+]
+
 
 def local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -55,6 +79,46 @@ def open_browser_later():
         pass
 
 
+def self_update():
+    """매번 update.py를 받아서 직접 실행하는 대신, 꺼졌다 켜지기만 하면
+    깃허브에 올라온 최신 코드를 자동으로 받아오게 한다(옆방 마진 대시보드
+    처럼). card_benefit.db(실제 데이터)는 절대 건드리지 않고, 코드
+    파일만 내용이 다를 때만 덮어쓴다. 인터넷이 안 되거나 깃허브 접속이
+    막힌 PC에서도 여기서 막히면 안 되므로(그러면 프로그램 자체가 안
+    켜짐), 실패하면 그냥 지금 있는 파일 그대로 넘어간다 - 조용히."""
+    import urllib.request
+
+    updated = []
+    for rel in _UPDATE_FILES:
+        url = (
+            f"https://raw.githubusercontent.com/{_UPDATE_OWNER}/{_UPDATE_REPO}/"
+            f"{_UPDATE_BRANCH}/{_UPDATE_SUBDIR}/{rel}"
+        )
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                remote_data = resp.read()
+        except Exception:
+            continue  # 이 파일 하나 실패해도 나머지는 계속 시도
+        local_path = os.path.join(BASE_DIR, rel)
+        try:
+            with open(local_path, "rb") as f:
+                local_data = f.read()
+        except Exception:
+            local_data = None
+        if remote_data != local_data:
+            try:
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                with open(local_path, "wb") as f:
+                    f.write(remote_data)
+                updated.append(rel)
+            except Exception:
+                pass
+    if updated:
+        print(f"최신 버전으로 자동 업데이트됨: {', '.join(updated)}")
+        print()
+
+
 def _requirements_hash():
     try:
         with open(os.path.join(BASE_DIR, "requirements.txt"), "rb") as f:
@@ -68,6 +132,9 @@ def main():
     print("  카드 남은혜택 체크")
     print("============================================")
     print()
+
+    print("최신 버전 확인 중...")
+    self_update()
 
     current_hash = _requirements_hash()
     already_done = False
