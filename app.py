@@ -267,10 +267,14 @@ def _send_ntfy(message, title=None):
     가입 불필요, 폰에 ntfy 앱 설치하고 설정에서 정한 토픽을 구독만 하면 됨).
     requests 라이브러리를 새로 추가하는 대신 표준 라이브러리 urllib으로
     충분해서 그걸 쓴다. 토픽을 아직 설정 안 했으면(기본값 빈 문자열)
-    조용히 아무것도 안 한다 - 설정 안 한 사람한테 에러를 보일 이유가 없다."""
+    조용히 아무것도 안 한다 - 설정 안 한 사람한테 에러를 보일 이유가 없다.
+    (ok, error_detail) 튜플을 돌려준다 - 예전엔 실패 이유를 숨기고
+    "인터넷 연결을 확인해주세요"라고만 보여줬는데, 실제로는 다른 이유
+    (SSL 인증서 문제 등)일 수 있어서 추측으로 안내하다가 사용자 지적을
+    받았다 - 이제 실제 예외 내용을 그대로 보여준다."""
     topic = load_settings().get('ntfy_topic', '').strip()
     if not topic:
-        return False
+        return False, '폰 알림 토픽이 설정되어 있지 않습니다.'
     try:
         import urllib.parse
         import urllib.request
@@ -285,9 +289,9 @@ def _send_ntfy(message, title=None):
             import email.header
             req.add_header('Title', str(email.header.Header(title, 'utf-8')))
         urllib.request.urlopen(req, timeout=10)
-        return True
-    except Exception:
-        return False
+        return True, ''
+    except Exception as e:
+        return False, f'{type(e).__name__}: {e}'
 
 
 init_db()
@@ -625,9 +629,9 @@ def api_notify_test():
     topic = load_settings().get('ntfy_topic', '').strip()
     if not topic:
         return jsonify({'ok': False, 'error': '폰 알림 토픽이 설정되어 있지 않습니다.'})
-    ok = _send_ntfy('테스트 알림입니다 - 이게 폰에 떴으면 설정이 정상입니다.', title='이유상점 Margin Board - 테스트')
+    ok, err = _send_ntfy('테스트 알림입니다 - 이게 폰에 떴으면 설정이 정상입니다.', title='이유상점 Margin Board - 테스트')
     if not ok:
-        return jsonify({'ok': False, 'error': 'ntfy.sh로 전송에 실패했습니다 - 인터넷 연결을 확인해주세요.'})
+        return jsonify({'ok': False, 'error': f'ntfy.sh로 전송에 실패했습니다: {err}'})
     return jsonify({'ok': True})
 
 
