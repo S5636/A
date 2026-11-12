@@ -173,9 +173,14 @@
     if (!found) return "";
     const [, slug, letter, color] = found;
     const fallback = `<span style="display:none;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;background:${color};color:#fff;font-size:10px;font-weight:800;">${letter}</span>`;
+    const imgStyle = "width:16px;height:16px;object-fit:contain;background:#fff;border-radius:4px;padding:1px;";
+    // 1순위 simple-icons(svg) 실패하면 2순위 서비스 파비콘(png), 그것도
+    // 실패하면 색깔 글자 배지로 - 두 단계 다 서버가 아직 못 받아왔거나
+    // (앱 막 켠 직후) 인터넷이 안 되는 경우에 대비.
     return `<span style="display:inline-flex;width:16px;height:16px;flex-shrink:0;">` +
-      `<img src="/static/img/sub_logos/${slug}.svg" style="width:16px;height:16px;object-fit:contain;background:#fff;border-radius:4px;padding:1px;" ` +
-      `onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex';">${fallback}</span>`;
+      `<img src="/static/img/sub_logos/${slug}.svg" data-stage="svg" style="${imgStyle}" ` +
+      `onerror="if(this.dataset.stage==='svg'){this.dataset.stage='png';this.src='/static/img/sub_logos/${slug}.png';}` +
+      `else{this.style.display='none';this.nextElementSibling.style.display='inline-flex';}">${fallback}</span>`;
   }
 
   function shortBenefitName(name) {

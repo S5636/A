@@ -214,20 +214,26 @@ def start_stock_monitor():
 # 서버에 넣어두기보다, 공개된 아이콘 모음에서 실행 중인 PC가 직접 받게
 # 하는 게 낫다고 판단) 앱이 실제로 돌아가는 PC에서 1회 자동으로 받아서
 # static/img/sub_logos/ 밑에 캐시해둔다 - 한 번 받으면 그다음부터는 로컬
-# 파일을 그대로 쓰므로 매번 인터넷에 안 나간다. simple-icons(MIT 라이선스
-# 공개 아이콘 모음)의 SVG를 쓴다.
+# 파일을 그대로 쓰므로 매번 인터넷에 안 나간다.
+# 1순위: simple-icons(MIT 라이선스 공개 아이콘 모음)의 깔끔한 SVG. 근데
+# 실제로 받아보니 토스/쿠팡/디즈니+/왓챠/웨이브/티빙처럼 한국 서비스는
+# 이 모음에 아예 없어서(simple-icons 데이터 직접 확인함 - 전세계
+# 유명 브랜드 위주라 국내 서비스는 거의 없음) 전부 글자 배지로만
+# 떨어졌었음. 2순위: 그 서비스 공식 홈페이지의 파비콘(구글 파비콘
+# 서비스로 받음 - 어떤 도메인이든 다 되는 범용 방식이라 simple-icons에
+# 없는 서비스도 커버됨).
 SUBSCRIPTION_LOGO_SLUGS = [
-    (re.compile(r"넷플릭스|netflix", re.I), "netflix"),
-    (re.compile(r"디즈니|disney", re.I), "disneyplus"),
-    (re.compile(r"네이버", re.I), "naver"),
-    (re.compile(r"쿠팡|coupang", re.I), "coupang"),
-    (re.compile(r"토스|toss", re.I), "toss"),
-    (re.compile(r"왓챠|watcha", re.I), "watcha"),
-    (re.compile(r"웨이브|wavve", re.I), "wavve"),
-    (re.compile(r"티빙|tving", re.I), "tving"),
-    (re.compile(r"유튜브|youtube", re.I), "youtube"),
-    (re.compile(r"애플|apple", re.I), "apple"),
-    (re.compile(r"스포티파이|spotify", re.I), "spotify"),
+    (re.compile(r"넷플릭스|netflix", re.I), "netflix", "netflix.com"),
+    (re.compile(r"디즈니|disney", re.I), None, "disneyplus.com"),
+    (re.compile(r"네이버", re.I), "naver", "naver.com"),
+    (re.compile(r"쿠팡|coupang", re.I), None, "coupang.com"),
+    (re.compile(r"토스|toss", re.I), None, "toss.im"),
+    (re.compile(r"왓챠|watcha", re.I), None, "watcha.com"),
+    (re.compile(r"웨이브|wavve", re.I), None, "wavve.com"),
+    (re.compile(r"티빙|tving", re.I), None, "tving.com"),
+    (re.compile(r"유튜브|youtube", re.I), "youtube", "youtube.com"),
+    (re.compile(r"애플|apple", re.I), "apple", "apple.com"),
+    (re.compile(r"스포티파이|spotify", re.I), "spotify", "spotify.com"),
 ]
 
 
@@ -244,11 +250,12 @@ def _log_subscription_logo_error(slug, error):
 
 
 def _fetch_subscription_logos_once():
-    """등록된 구독 항목 이름에 맞는 로고 slug들을 추려서, 아직 로컬에
-    없는 것만 simple-icons CDN에서 받아 캐시한다. 실패해도(인터넷 안 되는
-    PC, CDN 차단 등) 조용히 넘어간다 - 로고는 있으면 좋은 장식일 뿐,
-    실패했다고 앱이 멈추면 안 되고, 프론트는 파일이 없으면 색깔 글자
-    배지로 알아서 대체 표시한다."""
+    """등록된 구독 항목 이름에 맞는 로고들을 추려서, 아직 로컬에 없는 것만
+    받아 캐시한다(slug.svg는 simple-icons, slug.png는 그 서비스 공식
+    홈페이지 파비콘 - 프론트가 svg 먼저 시도하고 실패하면 png, 그것도
+    실패하면 색깔 글자 배지로 대체함). 실패해도(인터넷 안 되는 PC, 접속
+    차단 등) 조용히 넘어간다 - 로고는 있으면 좋은 장식일 뿐, 실패했다고
+    앱이 멈추면 안 된다."""
     import urllib.request
 
     try:
@@ -264,29 +271,43 @@ def _fetch_subscription_logos_once():
     except Exception:
         return
 
-    needed_slugs = set()
+    needed = {}  # slug(파일명) -> (simple_icons_slug 또는 None, 홈페이지 도메인)
     for name in names:
-        for pattern, slug in SUBSCRIPTION_LOGO_SLUGS:
+        for pattern, si_slug, domain in SUBSCRIPTION_LOGO_SLUGS:
             if pattern.search(name or ""):
-                needed_slugs.add(slug)
+                file_slug = si_slug or domain.split(".")[0]
+                needed[file_slug] = (si_slug, domain)
                 break
 
     logo_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "img", "sub_logos")
     os.makedirs(logo_dir, exist_ok=True)
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    for slug in needed_slugs:
-        dest = os.path.join(logo_dir, f"{slug}.svg")
-        if os.path.exists(dest):
-            continue
-        url = f"https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/{slug}.svg"
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = resp.read()
-            with open(dest, "wb") as f:
-                f.write(data)
-        except Exception as e:
-            _log_subscription_logo_error(slug, e)
+
+    def _download(url, dest):
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = resp.read()
+        with open(dest, "wb") as f:
+            f.write(data)
+
+    for file_slug, (si_slug, domain) in needed.items():
+        svg_dest = os.path.join(logo_dir, f"{file_slug}.svg")
+        if si_slug and not os.path.exists(svg_dest):
+            try:
+                _download(
+                    f"https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/{si_slug}.svg", svg_dest
+                )
+            except Exception as e:
+                _log_subscription_logo_error(f"{file_slug}(simple-icons)", e)
+
+        png_dest = os.path.join(logo_dir, f"{file_slug}.png")
+        if not os.path.exists(png_dest):
+            try:
+                _download(
+                    f"https://www.google.com/s2/favicons?domain={domain}&sz=64", png_dest
+                )
+            except Exception as e:
+                _log_subscription_logo_error(f"{file_slug}(favicon:{domain})", e)
 
 
 def start_subscription_logo_fetch():
