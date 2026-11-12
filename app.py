@@ -451,6 +451,14 @@ def api_dapalza_progress():
 def _dpj_collect_once():
     """DPJ(다팔자 자동수집) 한 번 실행 - '지금 수집' 버튼과 아래 30분 자동
     스케줄러가 완전히 동일한 로직을 타게 하려고 공용 함수로 뺐다."""
+    # 폰 알림이 "진짜 신규주문"인지 판단하려고, 수집 전에 이미 있던
+    # 주문번호 목록을 미리 찍어둔다(아래 new_order_count 계산 참고).
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        before_order_ids = {row[0] for row in conn.execute("SELECT order_id FROM merged_orders").fetchall()}
+        conn.close()
+    except Exception:
+        before_order_ids = set()
     # 오너클랜 창이 로그인 등으로 화면에 떠서 다팔자 창을 가리고 있으면,
     # 가려진 Electron 창의 접근성 트리 갱신이 멈춰서 다팔자 자동화가 탭/버튼을
     # 하나도 못 찾는 사고로 이어질 수 있다 - 다팔자를 건드리기 전에 오너클랜
@@ -538,6 +546,18 @@ def _dpj_collect_once():
                 and '[HL]' not in (r.get('buy_status') or '') for r in rows)
         except Exception:
             result['has_new_orders'] = False
+        # 폰 알림용 "진짜 신규주문" 개수 - has_new_orders는 "아직 STOCK
+        # 확인이 안 된 건이 있다"는 뜻이라 오래된 미확인 건이 있으면 새
+        # 주문이 하나도 없어도 계속 True로 나온다(사용자 지적: "신규주문
+        # 없는데 알림은 왜 있다고오냐" - 자동 알림 때문에 드러난 혼동이었다).
+        # 이 수집으로 실제 새로 생긴 주문번호만 따로 세서 그걸로 알림을 띄운다.
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            after_order_ids = {row[0] for row in conn.execute("SELECT order_id FROM merged_orders").fetchall()}
+            conn.close()
+            result['new_order_count'] = len(after_order_ids - before_order_ids)
+        except Exception:
+            result['new_order_count'] = 0
     return result
 
 
@@ -549,11 +569,15 @@ def api_dapalza_collect():
 # ---------------------------------------------------------------------------
 # DPJ 30분 자동 수집 - 사용자 요청: "30분에한번씩 dpj버튼 자동으로눌러주고
 # 신규주문있으면 알림받고싶은데". 마진보드 서버가 켜져있는 동안 백그라운드
-# 스레드가 30분마다 위와 똑같은 수집을 자동으로 돌리고, 신규주문이 새로
-# 생겼으면(위의 has_new_orders와 완전히 같은 기준) 화면(브라우저 알림)에
-# 띄울 수 있게 상태를 저장해둔다. 수동으로 DPJ 버튼을 눌러도 다팔자
-# 자동화 쪽에 이미 있는 "동시 실행 방지" 잠금(dapalza_auto.py)이 있어서
-# 자동 실행과 겹쳐도 서로 충돌하지 않고 하나는 대기만 한다.
+# 스레드가 30분마다 위와 똑같은 수집을 자동으로 돌리고, 이 수집으로 실제
+# 새로 생긴 주문번호가 있으면(new_order_count, _dpj_collect_once 참고)
+# 화면 알림 + 폰 알림(ntfy)을 띄울 수 있게 상태를 저장해둔다. has_new_orders는
+# "아직 STOCK 확인이 안 된 건이 있다"는 뜻이라 신규주문 알림 기준으로 쓰면
+# 안 된다(오래된 미확인 건 때문에 신규주문이 하나도 없어도 계속 True로
+# 나옴 - 사용자 지적: "신규주문없는데 알림은왜 있다고오냐"). 수동으로 DPJ
+# 버튼을 눌러도 다팔자 자동화 쪽에 이미 있는 "동시 실행 방지" 잠금
+# (dapalza_auto.py)이 있어서 자동 실행과 겹쳐도 서로 충돌하지 않고 하나는
+# 대기만 한다.
 # ---------------------------------------------------------------------------
 DPJ_AUTO_INTERVAL_SECONDS = 30 * 60
 
@@ -590,16 +614,18 @@ def _dpj_auto_loop():
                     _dpj_auto_state['last_error'] = upload_err
                 else:
                     _dpj_auto_state['last_error'] = ''
-                    if result.get('has_new_orders'):
+                    new_count = result.get('new_order_count', 0)
+                    if new_count > 0:
                         _dpj_auto_state['pending'] = True
-                        _dpj_auto_state['message'] = f'{now} 자동 수집 - 신규주문이 있습니다.'
+                        _dpj_auto_state['message'] = f'{now} 자동 수집 - 신규주문 {new_count}건.'
                         _dpj_auto_state['at'] = now
                         notify_new_orders = True
         # 폰 알림(ntfy)은 네트워크 호출이라 잠금을 잡은 채로 하지 않는다.
         if _dpj_auto_state['last_error']:
             _send_ntfy(f"{now} DPJ 자동 수집 실패 - {_dpj_auto_state['last_error']}", title='마진보드 DPJ 자동수집 실패')
         elif notify_new_orders:
-            _send_ntfy(f'{now} 신규주문이 있습니다 - 마진보드에서 확인해주세요.', title='이유상점 Margin Board - 신규주문')
+            _send_ntfy(f"{now} 신규주문 {result.get('new_order_count', 0)}건이 있습니다 - 마진보드에서 확인해주세요.",
+                        title='이유상점 Margin Board - 신규주문')
 
 
 _dpj_auto_thread_started = False
