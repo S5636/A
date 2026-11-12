@@ -765,6 +765,23 @@ def _resolve_payment_method(conn, card_id, fallback_text):
     return fallback_text or ""
 
 
+def _snapshot_card_label(conn, table, row_id):
+    """고정지출/보험 항목이 매칭되는 바로 그 순간의 결제카드 이름을
+    찍어서 돌려준다(카드탭 표기와 같은 짧은 이름). 나중에 그 항목의
+    결제카드를 다른 카드로 바꿔도, 이미 지난 "내역"은 바뀌기 전 카드로
+    계속 보여야 하기 때문(실제로 카드를 바꿨더니 지난 내역까지 전부
+    새 카드로 보이는 사고가 있었음) - inbox_items.matched_card_label에
+    이 값을 같이 저장해둔다."""
+    row = conn.execute(f"SELECT card_id, payment_method FROM {table} WHERE id = ?", (row_id,)).fetchone()
+    if not row:
+        return ""
+    if row["card_id"]:
+        card = conn.execute("SELECT name, short_name FROM cards WHERE id = ?", (row["card_id"],)).fetchone()
+        if card:
+            return card["short_name"] or card["name"]
+    return row["payment_method"] or ""
+
+
 def _card_label_matcher(conn):
     """받은 알림의 last4(카드 뒷자리, 3~4자리 섞여 들어옴)를 보고 카드탭에
     등록된 카드의 요약명을 찾아주는 함수를 만들어 돌려준다. 고정지출/보험의
@@ -796,7 +813,7 @@ def _attach_match_info(conn, rows, fk_column):
         item = dict(r)
         item["payment_method"] = _resolve_payment_method(conn, r["card_id"], r["payment_method"])
         history = conn.execute(
-            f"""SELECT id, amount, merchant, occurred_at, last4 FROM inbox_items
+            f"""SELECT id, amount, merchant, occurred_at, last4, matched_card_label FROM inbox_items
                WHERE {fk_column} = ? ORDER BY occurred_at DESC""",
             (r["id"],),
         ).fetchall()
@@ -806,11 +823,14 @@ def _attach_match_info(conn, rows, fk_column):
                 "amount": h["amount"],
                 "merchant": h["merchant"],
                 "occurred_at": h["occurred_at"],
-                # 알림 자체의 last4로 카드를 못 찾으면(알림 형식에 따라
-                # last4가 아예 안 찍히는 경우가 있음), 이 항목에 등록해둔
-                # 결제카드로 대신 보여준다 - 이미 어느 카드인지 알고
-                # 등록까지 해놨는데 "내역"에서만 비어 보이면 안 되므로.
-                "card_label": card_label_for(h["last4"]) or (item["payment_method"] or None),
+                # 1순위: 알림 자체의 last4로 찾은 카드(가장 정확함).
+                # 2순위: 매칭되던 순간에 찍어둔 스냅샷(matched_card_label) -
+                # 나중에 이 항목의 결제카드를 바꿔도 지난 내역은 안 바뀜
+                # (실제로 카드 바꿨더니 지난 내역까지 전부 새 카드로 보이는
+                # 사고가 있었음). 3순위: 스냅샷이 없는 옛날 데이터만, 지금
+                # 등록된 카드로 대신 보여줌(없는 것보단 나음).
+                "card_label": card_label_for(h["last4"]) or h["matched_card_label"]
+                or (item["payment_method"] or None),
             }
             for h in history
         ]
@@ -1004,7 +1024,11 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         if len(narrowed) == 1:
             amount_matches = narrowed
     if len(amount_matches) == 1:
-        conn.execute(f"UPDATE inbox_items SET {fk_column} = ? WHERE id = ?", (amount_matches[0]["id"], inbox_id))
+        label = _snapshot_card_label(conn, table, amount_matches[0]["id"])
+        conn.execute(
+            f"UPDATE inbox_items SET {fk_column} = ?, matched_card_label = ? WHERE id = ?",
+            (amount_matches[0]["id"], label, inbox_id),
+        )
         return True
     if amount_matches:
         return False
@@ -1036,7 +1060,11 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
     if len(name_matches) != 1:
         return False
 
-    conn.execute(f"UPDATE inbox_items SET {fk_column} = ? WHERE id = ?", (name_matches[0]["id"], inbox_id))
+    label = _snapshot_card_label(conn, table, name_matches[0]["id"])
+    conn.execute(
+        f"UPDATE inbox_items SET {fk_column} = ?, matched_card_label = ? WHERE id = ?",
+        (name_matches[0]["id"], label, inbox_id),
+    )
     return True
 
 
@@ -1116,6 +1144,24 @@ def apply_startup_data_fixes():
         # 'LGU+ 통신요금 휴대폰'에 잘못 묶였던 "(주)포스코와이드" 75,000원 -
         # LG U+랑 무관한 회사, 금액만 우연히 겹쳐서 묶인 걸로 보임.
         _unlink_bad_matches("LGU+ 통신요금 휴대폰", ["포스코와이드"])
+
+        # 'LGU+ 통신요금 인터넷' 결제카드를 이번 달부터 KB에서 씨티로
+        # 바꿨는데, 카드가 등록 안 돼 있던(last4가 안 찍힌) 지난 내역들이
+        # 전부 "지금 등록된 카드"로 보이는 바람에 지난달 것까지 전부
+        # 씨티로 보이던 문제(사용자 확인) - 위에서 추가한 matched_card_label
+        # 스냅샷 기능으로 앞으로는 안 생기지만, 이미 매칭된 과거 내역에는
+        # 스냅샷이 없어서 소급 채워준다. 이번 달 것만 빼고(이번 달은 실제로
+        # 씨티로 낸 게 맞음) 전부 KB로 채운다.
+        inet = conn.execute(
+            "SELECT id FROM recurring_payments WHERE name LIKE 'LGU+%인터넷%'"
+        ).fetchone()
+        if inet:
+            this_ym = current_year_month()
+            conn.execute(
+                "UPDATE inbox_items SET matched_card_label = 'KB' "
+                "WHERE recurring_id = ? AND matched_card_label = '' AND substr(occurred_at, 1, 7) != ?",
+                (inet["id"], this_ym),
+            )
 
         conn.commit()
     except Exception:
@@ -2445,9 +2491,10 @@ def confirm_recurring_match(item_id):
             item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
             if not item or item["recurring_id"] is not None:
                 continue
+            label = _snapshot_card_label(conn, "recurring_payments", item_id)
             conn.execute(
-                "UPDATE inbox_items SET recurring_id = ? WHERE id = ?",
-                (item_id, inbox_id),
+                "UPDATE inbox_items SET recurring_id = ?, matched_card_label = ? WHERE id = ?",
+                (item_id, label, inbox_id),
             )
             matched += 1
         conn.commit()
@@ -2707,9 +2754,10 @@ def confirm_insurance_match(item_id):
             item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
             if not item or item["insurance_id"] is not None:
                 continue
+            label = _snapshot_card_label(conn, "insurances", item_id)
             conn.execute(
-                "UPDATE inbox_items SET insurance_id = ? WHERE id = ?",
-                (item_id, inbox_id),
+                "UPDATE inbox_items SET insurance_id = ?, matched_card_label = ? WHERE id = ?",
+                (item_id, label, inbox_id),
             )
             matched += 1
         conn.commit()
