@@ -251,7 +251,7 @@ def init_db():
 
 
 def load_settings():
-    default = {'dapalza_url': '', 'ownerclan_url': ''}
+    default = {'dapalza_url': '', 'ownerclan_url': '', 'ntfy_topic': ''}
     try:
         with open(SETTINGS_PATH, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -259,6 +259,35 @@ def load_settings():
     except Exception:
         pass
     return default
+
+
+def _send_ntfy(message, title=None):
+    """핸드폰 알림(사용자 요청: "핸드폰으로알림받는건?") - ntfy.sh에 그냥
+    HTTP POST 한 번 보내는 걸로 끝나는 무료 푸시 알림 서비스를 쓴다(계정
+    가입 불필요, 폰에 ntfy 앱 설치하고 설정에서 정한 토픽을 구독만 하면 됨).
+    requests 라이브러리를 새로 추가하는 대신 표준 라이브러리 urllib으로
+    충분해서 그걸 쓴다. 토픽을 아직 설정 안 했으면(기본값 빈 문자열)
+    조용히 아무것도 안 한다 - 설정 안 한 사람한테 에러를 보일 이유가 없다."""
+    topic = load_settings().get('ntfy_topic', '').strip()
+    if not topic:
+        return False
+    try:
+        import urllib.parse
+        import urllib.request
+        req = urllib.request.Request(
+            f'https://ntfy.sh/{urllib.parse.quote(topic)}',
+            data=message.encode('utf-8'),
+            method='POST',
+        )
+        if title:
+            # HTTP 헤더는 ASCII만 허용해서 한글 제목은 못 넣는다 - RFC 2047
+            # 인코딩된 형태로 보내면 ntfy가 알아서 디코딩해서 보여준다.
+            import email.header
+            req.add_header('Title', str(email.header.Header(title, 'utf-8')))
+        urllib.request.urlopen(req, timeout=10)
+        return True
+    except Exception:
+        return False
 
 
 init_db()
@@ -538,21 +567,29 @@ def _dpj_auto_loop():
             with _dpj_auto_lock:
                 _dpj_auto_state['last_run_at'] = now
                 _dpj_auto_state['last_error'] = _friendly_error(e)
+            _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)}', title='마진보드 DPJ 자동수집 실패')
             continue
+        notify_new_orders = False
         with _dpj_auto_lock:
             _dpj_auto_state['last_run_at'] = now
             if not result.get('ok'):
                 _dpj_auto_state['last_error'] = (result.get('log') or ['알 수 없는 오류'])[-1]
-                continue
-            upload_err = (result.get('upload') or {}).get('error')
-            if upload_err:
-                _dpj_auto_state['last_error'] = upload_err
-                continue
-            _dpj_auto_state['last_error'] = ''
-            if result.get('has_new_orders'):
-                _dpj_auto_state['pending'] = True
-                _dpj_auto_state['message'] = f'{now} 자동 수집 - 신규주문이 있습니다.'
-                _dpj_auto_state['at'] = now
+            else:
+                upload_err = (result.get('upload') or {}).get('error')
+                if upload_err:
+                    _dpj_auto_state['last_error'] = upload_err
+                else:
+                    _dpj_auto_state['last_error'] = ''
+                    if result.get('has_new_orders'):
+                        _dpj_auto_state['pending'] = True
+                        _dpj_auto_state['message'] = f'{now} 자동 수집 - 신규주문이 있습니다.'
+                        _dpj_auto_state['at'] = now
+                        notify_new_orders = True
+        # 폰 알림(ntfy)은 네트워크 호출이라 잠금을 잡은 채로 하지 않는다.
+        if _dpj_auto_state['last_error']:
+            _send_ntfy(f"{now} DPJ 자동 수집 실패 - {_dpj_auto_state['last_error']}", title='마진보드 DPJ 자동수집 실패')
+        elif notify_new_orders:
+            _send_ntfy(f'{now} 신규주문이 있습니다 - 마진보드에서 확인해주세요.', title='이유상점 Margin Board - 신규주문')
 
 
 _dpj_auto_thread_started = False
@@ -578,6 +615,19 @@ def api_dapalza_auto_alert_ack():
     # 안 그러면 새로고침/재접속할 때마다 같은 알림이 계속 다시 뜬다.
     with _dpj_auto_lock:
         _dpj_auto_state['pending'] = False
+    return jsonify({'ok': True})
+
+
+@app.route('/api/notify/test', methods=['POST'])
+def api_notify_test():
+    """폰 알림(ntfy) 설정 화면의 '테스트 알림 보내기' 버튼 - 토픽을 제대로
+    저장했는지, 폰 앱 구독이 맞게 돼있는지 바로 확인할 수 있게 한다."""
+    topic = load_settings().get('ntfy_topic', '').strip()
+    if not topic:
+        return jsonify({'ok': False, 'error': '폰 알림 토픽이 설정되어 있지 않습니다.'})
+    ok = _send_ntfy('테스트 알림입니다 - 이게 폰에 떴으면 설정이 정상입니다.', title='이유상점 Margin Board - 테스트')
+    if not ok:
+        return jsonify({'ok': False, 'error': 'ntfy.sh로 전송에 실패했습니다 - 인터넷 연결을 확인해주세요.'})
     return jsonify({'ok': True})
 
 
@@ -989,7 +1039,7 @@ def api_settings_get():
 def api_settings_save():
     body = request.get_json(force=True) or {}
     settings = load_settings()
-    settings.update({k: v for k, v in body.items() if k in ('dapalza_url', 'ownerclan_url')})
+    settings.update({k: v for k, v in body.items() if k in ('dapalza_url', 'ownerclan_url', 'ntfy_topic')})
     with open(SETTINGS_PATH, 'w', encoding='utf-8') as f:
         json.dump(settings, f, ensure_ascii=False, indent=2)
     return jsonify(settings)

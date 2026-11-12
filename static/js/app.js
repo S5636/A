@@ -590,6 +590,7 @@
     document.getElementById('link-ownerclan').href = s.ownerclan_url || '#';
     document.getElementById('input-dapalza-url').value = s.dapalza_url || '';
     document.getElementById('input-ownerclan-url').value = s.ownerclan_url || '';
+    document.getElementById('input-ntfy-topic').value = s.ntfy_topic || '';
   }
 
   document.getElementById('btn-edit-links').addEventListener('click', () => {
@@ -599,13 +600,34 @@
   document.getElementById('btn-save-links').addEventListener('click', async () => {
     const dapalza_url = document.getElementById('input-dapalza-url').value.trim();
     const ownerclan_url = document.getElementById('input-ownerclan-url').value.trim();
+    const ntfy_topic = document.getElementById('input-ntfy-topic').value.trim();
     await api('/api/settings', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dapalza_url, ownerclan_url }),
+      body: JSON.stringify({ dapalza_url, ownerclan_url, ntfy_topic }),
     });
     await loadSettingsLinks();
     document.getElementById('settings-row').style.display = 'none';
     toast('바로가기 주소가 저장되었습니다.', 'ok');
+  });
+  document.getElementById('btn-test-ntfy').addEventListener('click', async () => {
+    const ntfy_topic = document.getElementById('input-ntfy-topic').value.trim();
+    if (!ntfy_topic) { toast('먼저 폰 알림 토픽을 입력하고 저장해주세요.', 'err'); return; }
+    // 토픽을 입력만 하고 아직 저장 버튼을 안 눌렀을 수도 있어서, 테스트 전에
+    // 먼저 저장부터 한다.
+    await api('/api/settings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dapalza_url: document.getElementById('input-dapalza-url').value.trim(),
+        ownerclan_url: document.getElementById('input-ownerclan-url').value.trim(),
+        ntfy_topic,
+      }),
+    });
+    try {
+      const data = await api('/api/notify/test', { method: 'POST' });
+      toast(data.ok ? '테스트 알림을 보냈습니다 - 폰에 떴는지 확인해주세요.' : `테스트 알림 전송 실패: ${data.error}`, data.ok ? 'ok' : 'err');
+    } catch (e) {
+      toast('테스트 알림 요청이 실패했습니다.', 'err');
+    }
   });
 
   function renderCollectLog(logId, data) {

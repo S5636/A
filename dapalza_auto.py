@@ -898,6 +898,10 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
             L('다팔자 창이 300초(5분)가 지나도 내용을 못 그려내고 있습니다 - 다팔자 자체가 자동동기화 등으로 바쁜 상태일 가능성이 큽니다.')
             raise RuntimeError('다팔자가 아직 바쁜 상태로 보입니다(자체 자동동기화 등) - 다팔자 창에서 작업이 끝난 걸 확인한 뒤 잠시 후 다시 시도해주세요.')
 
+        # '주문관리' 탭을 누르기 직전에도 자동동기화 토스트가 새로 떠서 탭을
+        # 가릴 수 있다(사용자가 실제로 겪음: "자동동기화 까만창 뜨면 다른버튼을
+        # 못찾아") - 여기서도 미리 닫아준다.
+        _dismiss_sync_toast(win, L)
         try:
             L("'주문관리' 탭 클릭...")
             _click(win, '주문관리', 'TabItem', L)
@@ -915,11 +919,24 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
 
         # '주문수집' 버튼을 누르기 직전에 자동동기화 토스트가 새로 떠 있을 수
         # 있다 - 떠 있는 채로 누르면 클릭이 씹히거나 엉뚱한 곳이 눌릴 수 있어
-        # 미리 한 번 더 닫아준다.
-        _dismiss_sync_toast(win, L)
+        # 미리 한 번 더 닫아준다. 한 번 닫혀도 바로 또 새로 뜰 수 있어서
+        # (상점 규모가 커서 자동동기화가 거의 끊임없이 도는 경우가 실제로
+        # 있었음) 더 안 뜰 때까지 몇 번 더 확인한다.
+        for _ in range(3):
+            if not _dismiss_sync_toast(win, L):
+                break
+            time.sleep(0.5)
 
         L("'주문수집 및 동기화' 버튼 클릭...")
-        _click(win, '주문수집 및 동기화', 'Button', L)
+        try:
+            _click(win, '주문수집 및 동기화', 'Button', L)
+        except Exception as e:
+            # 토스트가 버튼을 가리고 있어서 못 찾았을 수 있다(사용자가 실제로
+            # 겪음) - 한 번 더 닫고 재시도한다.
+            L(f"'주문수집 및 동기화' 버튼을 못 찾았습니다({type(e).__name__}) - 자동동기화 토스트를 다시 확인하고 재시도합니다...")
+            _dismiss_sync_toast(win, L)
+            time.sleep(1)
+            _click(win, '주문수집 및 동기화', 'Button', L)
 
         L('수집 완료 팝업을 기다리는 중 (마켓/주문이 많으면 시간이 꽤 걸릴 수 있음)...')
         # 실제로 뜨는 '수집 완료' 팝업은 별도의 윈도우 창이 아니라, 메인 창
