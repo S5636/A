@@ -66,6 +66,30 @@ def _apply_update_from(extracted_root):
             shutil.copy2(src, dst)
 
 
+def _install_https_opener():
+    """일부 윈도우 PC에서 urllib 기본 SSL 인증서 확인이 "unable to get issuer
+    certificate"로 실패하는 경우가 실제로 있었다(윈도우 자체 인증서
+    저장소에 중간 인증서가 빠져있는 흔한 문제로 보임) - certifi가 갖고
+    있는, 더 완전한 공인 인증서 목록을 대신 쓰면 이 문제를 피할 수 있다.
+    certifi는 requirements.txt에 있어서 pip install 이후에는 항상 쓸 수
+    있다(그래서 이 함수는 pip install이 끝난 뒤에만 호출한다) - 혹시라도
+    아직 없으면(첫 설치 과정 자체가 실패한 경우 등) 그냥 조용히 넘어가고
+    기본 동작(OS 인증서 저장소)으로 되돌아간다. 인증서 확인 자체를 끄는
+    것(끄면 더 쉽게 고쳐지지만 보안상 절대 안 됨)과는 다르다 - 더 완전한
+    신뢰 목록으로 "제대로" 검증하는 것이다."""
+    try:
+        import certifi
+        import ssl
+        import urllib.request
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        urllib.request.install_opener(
+            urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+        )
+        return True
+    except Exception:
+        return False
+
+
 def _check_and_apply_update():
     try:
         import urllib.request
@@ -125,10 +149,6 @@ def main():
     print("============================================")
     print()
 
-    print("업데이트를 확인하는 중...")
-    _check_and_apply_update()
-    print()
-
     # pip install/playwright install을 매번 무조건 실행하면, pip이 로컬에 이미
     # 다 깔려있어도 매번 네트워크로 버전을 다시 확인하느라 시간이 걸린다
     # (특히 학교/회사 네트워크처럼 느린 환경에서 부팅이 오래 걸린다는 지적을
@@ -165,7 +185,19 @@ def main():
         except Exception:
             pass
 
+    # 자동 업데이트 확인은 pip install 다음에 한다(순서 중요) - certifi가
+    # requirements.txt에 있어서, 여기 도착한 시점엔 항상 설치가 돼있다고
+    # 믿을 수 있다. 업데이트 확인을 pip install보다 먼저 하면, certifi
+    # 자체가 아직 하나도 안 깔려있는 상태에서 인증서 문제를 certifi로
+    # 피해보려는 코드가 돌아서 아무 의미가 없다(실제로 겪은 문제:
+    # "[SSL: CERTIFICATE_VERIFY_FAILED] ... unable to get issuer
+    # certificate" - 윈도우 자체 인증서 저장소에 중간 인증서가 빠져있는
+    # 경우로 보임).
+    _install_https_opener()
+    print("업데이트를 확인하는 중...")
+    _check_and_apply_update()
     print()
+
     print("설치 완료. 서버를 시작합니다.")
     print("잠시 후 브라우저가 자동으로 열립니다. (안 열리면 http://127.0.0.1:5000 직접 접속하세요)")
     print()
