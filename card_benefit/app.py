@@ -1067,6 +1067,33 @@ def apply_startup_data_fixes():
                 (hanjeon_101["id"],),
             )
 
+        # '배달의민족'(우아한형제들) 12,000원 결제가 'HL 삼천리 도시가스
+        # 달달'(주거/관리비, 금액 무관 이름매칭만 쓰는 항목)에 잘못 묶여
+        # 있던 걸 실제로 확인함 - 지금 코드로 똑같은 알림을 다시 넣어
+        # 재현해봤지만 매칭 안 되는 걸로 확인돼서(현재 로직 버그 아님),
+        # 예전에 잘못 묶인 채 안 풀린 과거 데이터로 보임. 매칭만 풀고
+        # (알림 자체/상태는 안 건드림) 가맹점명을 제외목록에 넣어서 다시
+        # 자동으로 안 붙게 한다(기존 "해제" 버튼과 동일한 방식).
+        gas_dadal = conn.execute(
+            "SELECT id, excluded_merchants FROM recurring_payments WHERE name = 'HL 삼천리 도시가스 달달'"
+        ).fetchone()
+        if gas_dadal:
+            bad_item = conn.execute(
+                "SELECT id, merchant FROM inbox_items WHERE recurring_id = ? "
+                "AND (merchant LIKE '%배달의민족%' OR merchant LIKE '%우아한형제들%')",
+                (gas_dadal["id"],),
+            ).fetchone()
+            if bad_item:
+                conn.execute("UPDATE inbox_items SET recurring_id = NULL WHERE id = ?", (bad_item["id"],))
+                merchant_key = _merchant_base(bad_item["merchant"])
+                existing = [m for m in (gas_dadal["excluded_merchants"] or "").split("\n") if m]
+                if merchant_key not in existing:
+                    existing.append(merchant_key)
+                    conn.execute(
+                        "UPDATE recurring_payments SET excluded_merchants = ? WHERE id = ?",
+                        ("\n".join(existing), gas_dadal["id"]),
+                    )
+
         conn.commit()
     except Exception:
         pass
