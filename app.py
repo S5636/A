@@ -269,25 +269,31 @@ def _send_ntfy(message, title=None):
     충분해서 그걸 쓴다. 토픽을 아직 설정 안 했으면(기본값 빈 문자열)
     조용히 아무것도 안 한다 - 설정 안 한 사람한테 에러를 보일 이유가 없다.
     (ok, error_detail) 튜플을 돌려준다 - 예전엔 실패 이유를 숨기고
-    "인터넷 연결을 확인해주세요"라고만 보여줬는데, 실제로는 다른 이유
-    (SSL 인증서 문제 등)일 수 있어서 추측으로 안내하다가 사용자 지적을
-    받았다 - 이제 실제 예외 내용을 그대로 보여준다."""
+    "인터넷 연결을 확인해주세요"라고만 보여줬는데, 실제로는 다른 이유일 수
+    있어서 추측으로 안내하다가 사용자 지적을 받았다 - 이제 실제 예외 내용을
+    그대로 보여준다. 그 덕분에 실제 버그(UnicodeEncodeError)를 바로
+    찾았다: 제목을 HTTP 헤더(Title)로 보내고 있었는데, HTTP 헤더는
+    ASCII/latin-1만 허용돼서 한글 제목을 넣으면 깨졌다(RFC 2047로
+    인코딩한다고 넣었던 코드도 str(Header(...))를 잘못 써서 실제로는
+    인코딩이 안 되고 있었음). 헤더를 아예 안 쓰고 ntfy의 JSON 발행
+    방식(루트 주소에 topic/message/title을 JSON 바디로 담아 보냄)으로
+    바꿔서, 제목이든 메시지든 전부 UTF-8 JSON 바디 안에만 있고 헤더에는
+    안 들어가게 했다 - 이러면 한글이 전혀 문제 되지 않는다."""
     topic = load_settings().get('ntfy_topic', '').strip()
     if not topic:
         return False, '폰 알림 토픽이 설정되어 있지 않습니다.'
     try:
-        import urllib.parse
+        import json
         import urllib.request
+        payload = {'topic': topic, 'message': message}
+        if title:
+            payload['title'] = title
         req = urllib.request.Request(
-            f'https://ntfy.sh/{urllib.parse.quote(topic)}',
-            data=message.encode('utf-8'),
+            'https://ntfy.sh/',
+            data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+            headers={'Content-Type': 'application/json; charset=utf-8'},
             method='POST',
         )
-        if title:
-            # HTTP 헤더는 ASCII만 허용해서 한글 제목은 못 넣는다 - RFC 2047
-            # 인코딩된 형태로 보내면 ntfy가 알아서 디코딩해서 보여준다.
-            import email.header
-            req.add_header('Title', str(email.header.Header(title, 'utf-8')))
         urllib.request.urlopen(req, timeout=10)
         return True, ''
     except Exception as e:
