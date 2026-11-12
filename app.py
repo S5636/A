@@ -580,6 +580,17 @@ def api_dapalza_collect():
 # 대기만 한다.
 # ---------------------------------------------------------------------------
 DPJ_AUTO_INTERVAL_SECONDS = 30 * 60
+# 사용자 요청: "30분 자동수집 야간에꺼야겠다 밤9시부터 다음날9시까지" -
+# 이 시간대(21시~다음날 09시)에는 30분 주기가 돌아와도 실제 수집은
+# 건너뛴다. PC의 로컬 시간 기준이다.
+DPJ_AUTO_NIGHT_START_HOUR = 21
+DPJ_AUTO_NIGHT_END_HOUR = 9
+
+
+def _is_dpj_auto_night_now():
+    hour = datetime.now().hour
+    return hour >= DPJ_AUTO_NIGHT_START_HOUR or hour < DPJ_AUTO_NIGHT_END_HOUR
+
 
 _dpj_auto_state = {
     'pending': False,       # 신규주문 알림을 아직 화면에 안 보여줬으면 True
@@ -594,6 +605,11 @@ _dpj_auto_lock = threading.Lock()
 def _dpj_auto_loop():
     while True:
         time.sleep(DPJ_AUTO_INTERVAL_SECONDS)
+        if _is_dpj_auto_night_now():
+            # 야간(21시~다음날 09시)에는 이번 주기는 건너뛰고 그냥 다시
+            # 잔다 - last_run_at/last_error를 안 건드려서 "실행은 했는데
+            # 아무 일도 안 생겼다"로 혼동되지 않게 한다.
+            continue
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         try:
             result = _dpj_collect_once()
