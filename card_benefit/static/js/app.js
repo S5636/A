@@ -21,16 +21,36 @@
   // 카드/대출/고정지출/보험 박스마다 다른 색 배경 틴트를 입혀서 서로
   // 구분되게 한다(전부 class="card"라 배경이 다 똑같았음). 제목 글씨색은
   // 템플릿이 이미 직접 색을 넣어둔 경우(대출 만기임박 경고 등)는 그대로
-  // 둔다 - 장식용 틴트가 그 경고색을 덮어쓰면 안 되므로.
-  const NEON_YELLOW = "#f4ff2b";
+  // 둔다 - 장식용 틴트가 그 경고색을 덮어쓰면 안 되므로. 외곽선/네온
+  // 테두리도 전부 똑같은 네온 노랑으로 고정했었는데(요청으로 넣었다가
+  // 보기 싫다고 원복 요청받음), 배경/제목과 똑같은 색으로 되돌린다.
+  function colorForIndex(idx) {
+    return CARD_COLORS[idx % CARD_COLORS.length];
+  }
 
-  function applyCardColorTint(el, idx) {
-    const color = CARD_COLORS[idx % CARD_COLORS.length];
+  function applyCardColorTint(el, color) {
     const titleEl = el.querySelector(".card-title");
     if (titleEl && !titleEl.style.color) titleEl.style.color = color;
+    if (!color.startsWith("#")) {
+      // 빌려올 카드 색이 없는 경우(현금/계좌이체 등) - 무채색 기본
+      // 테두리만 쓰고 배경 틴트/네온 글로우는 넣지 않는다.
+      el.style.borderColor = "var(--border)";
+      el.style.boxShadow = "none";
+      return;
+    }
     el.style.background = `linear-gradient(${hexToRgba(color, 0.07)}, ${hexToRgba(color, 0.07)}), var(--surface)`;
-    el.style.borderColor = NEON_YELLOW;
-    el.style.boxShadow = `0 0 7px -2px ${hexToRgba(NEON_YELLOW, 0.65)}`;
+    el.style.borderColor = color;
+    el.style.boxShadow = `0 0 7px -2px ${hexToRgba(color, 0.65)}`;
+  }
+
+  // 지출 항목은 자기 목록 안에서의 순서가 아니라, 실제로 결제하는 카드의
+  // 색을 그대로 따라간다(카드탭에서 그 카드에 준 고유색) - "지출탭 상단
+  // 합계박스"(카드별 합계 알약)가 이미 이렇게 계산하던 방식과 동일하게
+  // 맞춘다. 카드로 안 내는 항목(현금/계좌이체 등)은 빌려올 카드 색이
+  // 없으므로 무채색으로 둔다.
+  function colorForCardId(cardId) {
+    const idx = state.cards.findIndex((c) => c.id === cardId);
+    return idx >= 0 ? colorForIndex(idx) : "var(--text-muted)";
   }
 
   let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [], suspected_duplicates: [], stocks: [] };
@@ -525,7 +545,7 @@
       el.className = "card";
       el.id = `card-${card.id}`;
       el.innerHTML = cardTemplate(card, idx === 0, idx === state.cards.length - 1);
-      applyCardColorTint(el, idx);
+      applyCardColorTint(el, colorForIndex(idx));
       cardList.appendChild(el);
       wireCard(el, card, state.cards, idx);
     });
@@ -894,7 +914,7 @@
       el.id = `loan-${loan.id}`;
       const isManual = loanSort === "manual";
       el.innerHTML = loanTemplate(loan, isManual, idx === 0, idx === loans.length - 1);
-      applyCardColorTint(el, idx);
+      applyCardColorTint(el, colorForIndex(idx));
       loanList.appendChild(el);
       wireLoan(el, loan, isManual ? loans : null, idx);
     });
@@ -1247,7 +1267,7 @@
       el.className = "card";
       el.id = `recurring-${item.id}`;
       el.innerHTML = recurringTemplate(item);
-      applyCardColorTint(el, idx);
+      applyCardColorTint(el, colorForCardId(item.card_id));
       list.appendChild(el);
       wireRecurring(el, item);
     });
@@ -1578,7 +1598,7 @@
       el.className = "card";
       el.id = `insurance-${item.id}`;
       el.innerHTML = insuranceTemplate(item);
-      applyCardColorTint(el, idx);
+      applyCardColorTint(el, colorForIndex(idx));
       list.appendChild(el);
       wireInsurance(el, item);
     });
