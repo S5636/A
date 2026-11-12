@@ -556,7 +556,7 @@
       <input type="text" id="recurring-method" placeholder="결제수단을 직접 입력하세요" style="display:none;">
     </label>
     <label>매월 결제일 (선택)
-      <input type="number" id="recurring-day" min="0" max="31" placeholder="예: 5">
+      <select id="recurring-day"></select>
     </label>
     <label id="recurring-billing-cycle-row" style="display:none;">결제 주기
       <select id="recurring-billing-cycle">
@@ -564,9 +564,10 @@
         <option value="연간">연간</option>
       </select>
     </label>
-    <label>사용 기간 (선택 - 전기요금처럼 청구마다 실제 사용기간이 다르면)
-      <input type="text" id="recurring-usage-period" placeholder="예: 2026-09-15 ~ 2026-10-14">
+    <label>사용 기간 시작일 (선택 - 전기요금처럼 청구마다 실제 사용기간이 다르면)
+      <input type="date" id="recurring-usage-period-start">
     </label>
+    <p class="hint" id="recurring-usage-period-preview" style="display:none;"></p>
     <label>카드/계좌 알림에 찍히는 이름이 다르면 (선택)
       <input type="text" id="recurring-billing-alias" placeholder="예: 한국전력 자동이체가 '한전 저압'으로 찍히는 경우">
     </label>

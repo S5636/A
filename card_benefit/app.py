@@ -806,7 +806,11 @@ def _attach_match_info(conn, rows, fk_column):
                 "amount": h["amount"],
                 "merchant": h["merchant"],
                 "occurred_at": h["occurred_at"],
-                "card_label": card_label_for(h["last4"]),
+                # 알림 자체의 last4로 카드를 못 찾으면(알림 형식에 따라
+                # last4가 아예 안 찍히는 경우가 있음), 이 항목에 등록해둔
+                # 결제카드로 대신 보여준다 - 이미 어느 카드인지 알고
+                # 등록까지 해놨는데 "내역"에서만 비어 보이면 안 되므로.
+                "card_label": card_label_for(h["last4"]) or (item["payment_method"] or None),
             }
             for h in history
         ]

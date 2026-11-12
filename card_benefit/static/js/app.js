@@ -89,6 +89,31 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   }
 
+  // 사용 기간 시작일만 고르면 "시작일+1개월-1일"을 끝나는 날로 자동
+  // 계산해서 보여준다(전기요금처럼 매번 "n일~다음달 n-1일" 패턴이라
+  // 끝나는 날짜까지 직접 입력할 필요 없게). 31일처럼 다음달에 없는
+  // 날짜는 그 달 마지막 날로 자연스럽게 당겨진다(Date 객체가 알아서
+  // 처리 - 예: 1/31 + 1개월 = 3/3이 아니라 2월 마지막날이 되게 day를
+  // 0으로 줘서 "다음다음달 0일"(=다음달 마지막날) 방식으로 계산).
+  function usagePeriodEndDate(startStr) {
+    const [y, m, d] = startStr.split("-").map(Number);
+    const nextMonthLastDay = new Date(y, m + 1, 0).getDate();
+    const endDay = Math.min(d, nextMonthLastDay) - 1;
+    const end = endDay >= 1 ? new Date(y, m, endDay) : new Date(y, m - 1, nextMonthLastDay);
+    return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+  }
+
+  function updateUsagePeriodPreview() {
+    const startVal = document.getElementById("recurring-usage-period-start").value;
+    const preview = document.getElementById("recurring-usage-period-preview");
+    if (!startVal) {
+      preview.style.display = "none";
+      return;
+    }
+    preview.textContent = `사용기간: ${startVal} ~ ${usagePeriodEndDate(startVal)}`;
+    preview.style.display = "";
+  }
+
   function renderMonthBar() {
     const ym = selectedMonth || currentMonthStr();
     const [y, m] = ym.split("-").map(Number);
@@ -1524,11 +1549,19 @@
       methodInput.value = "";
     }
 
-    document.getElementById("recurring-day").value = item && item.payment_day ? item.payment_day : "";
+    const daySelect = document.getElementById("recurring-day");
+    daySelect.innerHTML = [
+      `<option value="0">선택 안 함</option>`,
+      ...Array.from({ length: 31 }, (_, i) => i + 1).map((d) => `<option value="${d}">${d}일</option>`),
+    ].join("");
+    daySelect.value = item && item.payment_day ? item.payment_day : "0";
     document.getElementById("recurring-billing-cycle").value = item ? (item.billing_cycle || "월간") : "월간";
     document.getElementById("recurring-billing-cycle-row").style.display =
       document.getElementById("recurring-category").value === "구독" ? "" : "none";
-    document.getElementById("recurring-usage-period").value = item ? (item.usage_period || "") : "";
+    const usageStartInput = document.getElementById("recurring-usage-period-start");
+    const usageMatch = item && item.usage_period ? item.usage_period.match(/^(\d{4}-\d{2}-\d{2})/) : null;
+    usageStartInput.value = usageMatch ? usageMatch[1] : "";
+    updateUsagePeriodPreview();
     document.getElementById("recurring-billing-alias").value = item ? (item.billing_alias || "") : "";
     document.getElementById("recurring-active").checked = item ? !!item.active : true;
     document.getElementById("recurring-memo").value = item ? item.memo : "";
@@ -1538,6 +1571,7 @@
   document.getElementById("recurring-category").addEventListener("change", (e) => {
     document.getElementById("recurring-billing-cycle-row").style.display = e.target.value === "구독" ? "" : "none";
   });
+  document.getElementById("recurring-usage-period-start").addEventListener("change", updateUsagePeriodPreview);
   document.getElementById("recurring-cancel").addEventListener("click", () => recurringModal.classList.remove("open"));
   document.getElementById("recurring-save").addEventListener("click", async () => {
     const isCardChoice = methodSelect.value.startsWith("card:");
@@ -1549,7 +1583,10 @@
       payment_method: isCardChoice ? "" : (methodSelect.value === CUSTOM_METHOD ? methodInput.value.trim() : methodSelect.value),
       payment_day: document.getElementById("recurring-day").value || 0,
       billing_cycle: document.getElementById("recurring-billing-cycle").value,
-      usage_period: document.getElementById("recurring-usage-period").value.trim(),
+      usage_period: (() => {
+        const start = document.getElementById("recurring-usage-period-start").value;
+        return start ? `${start} ~ ${usagePeriodEndDate(start)}` : "";
+      })(),
       billing_alias: document.getElementById("recurring-billing-alias").value.trim(),
       active: document.getElementById("recurring-active").checked,
       memo: document.getElementById("recurring-memo").value.trim(),
