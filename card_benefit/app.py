@@ -1067,32 +1067,47 @@ def apply_startup_data_fixes():
                 (hanjeon_101["id"],),
             )
 
-        # '배달의민족'(우아한형제들) 12,000원 결제가 'HL 삼천리 도시가스
-        # 달달'(주거/관리비, 금액 무관 이름매칭만 쓰는 항목)에 잘못 묶여
-        # 있던 걸 실제로 확인함 - 지금 코드로 똑같은 알림을 다시 넣어
-        # 재현해봤지만 매칭 안 되는 걸로 확인돼서(현재 로직 버그 아님),
-        # 예전에 잘못 묶인 채 안 풀린 과거 데이터로 보임. 매칭만 풀고
+        # 실제 데이터 확인 결과, 이름/가맹점이 전혀 무관한데 금액만 우연히
+        # 같아서(또는 예전 느슨한 로직으로) 잘못 묶인 매칭이 여러 군데서
+        # 발견됨 - 발견될 때마다 여기 추가해서 해제한다. 매칭만 풀고
         # (알림 자체/상태는 안 건드림) 가맹점명을 제외목록에 넣어서 다시
         # 자동으로 안 붙게 한다(기존 "해제" 버튼과 동일한 방식).
-        gas_dadal = conn.execute(
-            "SELECT id, excluded_merchants FROM recurring_payments WHERE name = 'HL 삼천리 도시가스 달달'"
-        ).fetchone()
-        if gas_dadal:
-            bad_item = conn.execute(
-                "SELECT id, merchant FROM inbox_items WHERE recurring_id = ? "
-                "AND (merchant LIKE '%배달의민족%' OR merchant LIKE '%우아한형제들%')",
-                (gas_dadal["id"],),
+        def _unlink_bad_matches(recurring_name, merchant_like_patterns):
+            row = conn.execute(
+                "SELECT id, excluded_merchants FROM recurring_payments WHERE name = ?", (recurring_name,)
             ).fetchone()
-            if bad_item:
+            if not row:
+                return
+            where_merchant = " OR ".join(["merchant LIKE ?"] * len(merchant_like_patterns))
+            bad_items = conn.execute(
+                f"SELECT id, merchant FROM inbox_items WHERE recurring_id = ? AND ({where_merchant})",
+                (row["id"], *[f"%{p}%" for p in merchant_like_patterns]),
+            ).fetchall()
+            if not bad_items:
+                return
+            existing = [m for m in (row["excluded_merchants"] or "").split("\n") if m]
+            for bad_item in bad_items:
                 conn.execute("UPDATE inbox_items SET recurring_id = NULL WHERE id = ?", (bad_item["id"],))
                 merchant_key = _merchant_base(bad_item["merchant"])
-                existing = [m for m in (gas_dadal["excluded_merchants"] or "").split("\n") if m]
                 if merchant_key not in existing:
                     existing.append(merchant_key)
-                    conn.execute(
-                        "UPDATE recurring_payments SET excluded_merchants = ? WHERE id = ?",
-                        ("\n".join(existing), gas_dadal["id"]),
-                    )
+            conn.execute(
+                "UPDATE recurring_payments SET excluded_merchants = ? WHERE id = ?",
+                ("\n".join(existing), row["id"]),
+            )
+
+        # 'HL 삼천리 도시가스 달달'에 잘못 묶였던 배달의민족(우아한형제들)
+        # 12,000원 결제 - 지금 코드로 재현 테스트해봤지만 안 묶여서
+        # (버그 아님) 예전에 잘못 묶인 채 안 풀린 과거 데이터로 보임.
+        _unlink_bad_matches("HL 삼천리 도시가스 달달", ["배달의민족", "우아한형제들"])
+
+        # 'LGU+ 통신요금 인터넷'에 잘못 묶였던 "인터넷상거래-(주" 5건 -
+        # 그냥 온라인 쇼핑몰 결제 표기일 뿐 LGU+ 인터넷 요금이 아님.
+        _unlink_bad_matches("LGU+ 통신요금 인터넷", ["인터넷상거래"])
+
+        # 'LGU+ 통신요금 휴대폰'에 잘못 묶였던 "(주)포스코와이드" 75,000원 -
+        # LG U+랑 무관한 회사, 금액만 우연히 겹쳐서 묶인 걸로 보임.
+        _unlink_bad_matches("LGU+ 통신요금 휴대폰", ["포스코와이드"])
 
         conn.commit()
     except Exception:
