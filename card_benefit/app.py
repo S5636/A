@@ -296,37 +296,49 @@ def start_stock_monitor():
 # 떨어졌었음. 2순위: 그 서비스 공식 홈페이지의 파비콘(구글 파비콘
 # 서비스로 받음 - 어떤 도메인이든 다 되는 범용 방식이라 simple-icons에
 # 없는 서비스도 커버됨).
+# 각 항목: (이름 패턴, simple-icons slug, 파비콘용 공식 도메인, 앱스토어
+# 검색어). 마지막 항목(앱스토어 검색어)은 사용자가 실제로 보여준 스코어
+# 아이콘("U+one")처럼, 웹사이트 파비콘이 아니라 모바일 "앱 아이콘"이
+# 진짜 브랜드 이미지인 서비스를 위한 것 - 있으면 애플 앱스토어 검색
+# API(iTunes Search, 키 없이 공개로 쓸 수 있음)로 그 앱의 실제 아이콘을
+# 받아서 파비콘보다 먼저 시도한다(파비콘은 사이트 전용 아이콘이 없는
+# 경우가 많아서 구글이 generic한 회색 아이콘을 주는 경우가 잦았음).
 SUBSCRIPTION_LOGO_SLUGS = [
-    (re.compile(r"넷플릭스|netflix", re.I), "netflix", "netflix.com"),
-    (re.compile(r"디즈니|disney", re.I), None, "disneyplus.com"),
-    (re.compile(r"네이버", re.I), "naver", "naver.com"),
-    (re.compile(r"쿠팡|coupang", re.I), None, "coupang.com"),
-    (re.compile(r"토스|toss", re.I), None, "toss.im"),
-    (re.compile(r"왓챠|watcha", re.I), None, "watcha.com"),
-    (re.compile(r"웨이브|wavve", re.I), None, "wavve.com"),
-    (re.compile(r"티빙|tving", re.I), None, "tving.com"),
-    (re.compile(r"유튜브|youtube", re.I), "youtube", "youtube.com"),
-    (re.compile(r"애플|apple", re.I), "apple", "apple.com"),
-    (re.compile(r"스포티파이|spotify", re.I), "spotify", "spotify.com"),
+    (re.compile(r"넷플릭스|netflix", re.I), "netflix", "netflix.com", None),
+    (re.compile(r"디즈니|disney", re.I), None, "disneyplus.com", None),
+    (re.compile(r"네이버", re.I), "naver", "naver.com", None),
+    (re.compile(r"쿠팡|coupang", re.I), None, "coupang.com", None),
+    (re.compile(r"토스|toss", re.I), None, "toss.im", None),
+    (re.compile(r"왓챠|watcha", re.I), None, "watcha.com", None),
+    (re.compile(r"웨이브|wavve", re.I), None, "wavve.com", None),
+    (re.compile(r"티빙|tving", re.I), None, "tving.com", None),
+    (re.compile(r"유튜브|youtube", re.I), "youtube", "youtube.com", None),
+    (re.compile(r"애플|apple", re.I), "apple", "apple.com", None),
+    (re.compile(r"스포티파이|spotify", re.I), "spotify", "spotify.com", None),
     # 2026-11-14: "구독" 아닌 다른 지출 항목(렌탈/통신비 등)에도 로고를
     # 붙여달라는 요청으로 추가 - 더 이상 구독에만 한정하지 않음.
-    (re.compile(r"코웨이|coway", re.I), None, "coway.co.kr"),
+    (re.compile(r"코웨이|coway", re.I), None, "coway.co.kr", "코웨이 IoCare"),
     # "anthropic" slug는 회사 로고(다른 마크)라 "클로드" 항목엔 안 맞음 -
     # simple-icons에 제품 자체인 "claude" slug가 따로 있어서 그걸로 교체함
     # (slugs.md에서 Claude -> claude 직접 확인).
-    (re.compile(r"클로드|claude", re.I), "claude", "claude.ai"),
-    # lguplus.com의 파비콘은 LG그룹 공통 로고(빨간 원)라 U+ 고유의 마젠타
-    # 색 로고가 아니었음(사용자 확인) - uplus.co.kr이 더 U+ 서비스 전용
-    # 도메인이라 이걸로 바꿔봄. 이것도 아니면 또 알려달라고 해야 함(여기서
-    # 직접 이미지를 못 봐서 100% 확신은 못함).
-    (re.compile(r"LGU\+|LG\s*유플러스|유플러스", re.I), None, "uplus.co.kr"),
-    (re.compile(r"롯데렌탈|롯데렌터카", re.I), None, "lotterental.com"),
-    (re.compile(r"골프존|golfzon", re.I), None, "golfzon.com"),
+    (re.compile(r"클로드|claude", re.I), "claude", "claude.ai", None),
+    # lguplus.com/uplus.co.kr 파비콘 둘 다 LG그룹 공통 로고라 U+ 고유의
+    # 마젠타 로고가 아니었음(사용자 확인) - 사용자가 직접 보내준 스샷으로
+    # 실제 앱 이름이 "U+one"인 걸 확인해서, 그 앱 아이콘을 앱스토어에서
+    # 직접 받아온다(파비콘 의존 그만둠).
+    (re.compile(r"LGU\+|LG\s*유플러스|유플러스", re.I), None, "uplus.co.kr", "U+one"),
+    (re.compile(r"롯데렌탈|롯데렌터카", re.I), None, "lotterental.com", "롯데렌탈"),
+    (re.compile(r"골프존|golfzon", re.I), None, "golfzon.com", "골프존"),
     # "카카오 골프"는 계열사 카카오VX 서비스라 실제로는 로고가 다른데,
-    # kakaovx.com으로 시도했다가 404(사용자 로그로 확인)라 도메인을
-    # 못 찾았음 - 정확한 도메인/앱 이름 확인 전까진 일반 카카오 로고로
-    # 대신 보여준다(틀린 추측으로 또 깨진 이미지 띄우는 것보단 나음).
-    (re.compile(r"카카오|kakao", re.I), "kakao", "kakao.com"),
+    # kakaovx.com은 404(사용자 로그로 확인)라 도메인으로는 못 찾았음 -
+    # 앱스토어에서 "카카오 VX"로 검색해서 시도해본다.
+    # si_slug를 가짜("kakaogolf")로 줘서 파일명이 일반 카카오("kakao")랑
+    # 안 겹치게 함(둘이 겹치면 다른 걸 따로 등록해도 캐시 파일을 서로
+    # 덮어써서 둘 중 하나만 보임 - 실제로 한 번 이렇게 겹쳐서 터진 적 있음).
+    # simple-icons엔 "kakaogolf"가 당연히 없어서 svg는 항상 실패하고
+    # 바로 앱스토어/파비콘으로 넘어감(의도된 동작).
+    (re.compile(r"카카오\s*골프|카카오\s*vx", re.I), "kakaogolf", "kakao.com", "카카오 VX"),
+    (re.compile(r"카카오|kakao", re.I), "kakao", "kakao.com", None),
 ]
 
 # simple-icons 원본 svg 파일엔 브랜드 색이 안 박혀있어서(순수 모양 데이터만
@@ -379,23 +391,23 @@ def _fetch_subscription_logos_once():
     except Exception:
         return
 
-    needed = {}  # slug(파일명) -> (simple_icons_slug 또는 None, 홈페이지 도메인)
+    needed = {}  # slug(파일명) -> (simple_icons_slug, 홈페이지 도메인, 앱스토어 검색어)
     for name in names:
-        for pattern, si_slug, domain in SUBSCRIPTION_LOGO_SLUGS:
+        for pattern, si_slug, domain, app_term in SUBSCRIPTION_LOGO_SLUGS:
             if pattern.search(name or ""):
                 file_slug = si_slug or domain.split(".")[0]
-                needed[file_slug] = (si_slug, domain)
+                needed[file_slug] = (si_slug, domain, app_term)
                 break
 
     logo_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "img", "sub_logos")
     os.makedirs(logo_dir, exist_ok=True)
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-    # 2026-11-14: 파비콘 소스를 구글->clearbit 1순위로 바꿨는데, 이미 예전
-    # 구글 파비콘으로 캐시해둔 png 파일이 있으면 "이미 있음"으로 보고 그냥
-    # 넘어가버려서 바뀐 게 전혀 반영 안 됨 - 한 번만 전부 지우고 다시
-    # 받게 해서, 이번 교체가 실제로 적용되게 한다(최초 1회만, 마커 파일로 표시).
-    migrated_marker = os.path.join(logo_dir, ".clearbit_migrated")
+    # 매번 로고 받아오는 방식(소스) 자체를 바꿀 때마다, 이미 파일이 있으면
+    # "있음"으로 보고 넘어가는 구조라 바뀐 게 전혀 반영이 안 되는 문제가
+    # 반복됐음 - 그래서 방식을 바꿀 때마다 마커 이름을 새로 붙여서 그때마다
+    # 한 번씩은 전부 다시 받게 한다(최초 1회만, 그 다음부턴 정상적으로 캐시 씀).
+    migrated_marker = os.path.join(logo_dir, ".appicon_migrated_v1")
     if not os.path.exists(migrated_marker):
         for fname in os.listdir(logo_dir):
             if fname.endswith(".png"):
@@ -416,6 +428,25 @@ def _fetch_subscription_logos_once():
         with open(dest, "wb") as f:
             f.write(data)
 
+    def _fetch_app_store_icon(term, dest):
+        # 애플 앱스토어 검색 API(iTunes Search, 공개/무키) - 이름으로 앱을
+        # 찾아서 그 앱의 실제 아이콘(artworkUrl512, 없으면 100)을 받는다.
+        # 홈페이지 파비콘보다 앱 아이콘이 진짜 브랜드 이미지인 서비스용.
+        import json as _json
+        from urllib.parse import quote
+        url = f"https://itunes.apple.com/search?term={quote(term)}&country=kr&entity=software&limit=1"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = _json.loads(resp.read().decode("utf-8", errors="replace"))
+        results = data.get("results") or []
+        if not results:
+            raise ValueError(f"앱스토어에서 '{term}' 검색 결과 없음")
+        artwork_url = results[0].get("artworkUrl512") or results[0].get("artworkUrl100")
+        if not artwork_url:
+            raise ValueError(f"'{term}' 검색은 됐는데 아이콘 URL이 없음")
+        _download(artwork_url, dest)
+        return results[0].get("trackName")
+
     def _download_colored_svg(url, dest, hex_color):
         # simple-icons 원본 svg는 색이 안 박혀있어서(순수 모양만, fill 지정
         # 안 하면 브라우저 기본값인 검정으로 보임) 루트 <svg> 태그에 공식
@@ -430,7 +461,7 @@ def _fetch_subscription_logos_once():
 
     status_lines = []  # 이번 실행에서 각 slug가 실제로 어떻게 됐는지(성공/실패/스킵) 전부 남김
 
-    for file_slug, (si_slug, domain) in needed.items():
+    for file_slug, (si_slug, domain, app_term) in needed.items():
         svg_dest = os.path.join(logo_dir, f"{file_slug}.svg")
         # 예전엔 색 안 박고(검정으로 보이게) 받아서 캐시해둔 적 있어서, fill이
         # 안 들어있는 옛날 파일이면 지우고 새로 받는다.
@@ -460,15 +491,22 @@ def _fetch_subscription_logos_once():
         png_dest = os.path.join(logo_dir, f"{file_slug}.png")
         if os.path.exists(png_dest):
             status_lines.append(f"{file_slug}.png: 이미 있음(스킵) - 다시 받으려면 파일 지우고 재시작")
-        else:
-            # 2026-11-14: clearbit 로고 API를 1순위로 썼었는데, 사용자가
-            # 보내준 실제 로그에서 전부 getaddrinfo 실패로 나와서 찾아보니
-            # logo.clearbit.com 자체가 2025-12-08에 완전히 서비스 종료됨
-            # (HubSpot이 Clearbit을 흡수하면서 무료 로고 API를 닫음) - 내가
-            # 이미 죽은 서비스를 1순위로 넣는 실수를 했음. 완전히 빼고 구글
-            # 파비콘 하나로 되돌림("로고가 틀렸다"는 신고의 진짜 원인은
-            # 파비콘 품질이 아니라 브라우저가 예전 이미지를 계속 캐시해서
-            # 안 바뀐 것처럼 보인 거였음 - LOGO_VERSION 캐시버스팅으로 따로 고침).
+            continue
+
+        # clearbit 로고 API는 2025-12-08에 완전히 서비스 종료돼서(사용자가
+        # 보내준 로그로 확인) 뺐고, 앱스토어 검색어가 있는 항목은 그게
+        # 진짜 브랜드 아이콘이라 파비콘보다 먼저 시도한다 - 실패하면 구글
+        # 파비콘으로 넘어간다.
+        got_it = False
+        if app_term:
+            try:
+                track_name = _fetch_app_store_icon(app_term, png_dest)
+                status_lines.append(f"{file_slug}.png: 앱스토어('{app_term}' -> {track_name})에서 받음")
+                got_it = True
+            except Exception as e:
+                status_lines.append(f"{file_slug}.png: 앱스토어 검색 실패({e}) - 파비콘으로 대신 시도")
+
+        if not got_it:
             try:
                 _download(
                     f"https://www.google.com/s2/favicons?domain={domain}&sz=128", png_dest
