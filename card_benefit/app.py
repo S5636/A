@@ -152,7 +152,42 @@ def _fetch_stock_price(code):
 # 이 중 하나라도 실제 페이지에 없는 걸로 나오면(용어가 다르거나 이미지로만
 # 표시하는 식이면) 못 잡아낼 수 있음 - 그런 경우를 위해 못 찾았을 때도 뭘
 # 받았는지 로그에 남겨서, 나중에 실제 PC 로그를 보고 다시 맞출 수 있게 한다.
-_STOCK_RISK_LABELS = ["상장폐지", "정리매매", "거래정지", "투자위험종목", "투자경고종목", "관리종목", "투자주의종목"]
+# 2026-11-13: 사용자가 실제 종목(스코넥 276040, 거래정지 상태)의 네이버
+# 화면 스크린샷을 보내줘서 실제 문구가 "거래정지"가 아니라 "거래가 중단된
+# 상태입니다"인 걸 확인함 - "거래가 중단된" 조각을 추가. 다만 이게 지금
+# 긁는 두 소스(실시간 API/구버전 상세페이지)에 그대로 텍스트로 들어있는지는
+# 여전히 못 받아봐서 모름(아예 다른 모바일 전용 API를 쓰는 화면일 수도
+# 있음) - 이번에도 못 찾으면 _log_stock_risk_debug가 남긴 실제 응답을
+# 보고 정확히 맞출 것.
+# (화면에서 찾을 문구, 뱃지에 실제로 보여줄 짧은 이름) - 찾을 때 쓰는
+# 문구가 뱃지로 보여주기엔 너무 길거나 문장 조각이라 어색할 수 있어서 둘을
+# 분리해둠(예: "거래가 중단된"을 찾았어도 뱃지엔 "거래정지"라고 깔끔하게 표시).
+_STOCK_RISK_LABELS = [
+    ("상장폐지", "상장폐지"),
+    ("정리매매", "정리매매"),
+    ("매매거래정지", "거래정지"),
+    ("거래정지", "거래정지"),
+    ("거래가 중단된", "거래정지"),
+    ("투자위험종목", "투자위험종목"),
+    ("투자경고종목", "투자경고종목"),
+    ("관리종목", "관리종목"),
+    ("투자주의종목", "투자주의종목"),
+]
+
+
+def _log_stock_risk_debug(code, raw1, raw2):
+    """위험표시 문구를 이번에도 못 찾았을 때, 실제 응답이 어떻게 생겼는지
+    남겨서 다음엔 추측 없이 정확한 문구/필드를 맞출 수 있게 한다(매번
+    쌓이면 너무 커지니 종목별로 최신 것 하나만 남기고 덮어씀) - 원인이
+    확인되면 이 임시 진단 로그는 지울 것."""
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stock_risk_debug.log")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"\n===== {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{code}] =====\n")
+            f.write(f"--- 실시간 API ---\n{(raw1 or '(응답 없음/실패)')[:4000]}\n")
+            f.write(f"--- 종목 상세 페이지(일부) ---\n{(raw2 or '(응답 없음/실패)')[:4000]}\n")
+    except Exception:
+        pass
 
 
 def _fetch_stock_risk_label(code):
@@ -169,11 +204,12 @@ def _fetch_stock_risk_label(code):
     }
 
     def _find_label(text):
-        for label in _STOCK_RISK_LABELS:
-            if label in text:
-                return label
+        for needle, display in _STOCK_RISK_LABELS:
+            if needle in text:
+                return display
         return ""
 
+    raw1 = ""
     url1 = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code}"
     try:
         req = urllib.request.Request(url1, headers=headers)
@@ -185,6 +221,7 @@ def _fetch_stock_risk_label(code):
     except Exception as e1:
         _log_stock_fetch_error(code, "위험종목 확인(실시간 API)", e1)
 
+    raw2 = ""
     url2 = f"https://finance.naver.com/item/main.naver?code={code}"
     try:
         req = urllib.request.Request(url2, headers=headers)
@@ -193,12 +230,13 @@ def _fetch_stock_risk_label(code):
         found = _find_label(raw2)
         if found:
             return found
-        # 못 찾은 것도 정상(대부분 종목은 위험 상태가 아님)이라 매번 로그를
-        # 남기진 않는다 - 실제로 위험 상태인 걸 사용자가 알려줬는데도 여기서
-        # 못 찾는 경우에만, 그때 가서 이 페이지를 따로 받아 확인하면 된다.
     except Exception as e2:
         _log_stock_fetch_error(code, "위험종목 확인(페이지)", e2)
 
+    # 아직 어떤 종목이 실제로 위험 상태인지(이 함수가 정확히 맞혀야 할
+    # 대상) 확실하지 않으므로, 못 찾았을 때마다 실제 응답을 남겨서 다음에
+    # 바로 확인할 수 있게 한다(사용자가 "안 뜬다"고 말해준 경우를 위함).
+    _log_stock_risk_debug(code, raw1, raw2)
     return ""
 
 
