@@ -391,6 +391,24 @@ def _fetch_subscription_logos_once():
     os.makedirs(logo_dir, exist_ok=True)
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
+    # 2026-11-14: 파비콘 소스를 구글->clearbit 1순위로 바꿨는데, 이미 예전
+    # 구글 파비콘으로 캐시해둔 png 파일이 있으면 "이미 있음"으로 보고 그냥
+    # 넘어가버려서 바뀐 게 전혀 반영 안 됨 - 한 번만 전부 지우고 다시
+    # 받게 해서, 이번 교체가 실제로 적용되게 한다(최초 1회만, 마커 파일로 표시).
+    migrated_marker = os.path.join(logo_dir, ".clearbit_migrated")
+    if not os.path.exists(migrated_marker):
+        for fname in os.listdir(logo_dir):
+            if fname.endswith(".png"):
+                try:
+                    os.remove(os.path.join(logo_dir, fname))
+                except Exception:
+                    pass
+        try:
+            with open(migrated_marker, "w") as f:
+                f.write(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            pass
+
     def _download(url, dest):
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=8) as resp:
