@@ -8,6 +8,7 @@ import os
 import json
 import re
 import sqlite3
+import sys
 import threading
 import time
 import traceback
@@ -628,18 +629,35 @@ def _append_dpj_history(now, status, log_lines):
         pass
 
 
+DPJ_AUTO_RESTART_THRESHOLD = 2
+
+
+def _self_restart():
+    """마진보드 프로세스 자체를 재시작한다. 다팔자 자동화의 동시 실행
+    방지 잠금(_run_lock)은 프로세스 메모리 안에 있는 threading.Lock이라,
+    그 잠금을 쥔 스레드가 멈춰있어도 프로세스를 통째로 새로 띄우면 완전히
+    새 잠금(당연히 안 잠긴 상태)으로 깨끗하게 시작한다 - 사용자 지적대로
+    "체크만 하고 원상복구는 못 하는" 상태를 실제로 풀어주는 유일한 방법.
+    다만 이 시점에 다른 요청(STOCK/ORDER 등)이 동시에 진행 중이었다면
+    그것도 같이 끊긴다 - 멈춰있는 자동화를 살리는 대가로 감수하는
+    부분이다. os.execv는 지금 이 프로세스를 그 자리에서 완전히 새
+    launcher.py 실행으로 바꿔치기한다(윈도우에서도 동작 확인된 표준
+    방식) - 업데이트 확인/설치 점검부터 전부 처음부터 다시 돈다."""
+    print("[안내] DPJ 자동 수집이 연달아 멈춰서 마진보드를 자동으로 재시작합니다...")
+    time.sleep(2)  # 방금 보낸 폰 알림이 확실히 다 나갈 시간을 준다
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
 def _note_dpj_outcome(failed):
     """연속 실패 횟수를 추적해서, 일정 횟수 이상 계속 실패하면 재시작을
-    권하는 문구를 돌려준다. 다팔자 자동화의 동시 실행 방지 잠금(_run_lock)
-    은 멈춘 스레드가 쥐고 있으면 다음 주기가 와도 저절로 안 풀린다
-    (사용자 지적: "체크는 할 수 있어도 원상복구 하기는 어려운 거
-    아니냐" - 맞는 말이다. 시간초과 감지는 스케줄러가 다음 주기를
-    정상적으로 다시 시작하게만 해줄 뿐, 멈춰있는 자동화 자체나 그게
-    쥐고 있는 잠금을 코드가 스스로 풀거나 고쳐주지는 못한다 - 그걸
-    억지로 풀면 오히려 두 자동화가 동시에 같은 다팔자 창을 붙잡는 더
-    위험한 사고로 이어질 수 있어서 일부러 안 건드린다). 그래서 감지만
-    하고 끝내지 않고, 실패가 반복되면 "자동 복구가 안 되니 직접
-    재시작해달라"고 명확히 알려준다."""
+    권하는 문구와 함께 실제로 재시작이 필요한지(should_restart)를
+    (hint, should_restart) 튜플로 돌려준다. 다팔자 자동화의 동시 실행
+    방지 잠금(_run_lock)은 멈춘 스레드가 쥐고 있으면 다음 주기가 와도
+    저절로 안 풀린다(사용자 지적: "체크는 할 수 있어도 원상복구 하기는
+    어려운 거 아니냐" - 맞는 말이었고, "니가 할 수도 있지?"라는 후속
+    요청을 받아서 실제로 프로세스를 재시작하는 _self_restart()를
+    추가했다 - 잠금을 억지로 풀지 않고 프로세스 자체를 새로 띄우는
+    안전한 방식으로)."""
     with _dpj_auto_lock:
         if failed:
             _dpj_auto_state['consecutive_failures'] += 1
@@ -647,9 +665,9 @@ def _note_dpj_outcome(failed):
         else:
             _dpj_auto_state['consecutive_failures'] = 0
             n = 0
-    if n >= 2:
-        return f' ({n}회 연속 실패 - 자동으로는 복구가 안 될 수 있습니다. 마진보드를 완전히 껐다 다시 켜주세요.)'
-    return ''
+    if n >= DPJ_AUTO_RESTART_THRESHOLD:
+        return f' ({n}회 연속 실패 - 자동으로 재시작합니다.)', True
+    return '', False
 
 
 def _dpj_auto_loop():
@@ -683,8 +701,10 @@ def _dpj_auto_loop():
                 _dpj_auto_state['last_error'] = msg
             print(f"[DPJ 자동수집 {now}] {msg}")
             _append_dpj_history(now, '시간초과', [msg])
-            hint = _note_dpj_outcome(True)
+            hint, should_restart = _note_dpj_outcome(True)
             _send_ntfy(f'{now} DPJ 자동 수집이 멈춘 것 같습니다(시간 초과) - 다음 주기에 다시 시도합니다.{hint}', title='마진보드 DPJ 자동수집 지연')
+            if should_restart:
+                _self_restart()
             continue
 
         if 'exception' in run_box:
@@ -694,8 +714,10 @@ def _dpj_auto_loop():
                 _dpj_auto_state['last_error'] = _friendly_error(e)
             print(f"[DPJ 자동수집 {now}] 실패(예외): {type(e).__name__}: {e}")
             _append_dpj_history(now, '실패(예외)', [f'{type(e).__name__}: {e}'])
-            hint = _note_dpj_outcome(True)
+            hint, should_restart = _note_dpj_outcome(True)
             _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)}{hint}', title='마진보드 DPJ 자동수집 실패')
+            if should_restart:
+                _self_restart()
             continue
 
         result = run_box.get('result') or {}
@@ -725,13 +747,15 @@ def _dpj_auto_loop():
                         _dpj_auto_state['at'] = now
                         notify_new_orders = True
         _append_dpj_history(now, '성공' if result.get('ok') else '실패', result.get('log'))
-        hint = _note_dpj_outcome(bool(_dpj_auto_state['last_error']))
+        hint, should_restart = _note_dpj_outcome(bool(_dpj_auto_state['last_error']))
         # 폰 알림(ntfy)은 네트워크 호출이라 잠금을 잡은 채로 하지 않는다.
         if _dpj_auto_state['last_error']:
             _send_ntfy(f"{now} DPJ 자동 수집 실패 - {_dpj_auto_state['last_error']}{hint}", title='마진보드 DPJ 자동수집 실패')
         elif notify_new_orders:
             _send_ntfy(f"{now} 신규주문 {result.get('new_order_count', 0)}건이 있습니다 - 마진보드에서 확인해주세요.",
                         title='이유상점 Margin Board - 신규주문')
+        if should_restart:
+            _self_restart()
 
 
 _dpj_auto_thread_started = False
