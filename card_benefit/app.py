@@ -1190,6 +1190,20 @@ def apply_startup_data_fixes():
         if stocks_added:
             print(f"하나증권 종합위탁 계좌 보유종목 {stocks_added}개 신규 등록")
 
+        # 미래에셋증권 보유종목 등록할 때 '노타'가 빠졌던 걸 사용자가
+        # 지적해서 확인함(코드 486990, WebSearch로 실제 확인) - 매수가는
+        # 역시 평가금액/등락률로 역산한 추정치.
+        nota_exists = conn.execute("SELECT 1 FROM stocks WHERE name = '노타'").fetchone()
+        if not nota_exists:
+            max_order2 = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM stocks").fetchone()["m"]
+            conn.execute(
+                "INSERT INTO stocks (name, code, buy_price, quantity, broker, active, memo, sort_order) "
+                "VALUES ('노타', '486990', 9103, 1, '미래에셋증권', 1, "
+                "'등록 누락됐던 거 소급 추가, 매수가는 평가금액/등락률로 역산한 추정치', ?)",
+                (max_order2 + 1,),
+            )
+            print("미래에셋증권 '노타' 등록 누락분 추가")
+
         conn.commit()
     except Exception:
         pass
