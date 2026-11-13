@@ -825,12 +825,12 @@ def _attach_match_info(conn, rows, fk_column):
                 "occurred_at": h["occurred_at"],
                 # 1순위: 알림 자체의 last4로 찾은 카드(가장 정확함).
                 # 2순위: 매칭되던 순간에 찍어둔 스냅샷(matched_card_label) -
-                # 나중에 이 항목의 결제카드를 바꿔도 지난 내역은 안 바뀜
-                # (실제로 카드 바꿨더니 지난 내역까지 전부 새 카드로 보이는
-                # 사고가 있었음). 3순위: 스냅샷이 없는 옛날 데이터만, 지금
-                # 등록된 카드로 대신 보여줌(없는 것보단 나음).
-                "card_label": card_label_for(h["last4"]) or h["matched_card_label"]
-                or (item["payment_method"] or None),
+                # 나중에 이 항목의 결제카드를 바꿔도 지난 내역은 안 바뀜.
+                # 둘 다 없으면(옛날 데이터라 스냅샷이 없는 경우) "지금 등록된
+                # 카드"로 대신 보여주던 적이 있었는데, 그건 추측이라 등록이
+                # 꼬여있으면(예: 만료된 카드가 아직 등록만 돼있는 경우) 틀린
+                # 카드를 맞는 것처럼 보여주는 사고가 났다 - 모르면 그냥 빈칸.
+                "card_label": card_label_for(h["last4"]) or h["matched_card_label"] or None,
             }
             for h in history
         ]
