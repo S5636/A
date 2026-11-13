@@ -142,58 +142,41 @@ def _fetch_stock_price(code):
     return None
 
 
-# 거래정지/관리종목 등 "위험" 표시를 정확히 어떤 필드/선택자로 주는지는
-# 네이버 쪽 공식 문서가 없어서 모른다(이 작업을 한 환경에선 외부망이 막혀서
-# 실제 응답을 직접 확인할 수도 없었음) - 그래서 정확한 자리를 짚는 대신,
-# 실시간 API 응답과 종목 상세 페이지 전체 텍스트에서 거래소가 실제로 쓰는
-# 고정 용어(제도 이름 자체라 일반 광고/안내 문구에는 거의 안 나오는 말)가
-# 그대로 보이는지 찾는 방식으로 짰다. 우선순위(심각한 것부터): 상장폐지 >
-# 정리매매 > 거래정지 > 투자위험종목 > 투자경고종목 > 관리종목 > 투자주의종목.
-# 이 중 하나라도 실제 페이지에 없는 걸로 나오면(용어가 다르거나 이미지로만
-# 표시하는 식이면) 못 잡아낼 수 있음 - 그런 경우를 위해 못 찾았을 때도 뭘
-# 받았는지 로그에 남겨서, 나중에 실제 PC 로그를 보고 다시 맞출 수 있게 한다.
-# 2026-11-13: 사용자가 실제 종목(스코넥 276040, 거래정지 상태)의 네이버
-# 화면 스크린샷을 보내줘서 실제 문구가 "거래정지"가 아니라 "거래가 중단된
-# 상태입니다"인 걸 확인함 - "거래가 중단된" 조각을 추가. 다만 이게 지금
-# 긁는 두 소스(실시간 API/구버전 상세페이지)에 그대로 텍스트로 들어있는지는
-# 여전히 못 받아봐서 모름(아예 다른 모바일 전용 API를 쓰는 화면일 수도
-# 있음) - 이번에도 못 찾으면 _log_stock_risk_debug가 남긴 실제 응답을
-# 보고 정확히 맞출 것.
-# (화면에서 찾을 문구, 뱃지에 실제로 보여줄 짧은 이름) - 찾을 때 쓰는
-# 문구가 뱃지로 보여주기엔 너무 길거나 문장 조각이라 어색할 수 있어서 둘을
-# 분리해둠(예: "거래가 중단된"을 찾았어도 뱃지엔 "거래정지"라고 깔끔하게 표시).
-_STOCK_RISK_LABELS = [
-    ("상장폐지", "상장폐지"),
-    ("정리매매", "정리매매"),
-    ("매매거래정지", "거래정지"),
-    ("거래정지", "거래정지"),
-    ("거래가 중단된", "거래정지"),
-    ("투자위험종목", "투자위험종목"),
-    ("투자경고종목", "투자경고종목"),
-    ("관리종목", "관리종목"),
-    ("투자주의종목", "투자주의종목"),
-]
+# 2026-11-13: 사용자가 보내준 실제 진단 로그(스코넥 276040, 실제 거래정지
+# 상태)로 정확한 필드를 확인함 - 실시간 API 응답의 datas[0]["tradeStopType"]
+# 가 거래상태 그 자체임: 정상이면 {"code":"1","text":"운영.Trading",
+# "name":"TRADING"}, 거래정지면 {"code":"2","text":"정지.Halted",
+# "name":"HALTED"}로 옴(tradableStatus도 "tradable" vs "halt"로 같이 바뀜).
+# 이제 이 필드로 정확히 판단한다 - 더 이상 문구를 추측해서 찾을 필요 없음.
+# 다만 "관리종목"/"투자경고종목" 등 매매는 되는 채로 걸리는 다른 위험
+# 상태는 아직 실제 값을 본 적이 없어서(지금까지 확인된 보유종목 중엔
+# 없었음) code가 "1"도 "2"도 아닌 제3의 값으로 올 거라 추정만 함 - 그런
+# 경우는 text를 그대로 보여주고 로그를 남겨서, 실제로 그 상태인 종목이
+# 나오면 정확한 한글명으로 다시 맞춘다.
+_TRADE_STOP_LABELS = {
+    "HALTED": "거래정지",
+}
 
 
-def _log_stock_risk_debug(code, raw1, raw2):
-    """위험표시 문구를 이번에도 못 찾았을 때, 실제 응답이 어떻게 생겼는지
-    남겨서 다음엔 추측 없이 정확한 문구/필드를 맞출 수 있게 한다(매번
-    쌓이면 너무 커지니 종목별로 최신 것 하나만 남기고 덮어씀) - 원인이
-    확인되면 이 임시 진단 로그는 지울 것."""
+def _log_stock_risk_debug(code, raw1, raw2=""):
+    """위험표시 판단에 처음 보는 값(code가 "1"/"2"가 아니거나 파싱 자체가
+    실패)이 나오면 실제 응답을 남겨서, 다음엔 추측 없이 정확히 맞출 수
+    있게 한다(매번 쌓이면 너무 커지니 추가만 하되 - 문제되면 사용자가
+    파일 지우면 됨)."""
     try:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stock_risk_debug.log")
         with open(path, "a", encoding="utf-8") as f:
             f.write(f"\n===== {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{code}] =====\n")
             f.write(f"--- 실시간 API ---\n{(raw1 or '(응답 없음/실패)')[:4000]}\n")
-            f.write(f"--- 종목 상세 페이지(일부) ---\n{(raw2 or '(응답 없음/실패)')[:4000]}\n")
+            if raw2:
+                f.write(f"--- 종목 상세 페이지(일부) ---\n{raw2[:4000]}\n")
     except Exception:
         pass
 
 
 def _fetch_stock_risk_label(code):
-    """종목이 거래정지/관리종목 등 위험 상태인지 확인해서, 해당하면 그
-    용어를 그대로 돌려준다(아니면 빈 문자열). _fetch_stock_price와 같은
-    두 소스(실시간 API, 종목 상세 페이지)를 그대로 재활용한다."""
+    """종목이 거래정지 등 위험 상태인지 확인해서, 해당하면 그 상태 이름을
+    돌려준다(아니면 빈 문자열). 실시간 API의 tradeStopType 필드로 판단."""
     import urllib.request
 
     code = re.sub(r"^[Aa]", "", code or "")
@@ -203,41 +186,26 @@ def _fetch_stock_risk_label(code):
         "Referer": "https://finance.naver.com/",
     }
 
-    def _find_label(text):
-        for needle, display in _STOCK_RISK_LABELS:
-            if needle in text:
-                return display
-        return ""
-
     raw1 = ""
     url1 = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code}"
     try:
         req = urllib.request.Request(url1, headers=headers)
         with urllib.request.urlopen(req, timeout=5) as resp:
             raw1 = resp.read().decode("utf-8", errors="replace")
-        found = _find_label(raw1)
-        if found:
-            return found
+        stop = (json.loads(raw1)["datas"][0] or {}).get("tradeStopType") or {}
+        stop_name = stop.get("code") and stop.get("name")
+        if stop.get("code") not in (None, "1"):
+            label = _TRADE_STOP_LABELS.get(stop_name)
+            if not label:
+                # 처음 보는 상태 - 일단 받은 text 그대로 보여주고(아예
+                # 빈칸보다 나음) 로그를 남겨서 정확한 한글명으로 맞출 자료를 모은다.
+                label = (stop.get("text") or stop_name or "위험").split(".")[0]
+                _log_stock_risk_debug(code, raw1)
+            return label
+        return ""
     except Exception as e1:
-        _log_stock_fetch_error(code, "위험종목 확인(실시간 API)", e1)
-
-    raw2 = ""
-    url2 = f"https://finance.naver.com/item/main.naver?code={code}"
-    try:
-        req = urllib.request.Request(url2, headers=headers)
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            raw2 = resp.read().decode("utf-8", errors="replace")
-        found = _find_label(raw2)
-        if found:
-            return found
-    except Exception as e2:
-        _log_stock_fetch_error(code, "위험종목 확인(페이지)", e2)
-
-    # 아직 어떤 종목이 실제로 위험 상태인지(이 함수가 정확히 맞혀야 할
-    # 대상) 확실하지 않으므로, 못 찾았을 때마다 실제 응답을 남겨서 다음에
-    # 바로 확인할 수 있게 한다(사용자가 "안 뜬다"고 말해준 경우를 위함).
-    _log_stock_risk_debug(code, raw1, raw2)
-    return ""
+        _log_stock_fetch_error(code, "위험종목 확인(실시간 API)", e1, raw1)
+        return ""
 
 
 def _send_windows_toast(title, message):
