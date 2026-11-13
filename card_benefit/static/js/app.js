@@ -1913,7 +1913,7 @@
           <div class="card-text-stack">
             <div class="card-text-row">
               <span style="display:flex;align-items:center;gap:4px;min-width:0;flex:1;">
-                <span class="card-title-scroll"><span class="card-title" style="${s.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(s.name)}</span>${s.code ? ` <span class="card-method-dim" style="font-size:.78em;">${escapeHtml(s.code)}</span>` : ""}</span>
+                <span class="card-title-scroll"><span class="card-title" style="${s.active ? "" : "opacity:.5;text-decoration:line-through;"}${s.risk_label ? "color:var(--danger,#e5484d);" : ""}">${escapeHtml(s.name)}</span>${s.code ? ` <span class="card-method-dim" style="font-size:.78em;">${escapeHtml(s.code)}</span>` : ""}${s.risk_label ? ` <span class="loan-type-badge" style="color:#fff;background:var(--danger,#e5484d);">${escapeHtml(s.risk_label)}</span>` : ""}</span>
                 <button class="icon-btn edit-stock" data-id="${s.id}" title="수정">✏️</button>
                 <button class="icon-btn delete-stock" data-id="${s.id}" title="삭제">🗑️</button>
               </span>

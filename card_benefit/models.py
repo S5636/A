@@ -189,6 +189,7 @@ CREATE TABLE IF NOT EXISTS stocks (
     last_known_positive INTEGER NOT NULL DEFAULT 0,  -- 마지막으로 확인한 평가손익 부호(전환 감지용)
     broker TEXT DEFAULT '',                   -- 어느 증권사 계좌인지(예: 대신증권)
     sell_price REAL NOT NULL DEFAULT 0,       -- 매도가(매도 후엔 시세 대신 이 가격으로 손익 고정)
+    risk_label TEXT DEFAULT '',               -- 거래정지/관리종목 등 위험 상태 표시(백그라운드 갱신)
     active INTEGER NOT NULL DEFAULT 1,
     memo TEXT DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
@@ -270,6 +271,7 @@ def init_db():
         _ensure_column(conn, "recurring_payments", "usage_period", "usage_period TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "matched_card_label", "matched_card_label TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "deleted_at", "deleted_at TEXT DEFAULT NULL")
+        _ensure_column(conn, "stocks", "risk_label", "risk_label TEXT DEFAULT ''")
 
         # recurring_id/insurance_id는 _ensure_column으로 나중에 추가된 컬럼이라
         # (예전 DB엔 처음부터 있던 게 아니라서) ON DELETE SET NULL 외래키 제약이

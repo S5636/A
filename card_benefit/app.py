@@ -142,6 +142,66 @@ def _fetch_stock_price(code):
     return None
 
 
+# 거래정지/관리종목 등 "위험" 표시를 정확히 어떤 필드/선택자로 주는지는
+# 네이버 쪽 공식 문서가 없어서 모른다(이 작업을 한 환경에선 외부망이 막혀서
+# 실제 응답을 직접 확인할 수도 없었음) - 그래서 정확한 자리를 짚는 대신,
+# 실시간 API 응답과 종목 상세 페이지 전체 텍스트에서 거래소가 실제로 쓰는
+# 고정 용어(제도 이름 자체라 일반 광고/안내 문구에는 거의 안 나오는 말)가
+# 그대로 보이는지 찾는 방식으로 짰다. 우선순위(심각한 것부터): 상장폐지 >
+# 정리매매 > 거래정지 > 투자위험종목 > 투자경고종목 > 관리종목 > 투자주의종목.
+# 이 중 하나라도 실제 페이지에 없는 걸로 나오면(용어가 다르거나 이미지로만
+# 표시하는 식이면) 못 잡아낼 수 있음 - 그런 경우를 위해 못 찾았을 때도 뭘
+# 받았는지 로그에 남겨서, 나중에 실제 PC 로그를 보고 다시 맞출 수 있게 한다.
+_STOCK_RISK_LABELS = ["상장폐지", "정리매매", "거래정지", "투자위험종목", "투자경고종목", "관리종목", "투자주의종목"]
+
+
+def _fetch_stock_risk_label(code):
+    """종목이 거래정지/관리종목 등 위험 상태인지 확인해서, 해당하면 그
+    용어를 그대로 돌려준다(아니면 빈 문자열). _fetch_stock_price와 같은
+    두 소스(실시간 API, 종목 상세 페이지)를 그대로 재활용한다."""
+    import urllib.request
+
+    code = re.sub(r"^[Aa]", "", code or "")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Referer": "https://finance.naver.com/",
+    }
+
+    def _find_label(text):
+        for label in _STOCK_RISK_LABELS:
+            if label in text:
+                return label
+        return ""
+
+    url1 = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code}"
+    try:
+        req = urllib.request.Request(url1, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            raw1 = resp.read().decode("utf-8", errors="replace")
+        found = _find_label(raw1)
+        if found:
+            return found
+    except Exception as e1:
+        _log_stock_fetch_error(code, "위험종목 확인(실시간 API)", e1)
+
+    url2 = f"https://finance.naver.com/item/main.naver?code={code}"
+    try:
+        req = urllib.request.Request(url2, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            raw2 = resp.read().decode("utf-8", errors="replace")
+        found = _find_label(raw2)
+        if found:
+            return found
+        # 못 찾은 것도 정상(대부분 종목은 위험 상태가 아님)이라 매번 로그를
+        # 남기진 않는다 - 실제로 위험 상태인 걸 사용자가 알려줬는데도 여기서
+        # 못 찾는 경우에만, 그때 가서 이 페이지를 따로 받아 확인하면 된다.
+    except Exception as e2:
+        _log_stock_fetch_error(code, "위험종목 확인(페이지)", e2)
+
+    return ""
+
+
 def _send_windows_toast(title, message):
     """윈도우 토스트 알림을 띄운다. winotify가 없거나(다른 OS 등) 실패하면
     조용히 넘어간다 - 알림 하나 실패했다고 전체 가격 확인 루프가 멈추면
@@ -170,6 +230,13 @@ def _check_stocks_and_notify():
             "SELECT * FROM stocks WHERE active = 1 AND code != ''"
         ).fetchall()
         for s in stocks:
+            # 거래정지 상태면 가격 자체가 안 내려올 수 있어서(거래가 없으니
+            # 실시간가가 없음), 위험표시는 가격 조회 성공 여부와 무관하게
+            # 항상 따로 확인한다.
+            risk_label = _fetch_stock_risk_label(s["code"])
+            if risk_label != (s["risk_label"] or ""):
+                conn.execute("UPDATE stocks SET risk_label = ? WHERE id = ?", (risk_label, s["id"]))
+
             price = _fetch_stock_price(s["code"])
             if price is None:
                 continue
@@ -577,6 +644,7 @@ def serialize_stocks(conn):
             "active": bool(s["active"]),
             "memo": s["memo"],
             "sort_order": s["sort_order"],
+            "risk_label": s["risk_label"] or None,
         })
     return result
 
