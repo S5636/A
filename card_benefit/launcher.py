@@ -29,6 +29,7 @@ _UPDATE_FILES = [
     "app.py",
     "models.py",
     "launcher.py",
+    "START.bat",
     "static/css/style.css",
     "static/js/app.js",
     "static/img/logo.png",
