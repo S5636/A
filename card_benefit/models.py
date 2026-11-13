@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     matched_card_label TEXT DEFAULT '',  -- 매칭되던 순간의 결제카드 이름(스냅샷) - 나중에
                                           -- 고정지출/보험 항목의 결제카드를 바꿔도 과거 내역
                                           -- 표시가 같이 안 바뀌게(실제로 바뀌어버린 사고 있었음)
+    deleted_at TEXT DEFAULT NULL,  -- 휴지통: 완전삭제 대신 여기 시각을 찍어두고
+                                    -- 평소 목록/매칭에서는 빼되 나중에 복원 가능하게 함
     medical_claimed INTEGER NOT NULL DEFAULT 0,  -- 병원비/약국 결제를 실손 등으로 청구했는지
     medical_excluded INTEGER NOT NULL DEFAULT 0,  -- 병원비 목록에서 "이건 아님" 처리한 건 다시 안 보여줌
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -267,6 +269,7 @@ def init_db():
         _ensure_column(conn, "recurring_payments", "billing_cycle", "billing_cycle TEXT DEFAULT '월간'")
         _ensure_column(conn, "recurring_payments", "usage_period", "usage_period TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "matched_card_label", "matched_card_label TEXT DEFAULT ''")
+        _ensure_column(conn, "inbox_items", "deleted_at", "deleted_at TEXT DEFAULT NULL")
 
         # recurring_id/insurance_id는 _ensure_column으로 나중에 추가된 컬럼이라
         # (예전 DB엔 처음부터 있던 게 아니라서) ON DELETE SET NULL 외래키 제약이

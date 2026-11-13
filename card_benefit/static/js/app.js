@@ -7,6 +7,9 @@
   const noBenefitSection = document.getElementById("no-benefit-section");
   const noBenefitList = document.getElementById("no-benefit-list");
   const noBenefitCount = document.getElementById("no-benefit-count");
+  const trashSection = document.getElementById("trash-section");
+  const trashList = document.getElementById("trash-list");
+  const trashCount = document.getElementById("trash-count");
 
   const CARD_COLORS = ["#a78bfa", "#ec4899", "#fab219", "#22c55e", "#3987e5", "#f97316"];
 
@@ -53,9 +56,10 @@
     return idx >= 0 ? colorForIndex(idx) : "var(--text-muted)";
   }
 
-  let state = { cards: [], inbox: [], no_benefit: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [], suspected_duplicates: [], stocks: [] };
+  let state = { cards: [], inbox: [], no_benefit: [], trash: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [], suspected_duplicates: [], stocks: [] };
   let inboxOpen = false;
   let noBenefitOpen = false;
+  let trashOpen = false;
   // null = 진짜 이번 달(필터 없음). "YYYY-MM" 문자열이면 카드 탭의 "사용내역"
   // 목록뿐 아니라 한도/잔여/전월실적까지 전부 그 달 기준으로 같이 바뀐다.
   // (배정 모달은 예외 - 알림 자체의 결제 달 기준으로 따로 불러옴, 아래 참고)
@@ -254,6 +258,7 @@
     renderMonthBar();
     renderInbox();
     renderNoBenefit();
+    renderTrash();
     renderCards();
     renderMonthlySummary();
     renderLoans();
@@ -392,7 +397,7 @@
   // ---- 받은 알림 ----
   // ---- 여러 건 한 번에 선택/삭제(제외) 공용 - 몇 년치 카드내역을 한 번에
   // 업로드했을 때 필요없는 알림을 리스트별로 한 번에 치울 수 있게 한다 ----
-  const bulkSelections = { inbox: new Set(), noBenefit: new Set(), medical: new Set() };
+  const bulkSelections = { inbox: new Set(), noBenefit: new Set(), trash: new Set(), medical: new Set() };
 
   // actions: [{label, onAction: async (selectedIds) => bool}, ...] - 보통 1개지만
   // "받은 알림"처럼 "선택 삭제"/"선택 혜택없음 처리"를 둘 다 둬야 하는 경우도 있다.
@@ -466,7 +471,7 @@
       {
         label: "삭제",
         onAction: async (selectedIds) => {
-          if (!confirm(`${selectedIds.length}건을 완전히 삭제할까요? 되돌릴 수 없습니다.`)) return false;
+          if (!confirm(`${selectedIds.length}건을 휴지통으로 보낼까요? 휴지통에서 다시 복원할 수 있습니다.`)) return false;
           state = await api("/api/inbox/bulk-delete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -521,7 +526,7 @@
       {
         label: "삭제",
         onAction: async (selectedIds) => {
-          if (!confirm(`${selectedIds.length}건을 완전히 삭제할까요? 되돌릴 수 없습니다.`)) return false;
+          if (!confirm(`${selectedIds.length}건을 휴지통으로 보낼까요? 휴지통에서 다시 복원할 수 있습니다.`)) return false;
           state = await api("/api/inbox/bulk-delete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -540,7 +545,7 @@
         </div>
         <div class="benefit-buttons">
           <button class="btn secondary small reopen-no-benefit" data-id="${it.id}">재확인</button>
-          <button class="btn secondary small delete-no-benefit" data-id="${it.id}">완전 삭제</button>
+          <button class="btn secondary small delete-no-benefit" data-id="${it.id}">삭제</button>
         </div>
       </div>
     `).join("");
@@ -553,7 +558,7 @@
     );
     noBenefitList.querySelectorAll(".delete-no-benefit").forEach((btn) =>
       btn.addEventListener("click", async () => {
-        if (!confirm("완전히 삭제할까요? 되돌릴 수 없습니다.")) return;
+        if (!confirm("휴지통으로 보낼까요? 휴지통에서 다시 복원할 수 있습니다.")) return;
         state = await api(`/api/inbox/${btn.dataset.id}`, { method: "DELETE" });
         render();
       })
@@ -562,6 +567,52 @@
   }
   document.getElementById("no-benefit-toggle").addEventListener("click", () => {
     noBenefitOpen = !noBenefitOpen;
+    render();
+  });
+
+  // ---- 휴지통 ----
+  function renderTrash() {
+    const items = state.trash || [];
+    const ids = items.map((it) => it.id);
+    trashSection.style.display = items.length ? "block" : "none";
+    trashCount.textContent = items.length ? `${items.length}건` : "";
+    trashList.style.display = trashOpen ? "flex" : "none";
+    const trashActions = [
+      {
+        label: "복원",
+        onAction: async (selectedIds) => {
+          state = await api("/api/inbox/bulk-restore", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: selectedIds }),
+          });
+          return true;
+        },
+      },
+    ];
+    trashList.innerHTML = bulkBarHtml("trash", trashActions, ids) + items.map((it) => `
+      <div class="inbox-item" data-id="${it.id}">
+        <input type="checkbox" class="bulk-item-check" data-id="${it.id}" ${bulkSelections.trash.has(it.id) ? "checked" : ""}>
+        <div class="inbox-item-info">
+          <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
+          <div class="inbox-item-sub">${it.occurred_at}${it.card_name ? " · " + escapeHtml(shortCardName(it.card_name)) : ""}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""}</div>
+        </div>
+        <div class="benefit-buttons">
+          <button class="btn secondary small restore-trash" data-id="${it.id}">복원</button>
+        </div>
+      </div>
+    `).join("");
+
+    trashList.querySelectorAll(".restore-trash").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        state = await api(`/api/inbox/${btn.dataset.id}/restore`, { method: "POST" });
+        render();
+      })
+    );
+    wireBulkBar(trashList, "trash", ids, trashActions);
+  }
+  document.getElementById("trash-toggle").addEventListener("click", () => {
+    trashOpen = !trashOpen;
     render();
   });
 

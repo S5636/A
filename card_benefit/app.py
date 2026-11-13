@@ -323,7 +323,8 @@ def start_subscription_logo_fetch():
 
 def serialize_inbox(conn):
     rows = conn.execute(
-        "SELECT * FROM inbox_items WHERE status = 'pending' ORDER BY occurred_at DESC, id DESC"
+        "SELECT * FROM inbox_items WHERE status = 'pending' AND deleted_at IS NULL "
+        "ORDER BY occurred_at DESC, id DESC"
     ).fetchall()
     cards_with_code = conn.execute("SELECT id, name, issuer, last4 FROM cards WHERE last4 != ''").fetchall()
     benefits_by_card = {}
@@ -479,7 +480,7 @@ def serialize_no_benefit(conn):
     rows = conn.execute(
         """SELECT inbox_items.*, cards.name AS card_name
            FROM inbox_items LEFT JOIN cards ON cards.id = inbox_items.card_id
-           WHERE inbox_items.status = 'no_benefit'
+           WHERE inbox_items.status = 'no_benefit' AND inbox_items.deleted_at IS NULL
            ORDER BY inbox_items.occurred_at DESC, inbox_items.id DESC"""
     ).fetchall()
     return [
@@ -491,6 +492,31 @@ def serialize_no_benefit(conn):
             "occurred_at": r["occurred_at"],
             "card_id": r["card_id"],
             "card_name": r["card_name"],
+        }
+        for r in rows
+    ]
+
+
+def serialize_trash(conn):
+    """삭제(완전삭제 아님) 처리한 알림들 - 휴지통. 상태 상관없이 deleted_at만
+    찍혀 있으면 여기 보이고, 복원하면 deleted_at을 지워서 원래 있던 자리로
+    돌아가게 한다(큐든 혜택없음 처리 내역이든 status는 그대로 보존돼 있음)."""
+    rows = conn.execute(
+        """SELECT inbox_items.*, cards.name AS card_name
+           FROM inbox_items LEFT JOIN cards ON cards.id = inbox_items.card_id
+           WHERE inbox_items.deleted_at IS NOT NULL
+           ORDER BY inbox_items.deleted_at DESC, inbox_items.id DESC"""
+    ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "raw_text": r["raw_text"],
+            "amount": r["amount"],
+            "merchant": r["merchant"],
+            "occurred_at": r["occurred_at"],
+            "card_id": r["card_id"],
+            "card_name": r["card_name"],
+            "deleted_at": r["deleted_at"],
         }
         for r in rows
     ]
@@ -509,6 +535,7 @@ def serialize_full():
             "medical_expenses": serialize_medical_expenses(conn),
             "suspected_duplicates": find_suspected_duplicates(conn),
             "stocks": serialize_stocks(conn),
+            "trash": serialize_trash(conn),
         }
     finally:
         conn.close()
@@ -629,7 +656,7 @@ def serialize_medical_expenses(conn):
     "이건 아님" 처리(medical_excluded)한 건 다시 안 보여준다."""
     rows = conn.execute(
         "SELECT * FROM inbox_items WHERE merchant != '' AND medical_excluded = 0 "
-        "ORDER BY occurred_at DESC, id DESC"
+        "AND deleted_at IS NULL ORDER BY occurred_at DESC, id DESC"
     ).fetchall()
     return [
         {
@@ -657,7 +684,7 @@ def find_suspected_duplicates(conn):
     찍히는 정액 결제가 전부 딸려 들어오는 걸 막기 위함)."""
     rows = conn.execute(
         "SELECT * FROM inbox_items WHERE status != 'cancelled' AND dup_ignored = 0 "
-        "AND merchant != '' AND amount IS NOT NULL ORDER BY occurred_at"
+        "AND deleted_at IS NULL AND merchant != '' AND amount IS NOT NULL ORDER BY occurred_at"
     ).fetchall()
 
     card_label_for = _card_label_matcher(conn)
@@ -1412,7 +1439,10 @@ def _auto_match_all_pending(conn):
     이 함수를 호출한다 - 어느 버튼을 눌러도 결과가 같다. 이미 매칭된
     항목은 각 하위 매칭 함수가 자체적으로 걸러내므로(상태/FK 확인), 범위를
     넓게 잡아도 안전하다."""
-    ids = [r["id"] for r in conn.execute("SELECT id FROM inbox_items WHERE status != 'cancelled'")]
+    ids = [
+        r["id"]
+        for r in conn.execute("SELECT id FROM inbox_items WHERE status != 'cancelled' AND deleted_at IS NULL")
+    ]
     matched = 0
     for iid in ids:
         if _try_auto_match_all(conn, iid):
@@ -3562,7 +3592,9 @@ def _try_cancel_matching_notification(conn, last4, amount, exclude_id=None):
     if not amount:
         return False
     candidates = conn.execute(
-        "SELECT id, last4, benefit_id FROM inbox_items WHERE amount = ? AND status != 'cancelled'", (amount,)
+        "SELECT id, last4, benefit_id FROM inbox_items WHERE amount = ? AND status != 'cancelled' "
+        "AND deleted_at IS NULL",
+        (amount,),
     ).fetchall()
     matches = [
         r for r in candidates
@@ -3742,9 +3774,27 @@ def reopen_inbox_item(item_id):
 
 @app.route("/api/inbox/<int:item_id>", methods=["DELETE"])
 def discard_inbox_item(item_id):
+    """완전삭제 대신 휴지통으로 보낸다(deleted_at만 찍음) - "복원" 버튼으로
+    언제든 되돌릴 수 있게 실제 행은 지우지 않는다."""
     conn = get_conn()
     try:
-        conn.execute("DELETE FROM inbox_items WHERE id = ?", (item_id,))
+        conn.execute(
+            "UPDATE inbox_items SET deleted_at = datetime('now', 'localtime') WHERE id = ?",
+            (item_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/inbox/<int:item_id>/restore", methods=["POST"])
+def restore_inbox_item(item_id):
+    """휴지통에서 복원 - deleted_at을 지우면 status는 그대로 보존돼 있었으니
+    큐든 혜택없음 처리 내역이든 원래 있던 자리로 그대로 돌아간다."""
+    conn = get_conn()
+    try:
+        conn.execute("UPDATE inbox_items SET deleted_at = NULL WHERE id = ?", (item_id,))
         conn.commit()
     finally:
         conn.close()
@@ -3837,9 +3887,9 @@ def bulk_mark_no_benefit():
 
 @app.route("/api/inbox/bulk-delete", methods=["POST"])
 def bulk_delete_inbox_items():
-    """받은 알림/혜택없음 처리 내역 리스트에서 여러 개를 한 번에 완전 삭제한다.
-    과거 카드내역을 몇 년치 업로드했을 때 필요없는 알림을 한 번에 치우는 용도 -
-    혜택 사용기록(usage_logs) 자체는 지우지 않는다(source_inbox_id만 비워짐)."""
+    """받은 알림/혜택없음 처리 내역 리스트에서 여러 개를 한 번에 휴지통으로
+    보낸다(완전삭제 아님 - deleted_at만 찍고 실제 행은 남긴다). 과거
+    카드내역을 몇 년치 업로드했을 때 필요없는 알림을 한 번에 치우는 용도."""
     data = request.get_json(force=True) or {}
     ids = data.get("ids") or []
     try:
@@ -3852,7 +3902,32 @@ def bulk_delete_inbox_items():
     conn = get_conn()
     try:
         placeholders = ",".join("?" for _ in ids)
-        conn.execute(f"DELETE FROM inbox_items WHERE id IN ({placeholders})", ids)
+        conn.execute(
+            f"UPDATE inbox_items SET deleted_at = datetime('now', 'localtime') WHERE id IN ({placeholders})",
+            ids,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/inbox/bulk-restore", methods=["POST"])
+def bulk_restore_inbox_items():
+    """휴지통에서 여러 개를 한 번에 복원한다."""
+    data = request.get_json(force=True) or {}
+    ids = data.get("ids") or []
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return jsonify({"error": "복원할 항목을 선택하세요."}), 400
+    if not ids:
+        return jsonify({"error": "복원할 항목을 선택하세요."}), 400
+
+    conn = get_conn()
+    try:
+        placeholders = ",".join("?" for _ in ids)
+        conn.execute(f"UPDATE inbox_items SET deleted_at = NULL WHERE id IN ({placeholders})", ids)
         conn.commit()
     finally:
         conn.close()
