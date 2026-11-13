@@ -602,6 +602,31 @@ _dpj_auto_state = {
 _dpj_auto_lock = threading.Lock()
 
 
+# 30분마다 전체 로그를 history로 남겨달라는 요청(사용자: "30분마다 로그
+# 전체 저장해서 history로 남겨") - 콘솔 출력은 창을 닫거나 스크롤 버퍼를
+# 넘기면 사라지니, 실행마다(성공/실패 무관) 파일로 따로 쌓아둔다.
+DPJ_AUTO_HISTORY_PATH = os.path.join(BASE_DIR, 'dpj_auto_history.log')
+# 자동화 한 번이 이 시간을 넘기면 어딘가에 멈춰있는 것으로 보고 포기하고
+# 다음 30분 주기로 넘어간다(사용자가 실제로 겪음: "노트북 보고있는데
+# 30분에한번씩 안하는거같애" - 자동화 한 번이 어딘가에서 안 끝나고
+# 멈춰버리면, 그 다음 time.sleep()이 영원히 시작을 안 해서 이후 주기가
+# 전부 멈춰버린다). 다팔자 자동화 자체에 이미 "동시 실행 방지" 잠금이
+# 있어서, 멈춘 스레드가 나중에 뒤늦게 끝나더라도 다음 주기와 겹쳐도
+# 안전하다.
+DPJ_AUTO_RUN_TIMEOUT_SECONDS = 15 * 60
+
+
+def _append_dpj_history(now, status, log_lines):
+    try:
+        with open(DPJ_AUTO_HISTORY_PATH, 'a', encoding='utf-8') as f:
+            f.write(f"===== {now} ({status}) =====\n")
+            for line in (log_lines or []):
+                f.write(f"{line}\n")
+            f.write("\n")
+    except Exception:
+        pass
+
+
 def _dpj_auto_loop():
     while True:
         time.sleep(DPJ_AUTO_INTERVAL_SECONDS)
@@ -611,15 +636,42 @@ def _dpj_auto_loop():
             # 아무 일도 안 생겼다"로 혼동되지 않게 한다.
             continue
         now = time.strftime('%Y-%m-%d %H:%M:%S')
-        try:
-            result = _dpj_collect_once()
-        except Exception as e:
+
+        # 별도 스레드에서 돌리고 join(timeout=...)으로 기다린다 - 자동화가
+        # 안에서 멈춰있어도(응답 없는 창을 계속 기다리는 등) 이 루프
+        # 자체는 포기하고 다음 30분 주기를 정상적으로 다시 시작할 수 있다.
+        run_box = {}
+
+        def _run():
+            try:
+                run_box['result'] = _dpj_collect_once()
+            except Exception as e:
+                run_box['exception'] = e
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=DPJ_AUTO_RUN_TIMEOUT_SECONDS)
+        if t.is_alive():
+            msg = f'{DPJ_AUTO_RUN_TIMEOUT_SECONDS // 60}분이 지나도 끝나지 않아 멈춘 것으로 보입니다 - 이번 주기는 포기하고 다음 주기로 넘어갑니다.'
+            with _dpj_auto_lock:
+                _dpj_auto_state['last_run_at'] = now
+                _dpj_auto_state['last_error'] = msg
+            print(f"[DPJ 자동수집 {now}] {msg}")
+            _append_dpj_history(now, '시간초과', [msg])
+            _send_ntfy(f'{now} DPJ 자동 수집이 멈춘 것 같습니다(시간 초과) - 다음 주기에 다시 시도합니다.', title='마진보드 DPJ 자동수집 지연')
+            continue
+
+        if 'exception' in run_box:
+            e = run_box['exception']
             with _dpj_auto_lock:
                 _dpj_auto_state['last_run_at'] = now
                 _dpj_auto_state['last_error'] = _friendly_error(e)
             print(f"[DPJ 자동수집 {now}] 실패(예외): {type(e).__name__}: {e}")
+            _append_dpj_history(now, '실패(예외)', [f'{type(e).__name__}: {e}'])
             _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)}', title='마진보드 DPJ 자동수집 실패')
             continue
+
+        result = run_box.get('result') or {}
         notify_new_orders = False
         with _dpj_auto_lock:
             _dpj_auto_state['last_run_at'] = now
@@ -645,6 +697,7 @@ def _dpj_auto_loop():
                         _dpj_auto_state['message'] = f'{now} 자동 수집 - 신규주문 {new_count}건.'
                         _dpj_auto_state['at'] = now
                         notify_new_orders = True
+        _append_dpj_history(now, '성공' if result.get('ok') else '실패', result.get('log'))
         # 폰 알림(ntfy)은 네트워크 호출이라 잠금을 잡은 채로 하지 않는다.
         if _dpj_auto_state['last_error']:
             _send_ntfy(f"{now} DPJ 자동 수집 실패 - {_dpj_auto_state['last_error']}", title='마진보드 DPJ 자동수집 실패')
