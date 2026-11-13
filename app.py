@@ -598,6 +598,7 @@ _dpj_auto_state = {
     'at': '',                # 알림 발생 시각
     'last_run_at': '',       # 가장 최근 자동 수집이 끝난 시각(성공/실패 무관)
     'last_error': '',        # 가장 최근 자동 수집이 실패했으면 그 이유(성공하면 빈 문자열)
+    'consecutive_failures': 0,  # 연달아 실패한 횟수(아래 재시작 안내 판단용) - 성공하면 0으로 리셋
 }
 _dpj_auto_lock = threading.Lock()
 
@@ -625,6 +626,30 @@ def _append_dpj_history(now, status, log_lines):
             f.write("\n")
     except Exception:
         pass
+
+
+def _note_dpj_outcome(failed):
+    """연속 실패 횟수를 추적해서, 일정 횟수 이상 계속 실패하면 재시작을
+    권하는 문구를 돌려준다. 다팔자 자동화의 동시 실행 방지 잠금(_run_lock)
+    은 멈춘 스레드가 쥐고 있으면 다음 주기가 와도 저절로 안 풀린다
+    (사용자 지적: "체크는 할 수 있어도 원상복구 하기는 어려운 거
+    아니냐" - 맞는 말이다. 시간초과 감지는 스케줄러가 다음 주기를
+    정상적으로 다시 시작하게만 해줄 뿐, 멈춰있는 자동화 자체나 그게
+    쥐고 있는 잠금을 코드가 스스로 풀거나 고쳐주지는 못한다 - 그걸
+    억지로 풀면 오히려 두 자동화가 동시에 같은 다팔자 창을 붙잡는 더
+    위험한 사고로 이어질 수 있어서 일부러 안 건드린다). 그래서 감지만
+    하고 끝내지 않고, 실패가 반복되면 "자동 복구가 안 되니 직접
+    재시작해달라"고 명확히 알려준다."""
+    with _dpj_auto_lock:
+        if failed:
+            _dpj_auto_state['consecutive_failures'] += 1
+            n = _dpj_auto_state['consecutive_failures']
+        else:
+            _dpj_auto_state['consecutive_failures'] = 0
+            n = 0
+    if n >= 2:
+        return f' ({n}회 연속 실패 - 자동으로는 복구가 안 될 수 있습니다. 마진보드를 완전히 껐다 다시 켜주세요.)'
+    return ''
 
 
 def _dpj_auto_loop():
@@ -658,7 +683,8 @@ def _dpj_auto_loop():
                 _dpj_auto_state['last_error'] = msg
             print(f"[DPJ 자동수집 {now}] {msg}")
             _append_dpj_history(now, '시간초과', [msg])
-            _send_ntfy(f'{now} DPJ 자동 수집이 멈춘 것 같습니다(시간 초과) - 다음 주기에 다시 시도합니다.', title='마진보드 DPJ 자동수집 지연')
+            hint = _note_dpj_outcome(True)
+            _send_ntfy(f'{now} DPJ 자동 수집이 멈춘 것 같습니다(시간 초과) - 다음 주기에 다시 시도합니다.{hint}', title='마진보드 DPJ 자동수집 지연')
             continue
 
         if 'exception' in run_box:
@@ -668,7 +694,8 @@ def _dpj_auto_loop():
                 _dpj_auto_state['last_error'] = _friendly_error(e)
             print(f"[DPJ 자동수집 {now}] 실패(예외): {type(e).__name__}: {e}")
             _append_dpj_history(now, '실패(예외)', [f'{type(e).__name__}: {e}'])
-            _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)}', title='마진보드 DPJ 자동수집 실패')
+            hint = _note_dpj_outcome(True)
+            _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)}{hint}', title='마진보드 DPJ 자동수집 실패')
             continue
 
         result = run_box.get('result') or {}
@@ -698,9 +725,10 @@ def _dpj_auto_loop():
                         _dpj_auto_state['at'] = now
                         notify_new_orders = True
         _append_dpj_history(now, '성공' if result.get('ok') else '실패', result.get('log'))
+        hint = _note_dpj_outcome(bool(_dpj_auto_state['last_error']))
         # 폰 알림(ntfy)은 네트워크 호출이라 잠금을 잡은 채로 하지 않는다.
         if _dpj_auto_state['last_error']:
-            _send_ntfy(f"{now} DPJ 자동 수집 실패 - {_dpj_auto_state['last_error']}", title='마진보드 DPJ 자동수집 실패')
+            _send_ntfy(f"{now} DPJ 자동 수집 실패 - {_dpj_auto_state['last_error']}{hint}", title='마진보드 DPJ 자동수집 실패')
         elif notify_new_orders:
             _send_ntfy(f"{now} 신규주문 {result.get('new_order_count', 0)}건이 있습니다 - 마진보드에서 확인해주세요.",
                         title='이유상점 Margin Board - 신규주문')
