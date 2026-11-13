@@ -315,7 +315,11 @@ SUBSCRIPTION_LOGO_SLUGS = [
     # simple-icons에 제품 자체인 "claude" slug가 따로 있어서 그걸로 교체함
     # (slugs.md에서 Claude -> claude 직접 확인).
     (re.compile(r"클로드|claude", re.I), "claude", "claude.ai"),
-    (re.compile(r"LGU\+|LG\s*유플러스|유플러스", re.I), None, "lguplus.com"),
+    # lguplus.com의 파비콘은 LG그룹 공통 로고(빨간 원)라 U+ 고유의 마젠타
+    # 색 로고가 아니었음(사용자 확인) - uplus.co.kr이 더 U+ 서비스 전용
+    # 도메인이라 이걸로 바꿔봄. 이것도 아니면 또 알려달라고 해야 함(여기서
+    # 직접 이미지를 못 봐서 100% 확신은 못함).
+    (re.compile(r"LGU\+|LG\s*유플러스|유플러스", re.I), None, "uplus.co.kr"),
     (re.compile(r"롯데렌탈|롯데렌터카", re.I), None, "lotterental.com"),
     (re.compile(r"골프존|golfzon", re.I), None, "golfzon.com"),
     (re.compile(r"카카오|kakao", re.I), "kakao", "kakao.com"),
