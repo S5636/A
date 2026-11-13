@@ -827,14 +827,13 @@ def _attach_match_info(conn, rows, fk_column):
                 "amount": h["amount"],
                 "merchant": h["merchant"],
                 "occurred_at": h["occurred_at"],
-                # 1순위: 알림 자체에 card_id가 이미 저장돼 있으면 그걸로(실제
-                # FK라 last4 재해석보다 더 확실함 - "혜택없음 처리"나 카드/혜택
-                # 자동감지 때 이미 정확히 찍어둔 값). 2순위: 알림 last4로 직접
-                # 찾은 카드(구독성 알림처럼 last4가 아예 없는 경우도 있음).
+                # 1순위: 그 알림 자체에 찍힌 실제 last4로 직접 찾은 카드(실시간
+                # 알림 내용이 곧 사실이므로 최우선). 2순위: 알림에 last4가 없을 때
+                # 저장된 card_id(구독성 알림처럼 last4 자체가 없는 경우 대비).
                 # 3순위: 매칭되던 순간 스냅샷. 셋 다 없으면 빈칸(추측 금지).
                 "card_label": (
-                    (cards_by_id.get(h["card_id"]) if h["card_id"] else None)
-                    or card_label_for(h["last4"])
+                    card_label_for(h["last4"])
+                    or (cards_by_id.get(h["card_id"]) if h["card_id"] else None)
                     or h["matched_card_label"]
                     or None
                 ),
