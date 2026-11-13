@@ -809,6 +809,17 @@ def _snapshot_card_label(conn, table, row_id):
     return row["payment_method"] or ""
 
 
+def _match_time_card_label(conn, item, table, row_id):
+    """매칭되는 바로 그 순간 "내역"에 영구히 찍어둘 결제카드 이름을 정한다.
+    1순위는 그 알림 자체에 실제로 찍힌 last4(실시간 알림 내용이 곧 사실이므로
+    최우선) - last4가 있으면 카드탭에서 바로 찾는다. last4가 아예 없을 때만
+    (구독성 알림처럼 카드정보가 안 찍히는 경우) 고정지출/보험 항목에 등록된
+    카드로 대신 채운다. 한 번 이렇게 찍히면 나중에 등록 카드를 바꾸거나
+    로직이 바뀌어도 이 값은 절대 다시 계산되지 않는다(매칭 당시 그대로 고정)."""
+    label = _card_label_matcher(conn)(item["last4"]) if item else None
+    return label or _snapshot_card_label(conn, table, row_id)
+
+
 def _card_label_matcher(conn):
     """받은 알림의 last4(카드 뒷자리, 3~4자리 섞여 들어옴)를 보고 카드탭에
     등록된 카드의 요약명을 찾아주는 함수를 만들어 돌려준다. 고정지출/보험의
@@ -833,18 +844,13 @@ def _attach_match_info(conn, rows, fk_column):
     과거 달 매칭 내역도 match_history로 전부 붙여서(몇 달치를 한 번에 엑셀로
     올려도) "내역" 버튼으로 지난 달 것까지 다 보이게 한다."""
     current_ym = current_year_month()
-    card_label_for = _card_label_matcher(conn)
-    cards_by_id = {
-        c["id"]: (c["short_name"] or c["name"])
-        for c in conn.execute("SELECT id, name, short_name FROM cards").fetchall()
-    }
 
     result = []
     for r in rows:
         item = dict(r)
         item["payment_method"] = _resolve_payment_method(conn, r["card_id"], r["payment_method"])
         history = conn.execute(
-            f"""SELECT id, amount, merchant, occurred_at, last4, card_id, matched_card_label
+            f"""SELECT id, amount, merchant, occurred_at, matched_card_label
                FROM inbox_items WHERE {fk_column} = ? ORDER BY occurred_at DESC""",
             (r["id"],),
         ).fetchall()
@@ -854,16 +860,11 @@ def _attach_match_info(conn, rows, fk_column):
                 "amount": h["amount"],
                 "merchant": h["merchant"],
                 "occurred_at": h["occurred_at"],
-                # 1순위: 그 알림 자체에 찍힌 실제 last4로 직접 찾은 카드(실시간
-                # 알림 내용이 곧 사실이므로 최우선). 2순위: 알림에 last4가 없을 때
-                # 저장된 card_id(구독성 알림처럼 last4 자체가 없는 경우 대비).
-                # 3순위: 매칭되던 순간 스냅샷. 셋 다 없으면 빈칸(추측 금지).
-                "card_label": (
-                    card_label_for(h["last4"])
-                    or (cards_by_id.get(h["card_id"]) if h["card_id"] else None)
-                    or h["matched_card_label"]
-                    or None
-                ),
+                # 매칭되는 순간(_match_time_card_label) 1순위로 정해서 찍어둔
+                # 값을 그대로 보여준다 - 여기서 last4/card_id로 다시 계산하지
+                # 않는다(한 번 매칭되면 절대 안 바뀌어야 함). 스냅샷이 없으면
+                # (옛날 데이터 등) 빈칸으로 둔다(추측 금지).
+                "card_label": h["matched_card_label"] or None,
             }
             for h in history
         ]
@@ -1057,7 +1058,7 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         if len(narrowed) == 1:
             amount_matches = narrowed
     if len(amount_matches) == 1:
-        label = _snapshot_card_label(conn, table, amount_matches[0]["id"])
+        label = _match_time_card_label(conn, item, table, amount_matches[0]["id"])
         conn.execute(
             f"UPDATE inbox_items SET {fk_column} = ?, matched_card_label = ? WHERE id = ?",
             (amount_matches[0]["id"], label, inbox_id),
@@ -1093,7 +1094,7 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
     if len(name_matches) != 1:
         return False
 
-    label = _snapshot_card_label(conn, table, name_matches[0]["id"])
+    label = _match_time_card_label(conn, item, table, name_matches[0]["id"])
     conn.execute(
         f"UPDATE inbox_items SET {fk_column} = ?, matched_card_label = ? WHERE id = ?",
         (name_matches[0]["id"], label, inbox_id),
@@ -2568,7 +2569,7 @@ def confirm_recurring_match(item_id):
             item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
             if not item or item["recurring_id"] is not None:
                 continue
-            label = _snapshot_card_label(conn, "recurring_payments", item_id)
+            label = _match_time_card_label(conn, item, "recurring_payments", item_id)
             conn.execute(
                 "UPDATE inbox_items SET recurring_id = ?, matched_card_label = ? WHERE id = ?",
                 (item_id, label, inbox_id),
@@ -2831,7 +2832,7 @@ def confirm_insurance_match(item_id):
             item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
             if not item or item["insurance_id"] is not None:
                 continue
-            label = _snapshot_card_label(conn, "insurances", item_id)
+            label = _match_time_card_label(conn, item, "insurances", item_id)
             conn.execute(
                 "UPDATE inbox_items SET insurance_id = ?, matched_card_label = ? WHERE id = ?",
                 (item_id, label, inbox_id),
