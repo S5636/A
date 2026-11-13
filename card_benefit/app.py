@@ -311,9 +311,14 @@ SUBSCRIPTION_LOGO_SLUGS = [
     # 2026-11-14: "구독" 아닌 다른 지출 항목(렌탈/통신비 등)에도 로고를
     # 붙여달라는 요청으로 추가 - 더 이상 구독에만 한정하지 않음.
     (re.compile(r"코웨이|coway", re.I), None, "coway.co.kr"),
-    (re.compile(r"클로드|claude|anthropic", re.I), "anthropic", "claude.ai"),
+    # "anthropic" slug는 회사 로고(다른 마크)라 "클로드" 항목엔 안 맞음 -
+    # simple-icons에 제품 자체인 "claude" slug가 따로 있어서 그걸로 교체함
+    # (slugs.md에서 Claude -> claude 직접 확인).
+    (re.compile(r"클로드|claude", re.I), "claude", "claude.ai"),
     (re.compile(r"LGU\+|LG\s*유플러스|유플러스", re.I), None, "lguplus.com"),
     (re.compile(r"롯데렌탈|롯데렌터카", re.I), None, "lotterental.com"),
+    (re.compile(r"골프존|golfzon", re.I), None, "golfzon.com"),
+    (re.compile(r"카카오|kakao", re.I), "kakao", "kakao.com"),
 ]
 
 

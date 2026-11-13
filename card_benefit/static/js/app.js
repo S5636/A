@@ -197,15 +197,17 @@
     [/애플|apple/i, "apple", "A", "#555555"],
     [/스포티파이|spotify/i, "spotify", "S", "#1DB954"],
     [/코웨이|coway/i, "coway", "C", "#0073C6"],
-    [/클로드|claude|anthropic/i, "anthropic", "C", "#CC785C"],
+    [/클로드|claude/i, "claude", "C", "#CC785C"],
     [/LGU\+|LG\s*유플러스|유플러스/i, "lguplus", "L", "#E6007E"],
     [/롯데렌탈|롯데렌터카/i, "lotterental", "L", "#ED1C24"],
+    [/골프존|golfzon/i, "golfzon", "G", "#1B8A3D"],
+    [/카카오|kakao/i, "kakao", "K", "#FEE500", "#3C1E1E"],
   ];
   function subscriptionBadge(name) {
     const found = SUBSCRIPTION_LOGOS.find(([pattern]) => pattern.test(name || ""));
     if (!found) return "";
-    const [, slug, letter, color] = found;
-    const fallback = `<span style="display:none;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;background:${color};color:#fff;font-size:10px;font-weight:800;">${letter}</span>`;
+    const [, slug, letter, color, textColor] = found;
+    const fallback = `<span style="display:none;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;background:${color};color:${textColor || "#fff"};font-size:10px;font-weight:800;">${letter}</span>`;
     const imgStyle = "width:16px;height:16px;object-fit:contain;background:#fff;border-radius:4px;padding:1px;";
     // 1순위 simple-icons(svg) 실패하면 2순위 서비스 파비콘(png), 그것도
     // 실패하면 색깔 글자 배지로 - 두 단계 다 서버가 아직 못 받아왔거나
