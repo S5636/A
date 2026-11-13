@@ -195,13 +195,13 @@
     [/티빙|tving/i, "tving", "T", "#E6263D"],
     [/유튜브|youtube/i, "youtube", "Y", "#FF0000"],
     [/애플|apple/i, "apple", "A", "#555555"],
-    [/스포티파이|spotify/i, "spotify", "S", "#1DB954"],
+    [/스포티파이|spotify/i, "spotify", "S", "#1ED760"],
     [/코웨이|coway/i, "coway", "C", "#0073C6"],
-    [/클로드|claude/i, "claude", "C", "#CC785C"],
+    [/클로드|claude/i, "claude", "C", "#D97757"],
     [/LGU\+|LG\s*유플러스|유플러스/i, "uplus", "L", "#E6007E"],
     [/롯데렌탈|롯데렌터카/i, "lotterental", "L", "#ED1C24"],
     [/골프존|golfzon/i, "golfzon", "G", "#1B8A3D"],
-    [/카카오|kakao/i, "kakao", "K", "#FEE500", "#3C1E1E"],
+    [/카카오|kakao/i, "kakao", "K", "#FFCD00", "#3C1E1E"],
   ];
   function subscriptionBadge(name) {
     const found = SUBSCRIPTION_LOGOS.find(([pattern]) => pattern.test(name || ""));

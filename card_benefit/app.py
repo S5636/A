@@ -325,6 +325,23 @@ SUBSCRIPTION_LOGO_SLUGS = [
     (re.compile(r"카카오|kakao", re.I), "kakao", "kakao.com"),
 ]
 
+# simple-icons 원본 svg 파일엔 브랜드 색이 안 박혀있어서(순수 모양 데이터만
+# 있고 fill 지정이 없으면 브라우저가 기본값인 검정으로 그림 - 실제로
+# raw.githubusercontent.com에서 netflix.svg/claude.svg 둘 다 직접 받아서
+# <path>에 fill 속성이 전혀 없는 걸 확인함) "로고가 다 흑백이다"라는
+# 신고를 받고서야 알게 됨. simple-icons 자체 데이터(data/simple-icons.json의
+# hex 필드)에서 받아온 공식 브랜드색 - _download_colored_svg가 이걸 svg에
+# 박아 넣는다.
+_SIMPLE_ICON_COLORS = {
+    "netflix": "E50914",
+    "naver": "03C75A",
+    "youtube": "FF0000",
+    "apple": "000000",
+    "spotify": "1ED760",
+    "claude": "D97757",
+    "kakao": "FFCD00",
+}
+
 
 def _log_subscription_logo_error(slug, error):
     try:
@@ -377,12 +394,35 @@ def _fetch_subscription_logos_once():
         with open(dest, "wb") as f:
             f.write(data)
 
+    def _download_colored_svg(url, dest, hex_color):
+        # simple-icons 원본 svg는 색이 안 박혀있어서(순수 모양만, fill 지정
+        # 안 하면 브라우저 기본값인 검정으로 보임) 루트 <svg> 태그에 공식
+        # 브랜드 색을 fill로 박아 넣고 저장한다 - 하위 path들이 자기 fill을
+        # 따로 안 정했으면 이 색을 그대로 물려받아서 검정 대신 브랜드색으로 보임.
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            svg_text = resp.read().decode("utf-8", errors="replace")
+        svg_text = svg_text.replace("<svg ", f'<svg fill="#{hex_color}" ', 1)
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(svg_text)
+
     for file_slug, (si_slug, domain) in needed.items():
         svg_dest = os.path.join(logo_dir, f"{file_slug}.svg")
+        # 예전엔 색 안 박고(검정으로 보이게) 받아서 캐시해둔 적 있어서, fill이
+        # 안 들어있는 옛날 파일이면 지우고 새로 받는다.
+        if si_slug and os.path.exists(svg_dest):
+            try:
+                with open(svg_dest, "r", encoding="utf-8", errors="ignore") as f:
+                    if "fill=" not in f.read(200):
+                        os.remove(svg_dest)
+            except Exception:
+                pass
         if si_slug and not os.path.exists(svg_dest):
             try:
-                _download(
-                    f"https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/{si_slug}.svg", svg_dest
+                _download_colored_svg(
+                    f"https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/{si_slug}.svg",
+                    svg_dest,
+                    _SIMPLE_ICON_COLORS.get(si_slug, "000000"),
                 )
             except Exception as e:
                 _log_subscription_logo_error(f"{file_slug}(simple-icons)", e)
