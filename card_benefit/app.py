@@ -807,14 +807,18 @@ def _attach_match_info(conn, rows, fk_column):
     올려도) "내역" 버튼으로 지난 달 것까지 다 보이게 한다."""
     current_ym = current_year_month()
     card_label_for = _card_label_matcher(conn)
+    cards_by_id = {
+        c["id"]: (c["short_name"] or c["name"])
+        for c in conn.execute("SELECT id, name, short_name FROM cards").fetchall()
+    }
 
     result = []
     for r in rows:
         item = dict(r)
         item["payment_method"] = _resolve_payment_method(conn, r["card_id"], r["payment_method"])
         history = conn.execute(
-            f"""SELECT id, amount, merchant, occurred_at, last4, matched_card_label FROM inbox_items
-               WHERE {fk_column} = ? ORDER BY occurred_at DESC""",
+            f"""SELECT id, amount, merchant, occurred_at, last4, card_id, matched_card_label
+               FROM inbox_items WHERE {fk_column} = ? ORDER BY occurred_at DESC""",
             (r["id"],),
         ).fetchall()
         item["match_history"] = [
@@ -823,14 +827,17 @@ def _attach_match_info(conn, rows, fk_column):
                 "amount": h["amount"],
                 "merchant": h["merchant"],
                 "occurred_at": h["occurred_at"],
-                # 1순위: 알림 자체의 last4로 찾은 카드(가장 정확함).
-                # 2순위: 매칭되던 순간에 찍어둔 스냅샷(matched_card_label) -
-                # 나중에 이 항목의 결제카드를 바꿔도 지난 내역은 안 바뀜.
-                # 둘 다 없으면(옛날 데이터라 스냅샷이 없는 경우) "지금 등록된
-                # 카드"로 대신 보여주던 적이 있었는데, 그건 추측이라 등록이
-                # 꼬여있으면(예: 만료된 카드가 아직 등록만 돼있는 경우) 틀린
-                # 카드를 맞는 것처럼 보여주는 사고가 났다 - 모르면 그냥 빈칸.
-                "card_label": card_label_for(h["last4"]) or h["matched_card_label"] or None,
+                # 1순위: 알림 자체에 card_id가 이미 저장돼 있으면 그걸로(실제
+                # FK라 last4 재해석보다 더 확실함 - "혜택없음 처리"나 카드/혜택
+                # 자동감지 때 이미 정확히 찍어둔 값). 2순위: 알림 last4로 직접
+                # 찾은 카드(구독성 알림처럼 last4가 아예 없는 경우도 있음).
+                # 3순위: 매칭되던 순간 스냅샷. 셋 다 없으면 빈칸(추측 금지).
+                "card_label": (
+                    (cards_by_id.get(h["card_id"]) if h["card_id"] else None)
+                    or card_label_for(h["last4"])
+                    or h["matched_card_label"]
+                    or None
+                ),
             }
             for h in history
         ]
