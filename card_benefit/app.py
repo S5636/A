@@ -282,8 +282,9 @@ def start_stock_monitor():
     threading.Thread(target=_stock_monitor_loop, daemon=True).start()
 
 
-# 구독(지출탭 category='구독') 항목 이름 옆에 실제 브랜드 로고를 붙이고
-# 싶은데, 로고 이미지를 미리 앱 안에 박아두는 대신(저작권 있는 이미지라
+# 지출탭 항목(구독뿐 아니라 렌탈/통신비 등 카테고리 상관없이 전부) 이름
+# 옆에 실제 브랜드 로고를 붙이고 싶은데, 로고 이미지를 미리 앱 안에 박아두는
+# 대신(저작권 있는 이미지라
 # 서버에 넣어두기보다, 공개된 아이콘 모음에서 실행 중인 PC가 직접 받게
 # 하는 게 낫다고 판단) 앱이 실제로 돌아가는 PC에서 1회 자동으로 받아서
 # static/img/sub_logos/ 밑에 캐시해둔다 - 한 번 받으면 그다음부터는 로컬
@@ -307,6 +308,12 @@ SUBSCRIPTION_LOGO_SLUGS = [
     (re.compile(r"유튜브|youtube", re.I), "youtube", "youtube.com"),
     (re.compile(r"애플|apple", re.I), "apple", "apple.com"),
     (re.compile(r"스포티파이|spotify", re.I), "spotify", "spotify.com"),
+    # 2026-11-14: "구독" 아닌 다른 지출 항목(렌탈/통신비 등)에도 로고를
+    # 붙여달라는 요청으로 추가 - 더 이상 구독에만 한정하지 않음.
+    (re.compile(r"코웨이|coway", re.I), None, "coway.co.kr"),
+    (re.compile(r"클로드|claude|anthropic", re.I), "anthropic", "claude.ai"),
+    (re.compile(r"LGU\+|LG\s*유플러스|유플러스", re.I), None, "lguplus.com"),
+    (re.compile(r"롯데렌탈|롯데렌터카", re.I), None, "lotterental.com"),
 ]
 
 
@@ -323,21 +330,19 @@ def _log_subscription_logo_error(slug, error):
 
 
 def _fetch_subscription_logos_once():
-    """등록된 구독 항목 이름에 맞는 로고들을 추려서, 아직 로컬에 없는 것만
-    받아 캐시한다(slug.svg는 simple-icons, slug.png는 그 서비스 공식
-    홈페이지 파비콘 - 프론트가 svg 먼저 시도하고 실패하면 png, 그것도
-    실패하면 색깔 글자 배지로 대체함). 실패해도(인터넷 안 되는 PC, 접속
-    차단 등) 조용히 넘어간다 - 로고는 있으면 좋은 장식일 뿐, 실패했다고
-    앱이 멈추면 안 된다."""
+    """지출탭에 등록된 항목 이름에 맞는 로고들을 추려서(카테고리 상관없이
+    전부 대상), 아직 로컬에 없는 것만 받아 캐시한다(slug.svg는
+    simple-icons, slug.png는 그 서비스 공식 홈페이지 파비콘 - 프론트가
+    svg 먼저 시도하고 실패하면 png, 그것도 실패하면 색깔 글자 배지로
+    대체함). 실패해도(인터넷 안 되는 PC, 접속 차단 등) 조용히 넘어간다 -
+    로고는 있으면 좋은 장식일 뿐, 실패했다고 앱이 멈추면 안 된다."""
     import urllib.request
 
     try:
         conn = get_conn()
         try:
             names = [
-                r["name"] for r in conn.execute(
-                    "SELECT DISTINCT name FROM recurring_payments WHERE category = '구독'"
-                ).fetchall()
+                r["name"] for r in conn.execute("SELECT DISTINCT name FROM recurring_payments").fetchall()
             ]
         finally:
             conn.close()

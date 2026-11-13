@@ -179,10 +179,11 @@
     return shortCardName(card.name);
   }
 
-  // 구독 항목 이름 옆에 실제 브랜드 로고를 붙인다 - 서버(앱이 돌아가는
-  // PC)가 simple-icons CDN에서 받아서 static/img/sub_logos/에 캐시해둔
-  // svg 파일을 <img>로 먼저 시도하고, 아직 못 받았거나(막 추가해서
-  // 서버 재시작 전) 실패했으면 색깔 글자 배지로 자동 대체한다.
+  // 지출 항목 이름 옆에 실제 브랜드 로고를 붙인다(카테고리 상관없이 이름이
+  // 걸리면 다 붙임) - 서버(앱이 돌아가는 PC)가 simple-icons CDN/파비콘에서
+  // 받아서 static/img/sub_logos/에 캐시해둔 svg 파일을 <img>로 먼저
+  // 시도하고, 아직 못 받았거나(막 추가해서 서버 재시작 전) 실패했으면
+  // 색깔 글자 배지로 자동 대체한다.
   const SUBSCRIPTION_LOGOS = [
     [/넷플릭스|netflix/i, "netflix", "N", "#E50914"],
     [/디즈니|disney/i, "disneyplus", "D", "#113CCF"],
@@ -195,9 +196,12 @@
     [/유튜브|youtube/i, "youtube", "Y", "#FF0000"],
     [/애플|apple/i, "apple", "A", "#555555"],
     [/스포티파이|spotify/i, "spotify", "S", "#1DB954"],
+    [/코웨이|coway/i, "coway", "C", "#0073C6"],
+    [/클로드|claude|anthropic/i, "anthropic", "C", "#CC785C"],
+    [/LGU\+|LG\s*유플러스|유플러스/i, "lguplus", "L", "#E6007E"],
+    [/롯데렌탈|롯데렌터카/i, "lotterental", "L", "#ED1C24"],
   ];
-  function subscriptionBadge(category, name) {
-    if (category !== "구독") return "";
+  function subscriptionBadge(name) {
     const found = SUBSCRIPTION_LOGOS.find(([pattern]) => pattern.test(name || ""));
     if (!found) return "";
     const [, slug, letter, color] = found;
@@ -1397,7 +1401,7 @@
           ${item.payment_day ? `<div class="loan-day-badge" title="매월 결제일">${item.payment_day}</div>` : ""}
           <div class="card-text-stack">
             <div class="card-text-row">
-              <span class="card-title-scroll" style="display:flex;align-items:center;gap:4px;">${subscriptionBadge(item.category, item.name)}<span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.name)}</span></span>
+              <span class="card-title-scroll" style="display:flex;align-items:center;gap:4px;">${subscriptionBadge(item.name)}<span class="card-title" style="${item.active ? "" : "opacity:.5;text-decoration:line-through;"}">${escapeHtml(item.name)}</span></span>
               <span class="card-head-right">
                 ${item.category ? `<span class="loan-type-badge">${escapeHtml(item.category)}${item.category === "구독" && item.billing_cycle === "연간" ? " · 연간" : ""}</span>` : ""}
                 ${item.active ? "" : `<span class="loan-type-badge" style="color:var(--text-muted);background:var(--surface-3);">중단</span>`}
