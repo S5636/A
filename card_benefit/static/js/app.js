@@ -201,6 +201,9 @@
     [/LGU\+|LG\s*유플러스|유플러스/i, "uplus", "L", "#E6007E"],
     [/롯데렌탈|롯데렌터카/i, "lotterental", "L", "#ED1C24"],
     [/골프존|golfzon/i, "golfzon", "G", "#1B8A3D"],
+    // "카카오 골프"는 계열사 카카오VX 서비스라 일반 카카오 로고와 다름 -
+    // 아래 generic 카카오 패턴보다 먼저 와야 함(find가 첫 매칭에서 멈춤).
+    [/카카오\s*골프|kakaovx/i, "kakaovx", "K", "#1B8A3D"],
     [/카카오|kakao/i, "kakao", "K", "#FFCD00", "#3C1E1E"],
   ];
   function subscriptionBadge(name) {

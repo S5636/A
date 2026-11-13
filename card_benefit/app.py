@@ -322,6 +322,10 @@ SUBSCRIPTION_LOGO_SLUGS = [
     (re.compile(r"LGU\+|LG\s*유플러스|유플러스", re.I), None, "uplus.co.kr"),
     (re.compile(r"롯데렌탈|롯데렌터카", re.I), None, "lotterental.com"),
     (re.compile(r"골프존|golfzon", re.I), None, "golfzon.com"),
+    # "카카오 골프"는 카카오(톡) 자체가 아니라 계열사 카카오VX의 스크린골프
+    # 서비스라 로고가 다름(사용자 지적) - 일반 "카카오" 패턴보다 먼저 와야
+    # "카카오 골프"가 이쪽으로 먼저 잡힘(순서대로 첫 매칭에서 멈추는 구조).
+    (re.compile(r"카카오\s*골프|kakaovx", re.I), None, "kakaovx.com"),
     (re.compile(r"카카오|kakao", re.I), "kakao", "kakao.com"),
 ]
 
@@ -406,6 +410,8 @@ def _fetch_subscription_logos_once():
         with open(dest, "w", encoding="utf-8") as f:
             f.write(svg_text)
 
+    status_lines = []  # 이번 실행에서 각 slug가 실제로 어떻게 됐는지(성공/실패/스킵) 전부 남김
+
     for file_slug, (si_slug, domain) in needed.items():
         svg_dest = os.path.join(logo_dir, f"{file_slug}.svg")
         # 예전엔 색 안 박고(검정으로 보이게) 받아서 캐시해둔 적 있어서, fill이
@@ -417,24 +423,53 @@ def _fetch_subscription_logos_once():
                         os.remove(svg_dest)
             except Exception:
                 pass
-        if si_slug and not os.path.exists(svg_dest):
+        if si_slug and os.path.exists(svg_dest):
+            status_lines.append(f"{file_slug}.svg: 이미 있음(스킵)")
+        elif si_slug:
             try:
                 _download_colored_svg(
                     f"https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/{si_slug}.svg",
                     svg_dest,
                     _SIMPLE_ICON_COLORS.get(si_slug, "000000"),
                 )
+                status_lines.append(f"{file_slug}.svg: simple-icons({si_slug})에서 새로 받음")
             except Exception as e:
                 _log_subscription_logo_error(f"{file_slug}(simple-icons)", e)
+                status_lines.append(f"{file_slug}.svg: simple-icons 받기 실패 - {e}")
+        else:
+            status_lines.append(f"{file_slug}.svg: si_slug 없음(파비콘/로고 API만 시도)")
 
         png_dest = os.path.join(logo_dir, f"{file_slug}.png")
-        if not os.path.exists(png_dest):
+        if os.path.exists(png_dest):
+            status_lines.append(f"{file_slug}.png: 이미 있음(스킵) - 다시 받으려면 파일 지우고 재시작")
+        else:
+            # 2026-11-14: 구글 파비콘(s2/favicons)이 코웨이/U+/롯데렌탈/골프존
+            # 같은 국내 서비스 도메인에선 자주 엉뚱하거나(다른 사이트 로고) 너무
+            # generic한(사이트 전용이 아닌) 아이콘을 돌려준다는 신고를 받아서
+            # (예: U+ -> LG그룹 공통 로고) clearbit 로고 API를 1순위로 바꾸고,
+            # 구글 파비콘은 그것도 실패했을 때만 쓰는 최후 수단으로 내림.
             try:
-                _download(
-                    f"https://www.google.com/s2/favicons?domain={domain}&sz=64", png_dest
-                )
-            except Exception as e:
-                _log_subscription_logo_error(f"{file_slug}(favicon:{domain})", e)
+                _download(f"https://logo.clearbit.com/{domain}", png_dest)
+                status_lines.append(f"{file_slug}.png: clearbit({domain})에서 새로 받음")
+            except Exception as e1:
+                try:
+                    _download(
+                        f"https://www.google.com/s2/favicons?domain={domain}&sz=128", png_dest
+                    )
+                    status_lines.append(
+                        f"{file_slug}.png: clearbit 실패({e1}) - 구글 파비콘({domain})으로 대신 받음"
+                    )
+                except Exception as e2:
+                    _log_subscription_logo_error(f"{file_slug}(favicon:{domain})", e2)
+                    status_lines.append(f"{file_slug}.png: clearbit·구글 파비콘 둘 다 실패 - {e2}")
+
+    try:
+        debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sub_logo_debug.log")
+        with open(debug_path, "w", encoding="utf-8") as f:
+            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 지출 로고 확인 결과\n")
+            f.write("\n".join(status_lines) + "\n")
+    except Exception:
+        pass
 
 
 def start_subscription_logo_fetch():
