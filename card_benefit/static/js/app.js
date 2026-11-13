@@ -201,23 +201,28 @@
     [/LGU\+|LG\s*유플러스|유플러스/i, "uplus", "L", "#E6007E"],
     [/롯데렌탈|롯데렌터카/i, "lotterental", "L", "#ED1C24"],
     [/골프존|golfzon/i, "golfzon", "G", "#1B8A3D"],
-    // "카카오 골프"는 계열사 카카오VX 서비스라 일반 카카오 로고와 다름 -
-    // 아래 generic 카카오 패턴보다 먼저 와야 함(find가 첫 매칭에서 멈춤).
-    [/카카오\s*골프|kakaovx/i, "kakaovx", "K", "#1B8A3D"],
+    // "카카오 골프" 전용 도메인(kakaovx.com)이 404라 못 찾아서, 정확한
+    // 도메인 확인 전까진 일반 카카오 로고로 대신 보여줌.
     [/카카오|kakao/i, "kakao", "K", "#FFCD00", "#3C1E1E"],
   ];
+  // 로고 파일이 서버에서 새로 받아져도(흑백 -> 색 등) 브라우저가 예전
+  // 이미지를 계속 캐시해서 안 바뀐 것처럼 보이는 문제가 있어서, js/css랑
+  // 같은 버전 문자열(파일 바뀔 때마다 값이 바뀜)을 쿼리로 붙여 강제로
+  // 새로 받게 한다.
+  const LOGO_VERSION = (document.body && document.body.dataset.assetVersion) || "";
   function subscriptionBadge(name) {
     const found = SUBSCRIPTION_LOGOS.find(([pattern]) => pattern.test(name || ""));
     if (!found) return "";
     const [, slug, letter, color, textColor] = found;
     const fallback = `<span style="display:none;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;background:${color};color:${textColor || "#fff"};font-size:10px;font-weight:800;">${letter}</span>`;
     const imgStyle = "width:16px;height:16px;object-fit:contain;background:#fff;border-radius:4px;padding:1px;";
+    const v = LOGO_VERSION ? `?v=${LOGO_VERSION}` : "";
     // 1순위 simple-icons(svg) 실패하면 2순위 서비스 파비콘(png), 그것도
     // 실패하면 색깔 글자 배지로 - 두 단계 다 서버가 아직 못 받아왔거나
     // (앱 막 켠 직후) 인터넷이 안 되는 경우에 대비.
     return `<span style="display:inline-flex;width:16px;height:16px;flex-shrink:0;">` +
-      `<img src="/static/img/sub_logos/${slug}.svg" data-stage="svg" style="${imgStyle}" ` +
-      `onerror="if(this.dataset.stage==='svg'){this.dataset.stage='png';this.src='/static/img/sub_logos/${slug}.png';}` +
+      `<img src="/static/img/sub_logos/${slug}.svg${v}" data-stage="svg" style="${imgStyle}" ` +
+      `onerror="if(this.dataset.stage==='svg'){this.dataset.stage='png';this.src='/static/img/sub_logos/${slug}.png${v}';}` +
       `else{this.style.display='none';this.nextElementSibling.style.display='inline-flex';}">${fallback}</span>`;
   }
 

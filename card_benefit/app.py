@@ -322,10 +322,10 @@ SUBSCRIPTION_LOGO_SLUGS = [
     (re.compile(r"LGU\+|LG\s*유플러스|유플러스", re.I), None, "uplus.co.kr"),
     (re.compile(r"롯데렌탈|롯데렌터카", re.I), None, "lotterental.com"),
     (re.compile(r"골프존|golfzon", re.I), None, "golfzon.com"),
-    # "카카오 골프"는 카카오(톡) 자체가 아니라 계열사 카카오VX의 스크린골프
-    # 서비스라 로고가 다름(사용자 지적) - 일반 "카카오" 패턴보다 먼저 와야
-    # "카카오 골프"가 이쪽으로 먼저 잡힘(순서대로 첫 매칭에서 멈추는 구조).
-    (re.compile(r"카카오\s*골프|kakaovx", re.I), None, "kakaovx.com"),
+    # "카카오 골프"는 계열사 카카오VX 서비스라 실제로는 로고가 다른데,
+    # kakaovx.com으로 시도했다가 404(사용자 로그로 확인)라 도메인을
+    # 못 찾았음 - 정확한 도메인/앱 이름 확인 전까진 일반 카카오 로고로
+    # 대신 보여준다(틀린 추측으로 또 깨진 이미지 띄우는 것보단 나음).
     (re.compile(r"카카오|kakao", re.I), "kakao", "kakao.com"),
 ]
 
@@ -461,25 +461,22 @@ def _fetch_subscription_logos_once():
         if os.path.exists(png_dest):
             status_lines.append(f"{file_slug}.png: 이미 있음(스킵) - 다시 받으려면 파일 지우고 재시작")
         else:
-            # 2026-11-14: 구글 파비콘(s2/favicons)이 코웨이/U+/롯데렌탈/골프존
-            # 같은 국내 서비스 도메인에선 자주 엉뚱하거나(다른 사이트 로고) 너무
-            # generic한(사이트 전용이 아닌) 아이콘을 돌려준다는 신고를 받아서
-            # (예: U+ -> LG그룹 공통 로고) clearbit 로고 API를 1순위로 바꾸고,
-            # 구글 파비콘은 그것도 실패했을 때만 쓰는 최후 수단으로 내림.
+            # 2026-11-14: clearbit 로고 API를 1순위로 썼었는데, 사용자가
+            # 보내준 실제 로그에서 전부 getaddrinfo 실패로 나와서 찾아보니
+            # logo.clearbit.com 자체가 2025-12-08에 완전히 서비스 종료됨
+            # (HubSpot이 Clearbit을 흡수하면서 무료 로고 API를 닫음) - 내가
+            # 이미 죽은 서비스를 1순위로 넣는 실수를 했음. 완전히 빼고 구글
+            # 파비콘 하나로 되돌림("로고가 틀렸다"는 신고의 진짜 원인은
+            # 파비콘 품질이 아니라 브라우저가 예전 이미지를 계속 캐시해서
+            # 안 바뀐 것처럼 보인 거였음 - LOGO_VERSION 캐시버스팅으로 따로 고침).
             try:
-                _download(f"https://logo.clearbit.com/{domain}", png_dest)
-                status_lines.append(f"{file_slug}.png: clearbit({domain})에서 새로 받음")
-            except Exception as e1:
-                try:
-                    _download(
-                        f"https://www.google.com/s2/favicons?domain={domain}&sz=128", png_dest
-                    )
-                    status_lines.append(
-                        f"{file_slug}.png: clearbit 실패({e1}) - 구글 파비콘({domain})으로 대신 받음"
-                    )
-                except Exception as e2:
-                    _log_subscription_logo_error(f"{file_slug}(favicon:{domain})", e2)
-                    status_lines.append(f"{file_slug}.png: clearbit·구글 파비콘 둘 다 실패 - {e2}")
+                _download(
+                    f"https://www.google.com/s2/favicons?domain={domain}&sz=128", png_dest
+                )
+                status_lines.append(f"{file_slug}.png: 구글 파비콘({domain})에서 받음")
+            except Exception as e:
+                _log_subscription_logo_error(f"{file_slug}(favicon:{domain})", e)
+                status_lines.append(f"{file_slug}.png: 구글 파비콘 받기 실패 - {e}")
 
     try:
         debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sub_logo_debug.log")
@@ -2063,9 +2060,20 @@ def index():
     # 업데이트할 때마다 폰 브라우저가 예전에 캐시해둔 js/css를 계속
     # 쓰는 바람에 화면이 안 바뀐 것처럼 보이는 문제가 있어서, 파일이
     # 바뀔 때마다 값이 달라지는 버전 문자열을 붙여 강제로 새로 받게 한다.
+    # 지출 로고 이미지(static/img/sub_logos/*)도 똑같은 문제(서버 파일은
+    # 새로 받아졌는데 브라우저가 예전 흑백 이미지를 계속 캐시해서 보여줌)가
+    # 있어서, 그 폴더 안에서 가장 최근에 바뀐 파일 시각도 같이 반영한다.
     js_path = os.path.join(app.static_folder, "js", "app.js")
     css_path = os.path.join(app.static_folder, "css", "style.css")
-    asset_version = str(int(max(os.path.getmtime(js_path), os.path.getmtime(css_path))))
+    mtimes = [os.path.getmtime(js_path), os.path.getmtime(css_path)]
+    logo_dir = os.path.join(app.static_folder, "img", "sub_logos")
+    if os.path.isdir(logo_dir):
+        for fname in os.listdir(logo_dir):
+            try:
+                mtimes.append(os.path.getmtime(os.path.join(logo_dir, fname)))
+            except OSError:
+                pass
+    asset_version = str(int(max(mtimes)))
     resp = make_response(render_template("index.html", asset_version=asset_version))
     # 이 HTML 자체를 폰 브라우저가 캐시해버리면 새 버전 번호가 붙은
     # 링크조차 못 받아보게 되므로, 페이지 본문은 절대 캐시하지 않게 한다.
