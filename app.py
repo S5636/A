@@ -617,6 +617,7 @@ def _dpj_auto_loop():
             with _dpj_auto_lock:
                 _dpj_auto_state['last_run_at'] = now
                 _dpj_auto_state['last_error'] = _friendly_error(e)
+            print(f"[DPJ 자동수집 {now}] 실패(예외): {type(e).__name__}: {e}")
             _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)}', title='마진보드 DPJ 자동수집 실패')
             continue
         notify_new_orders = False
@@ -624,6 +625,14 @@ def _dpj_auto_loop():
             _dpj_auto_state['last_run_at'] = now
             if not result.get('ok'):
                 _dpj_auto_state['last_error'] = (result.get('log') or ['알 수 없는 오류'])[-1]
+                # 폰 알림엔 마지막 한 줄만 보내는데(길면 안 보여서), 실패
+                # 원인을 제대로 찾으려면 보통 그 직전의 상세 진단(화면에
+                # 보이는 글자 목록 등)까지 다 봐야 한다 - 콘솔(이 창)에는
+                # 전체 로그를 그대로 남겨서, 창을 계속 켜두는 한 스크롤해서
+                # 볼 수 있게 한다.
+                print(f"[DPJ 자동수집 {now}] 실패 - 전체 로그:")
+                for line in (result.get('log') or []):
+                    print(f"  {line}")
             else:
                 upload_err = (result.get('upload') or {}).get('error')
                 if upload_err:
