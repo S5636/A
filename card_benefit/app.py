@@ -4759,27 +4759,59 @@ def create_inbox_item_from_image():
     except Exception:
         return jsonify({"error": "이미지를 읽을 수 없습니다."}), 400
 
+    pil_img = None
     try:
-        # 깨끗한 캡쳐 화면이어도 폰 해상도 그대로면 숫자(특히 얇은 글씨)가
-        # 작아서 오인식이 잦다는 지적을 받아서, 원본이 작으면 확대해서
-        # 넘긴다 - OCR이 글자를 더 크고 선명하게 보게 해주는 흔한 전처리.
         from PIL import Image
         import numpy as np
-        img = Image.open(BytesIO(image_bytes)).convert("RGB")
+        pil_img = Image.open(BytesIO(image_bytes)).convert("RGB")
         target_width = 1600
-        if img.width < target_width:
-            scale = target_width / img.width
+        if pil_img.width < target_width:
+            scale = target_width / pil_img.width
             resample = getattr(Image, "Resampling", Image).LANCZOS
-            img = img.resize((target_width, round(img.height * scale)), resample)
-        ocr_input = np.array(img)
+            pil_img = pil_img.resize((target_width, round(pil_img.height * scale)), resample)
+        ocr_input = np.array(pil_img)
     except Exception:
         ocr_input = image_bytes  # 전처리 실패해도 원본 그대로는 시도
 
     try:
         reader = _get_ocr_reader()
-        lines = reader.readtext(ocr_input, detail=0, paragraph=False)
+        detections = reader.readtext(ocr_input, paragraph=False)  # detail=1(기본): [bbox, text, 신뢰도]
     except Exception as e:
         return jsonify({"error": f"글자 인식에 실패했습니다: {e}"}), 500
+
+    # 날짜/카드번호처럼 숫자·구분기호 위주인 줄은, 전체 화면을 한 번에 읽을
+    # 때보다 그 부분만 숫자 전용으로 다시 좁혀서 읽으면 오인식이 줄어든다
+    # (실제로 "01:01"을 "07.07"로 잘못 읽은 사례가 있어서 추가함 - 확대만
+    # 해서는 안 고쳐졌었음). 그 줄의 bbox만 크게 잘라 확대하고, 글자 종류를
+    # 숫자/구분기호로 제한해서(allowlist) 다시 읽어 더 정확하면 바꿔치기한다.
+    # 실패해도(크롭 실패, 재인식 실패 등) 원래 읽은 글자를 그대로 쓴다.
+    _NUMBER_LINE_RE = re.compile(r"^[\d\s:./\-]{4,}$")
+    lines = []
+    for item in detections:
+        bbox, text, _conf = item
+        if pil_img is not None and _NUMBER_LINE_RE.match(text.strip() or ""):
+            try:
+                xs = [p[0] for p in bbox]
+                ys = [p[1] for p in bbox]
+                pad = 8
+                x0, y0 = max(0, int(min(xs)) - pad), max(0, int(min(ys)) - pad)
+                x1, y1 = int(max(xs)) + pad, int(max(ys)) + pad
+                crop = pil_img.crop((x0, y0, x1, y1))
+                if crop.height:
+                    zoom = max(1, min(6, 120 // crop.height))
+                    if zoom > 1:
+                        resample = getattr(Image, "Resampling", Image).LANCZOS
+                        crop = crop.resize((crop.width * zoom, crop.height * zoom), resample)
+                    refined = reader.readtext(
+                        np.array(crop), detail=0, paragraph=True,
+                        allowlist="0123456789:./-",
+                    )
+                    refined_text = " ".join(refined).strip()
+                    if refined_text:
+                        text = refined_text
+            except Exception:
+                pass
+        lines.append(text)
 
     raw_text = "\n".join(lines)
     parsed = _parse_receipt_ocr(lines)
