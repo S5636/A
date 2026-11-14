@@ -4656,6 +4656,141 @@ def import_usage():
     return _import_statement(ws, header_info)
 
 
+# ---- 영수증/결제내역 캡쳐 OCR 등록 ----
+# 엑셀 업로드랑 같은 목적(과거/누락 결제를 보충)인데, 엑셀이 없고 캡쳐
+# 한 장밖에 없을 때를 위해 추가함(2026-11-14). 카드사/은행 앱마다 레이아웃이
+# 완전히 달라서 "한 줄짜리 문자 알림"용 parse_notification과는 다른 전용
+# 파서가 필요함 - 이름표(라벨)+값이 서로 다른 줄에 떨어져 있는 구조라서,
+# 화면에서 제일 먼저 나오는 "OOO원"(단, 부가세/누적금액 같은 금칙어 라벨
+# 바로 다음 건 제외)을 진짜 결제금액으로 보고, 그 바로 앞 줄을 가맹점명으로
+# 쓴다. 확신 없는 건 빈칸으로 둔다(추측 금지) - raw_text에 OCR 원문을 전부
+# 남겨서 틀렸으면 사람이 바로 알아챌 수 있게 한다.
+_RECEIPT_AMOUNT_BLACKLIST_LABELS = [
+    "부가세", "누적금액", "포인트", "할인", "캐시백", "적립", "수수료", "이자", "잔액",
+    "현지금액", "합계포인트", "공급가액",
+]
+_RECEIPT_CHROME_LABELS = {
+    "카드매출전표", "상세내역", "결제내역", "거래내역", "이용내역", "결제상세",
+    "주문상세", "구매내역", "영수증",
+}
+_OCR_READER = None
+
+
+def _get_ocr_reader():
+    """easyocr Reader는 생성(모델 로딩)이 느려서 한 번만 만들고 재사용한다
+    (서버 켜져 있는 동안 계속). 첫 호출 때 모델을 인터넷에서 받아오므로
+    그때만 느리고 그다음부턴 로컬에 캐시돼서 빠름."""
+    global _OCR_READER
+    if _OCR_READER is None:
+        import easyocr
+        _OCR_READER = easyocr.Reader(["ko", "en"], gpu=False)
+    return _OCR_READER
+
+
+def _parse_receipt_ocr(lines):
+    amount = None
+    merchant = ""
+    occurred_at = None
+    last4 = ""
+    approval_no = ""
+    prev_text = ""
+    for raw_line in lines:
+        text = (raw_line or "").strip()
+        if not text:
+            continue
+
+        if amount is None:
+            m = re.match(r"^([1-9][\d,]*)\s*원$", text)
+            if m and not any(bad in prev_text for bad in _RECEIPT_AMOUNT_BLACKLIST_LABELS):
+                try:
+                    amount = float(m.group(1).replace(",", ""))
+                    if prev_text and prev_text not in _RECEIPT_CHROME_LABELS:
+                        merchant = prev_text
+                except ValueError:
+                    pass
+
+        if occurred_at is None:
+            dm = re.search(r"(\d{2})[.\-](\d{1,2})[.\-](\d{1,2})\.?\s*(\d{1,2}:\d{2}(?::\d{2})?)?", text)
+            if dm:
+                year = f"20{dm.group(1)}"
+                month = dm.group(2).zfill(2)
+                day = dm.group(3).zfill(2)
+                time_part = dm.group(4) or "00:00"
+                if time_part.count(":") == 1:
+                    time_part += ":00"
+                occurred_at = f"{year}-{month}-{day} {time_part}"
+
+        if not last4:
+            lm = re.search(r"-(\d{4})\s*$", text) or re.search(r"(\d{3,4})\s*[*•]\s*$", text)
+            if lm:
+                last4 = lm.group(1)
+
+        if prev_text == "승인번호" and re.match(r"^\d+$", text):
+            approval_no = text
+
+        prev_text = text
+
+    return {
+        "amount": amount,
+        "merchant": merchant,
+        "occurred_at": occurred_at,
+        "last4": last4,
+        "approval_no": approval_no,
+    }
+
+
+@app.route("/api/inbox/from-image", methods=["POST"])
+def create_inbox_item_from_image():
+    """카드매출전표/카드사·은행 앱 상세내역 캡쳐 한 장을 올리면 글자를 읽어서
+    "받은 결제 알림" 큐에 등록한다."""
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "이미지를 선택하세요."}), 400
+    try:
+        image_bytes = file.read()
+    except Exception:
+        return jsonify({"error": "이미지를 읽을 수 없습니다."}), 400
+
+    try:
+        reader = _get_ocr_reader()
+        lines = reader.readtext(image_bytes, detail=0, paragraph=False)
+    except Exception as e:
+        return jsonify({"error": f"글자 인식에 실패했습니다: {e}"}), 500
+
+    raw_text = "\n".join(lines)
+    parsed = _parse_receipt_ocr(lines)
+    if parsed["amount"] is None:
+        return jsonify({
+            "error": "금액을 못 읽었습니다. 더 선명한 캡쳐로 다시 올리거나, "
+                     "필요하면 직접 알림을 추가해주세요.",
+            "ocr_text": raw_text,
+        }), 400
+
+    occurred_at = parsed["occurred_at"] or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            """INSERT INTO inbox_items
+               (raw_text, amount, last4, merchant, occurred_at, approval_no, source, status)
+               VALUES (?, ?, ?, ?, ?, ?, 'screenshot', 'pending')""",
+            (raw_text, parsed["amount"], parsed["last4"], parsed["merchant"], occurred_at,
+             parsed["approval_no"]),
+        )
+        _try_auto_match_all(conn, cur.lastrowid)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = serialize_full()
+    result["ocr_preview"] = {
+        "amount": parsed["amount"],
+        "merchant": parsed["merchant"],
+        "occurred_at": occurred_at,
+        "last4": parsed["last4"],
+    }
+    return jsonify(result)
+
+
 init_db()
 apply_startup_data_fixes()
 

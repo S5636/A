@@ -2761,6 +2761,41 @@
     importFile.value = "";
   });
 
+  const importImageFile = document.getElementById("import-image-file");
+  const importImageLog = document.getElementById("import-image-log");
+
+  importImageFile.addEventListener("change", async () => {
+    const file = importImageFile.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    importImageLog.innerHTML = `<div class="upload-log-item">글자 읽는 중... (처음 한 번은 오래 걸릴 수 있음)</div>`;
+    let data;
+    try {
+      const res = await fetch("/api/inbox/from-image", { method: "POST", body: formData });
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || "등록 실패");
+    } catch (e) {
+      importImageLog.innerHTML = `<div class="upload-log-item err">${escapeHtml(e.message)}</div>`;
+      importImageFile.value = "";
+      return;
+    }
+
+    state = data;
+    render();
+
+    const p = data.ocr_preview || {};
+    // 레이아웃이 카드사/은행 앱마다 달라서 완벽하게는 못 읽을 수 있어서,
+    // 뭘로 읽었는지 바로 보여줘서 틀렸으면 바로 알아챌 수 있게 한다.
+    importImageLog.innerHTML = `<div class="upload-log-item">` +
+      `읽은 내용: ${p.amount != null ? fmt(p.amount) + "원" : "(금액 못 읽음)"}` +
+      `${p.merchant ? " · " + escapeHtml(p.merchant) : ""}${p.occurred_at ? " · " + escapeHtml(p.occurred_at) : ""} ` +
+      `- 큐에 등록됨, 아래 "받은 결제 알림"에서 확인하세요.</div>`;
+    importImageFile.value = "";
+  });
+
   [cardModal, benefitModal, useModal, assignModal, webhookModal, perfModal, loanModal, loanPaymentModal, recurringModal].forEach((modal) => {
     modal.addEventListener("click", (e) => {
       if (e.target === modal) modal.classList.remove("open");
