@@ -7,10 +7,16 @@ rem python.exe child process, not just the cmd window itself. This window's
 rem title is not set yet (set just below), so only an "old" window matches.
 rem NOTE: keep this file plain ASCII only - Korean text here breaks on some
 rem Windows codepages and was seen to corrupt/garble commands in testing.
-taskkill /F /T /FI "WINDOWTITLE eq Card Benefit Checker" >nul 2>nul
+rem Printed on purpose (not >nul) so a failure is visible instead of silent.
+echo Checking for a previous window/server...
+taskkill /F /T /FI "WINDOWTITLE eq Card Benefit Checker"
+set FOUND_OLD_PORT=0
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5050 ^| findstr LISTENING') do (
-    taskkill /F /T /PID %%a >nul 2>nul
+    echo Found old server on port 5050, PID %%a - stopping it.
+    set FOUND_OLD_PORT=1
+    taskkill /F /T /PID %%a
 )
+if "%FOUND_OLD_PORT%"=="0" echo No old server was using port 5050.
 
 title Card Benefit Checker
 

@@ -4752,8 +4752,24 @@ def create_inbox_item_from_image():
         return jsonify({"error": "이미지를 읽을 수 없습니다."}), 400
 
     try:
+        # 깨끗한 캡쳐 화면이어도 폰 해상도 그대로면 숫자(특히 얇은 글씨)가
+        # 작아서 오인식이 잦다는 지적을 받아서, 원본이 작으면 확대해서
+        # 넘긴다 - OCR이 글자를 더 크고 선명하게 보게 해주는 흔한 전처리.
+        from PIL import Image
+        import numpy as np
+        img = Image.open(BytesIO(image_bytes)).convert("RGB")
+        target_width = 1600
+        if img.width < target_width:
+            scale = target_width / img.width
+            resample = getattr(Image, "Resampling", Image).LANCZOS
+            img = img.resize((target_width, round(img.height * scale)), resample)
+        ocr_input = np.array(img)
+    except Exception:
+        ocr_input = image_bytes  # 전처리 실패해도 원본 그대로는 시도
+
+    try:
         reader = _get_ocr_reader()
-        lines = reader.readtext(image_bytes, detail=0, paragraph=False)
+        lines = reader.readtext(ocr_input, detail=0, paragraph=False)
     except Exception as e:
         return jsonify({"error": f"글자 인식에 실패했습니다: {e}"}), 500
 
