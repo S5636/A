@@ -4710,15 +4710,23 @@ def _parse_receipt_ocr(lines):
                     pass
 
         if occurred_at is None:
-            dm = re.search(r"(\d{2})[.\-](\d{1,2})[.\-](\d{1,2})\.?\s*(\d{1,2}:\d{2}(?::\d{2})?)?", text)
+            # 시간 구분자로 ":"가 와야 하는데 OCR이 "."로 잘못 읽는 경우가
+            # 있어서(실제로 "01:01"을 "07.07"로 오인식한 사례 발견) 둘 다
+            # 받아준다. 그리고 월/일/시/분이 말이 안 되는 값(월 71 같은)이면
+            # OCR이 숫자를 잘못 읽은 거니 그 날짜는 통째로 버린다(엉뚱한
+            # 날짜를 저장하느니 빈칸이 낫다 - 추측 금지).
+            dm = re.search(
+                r"(\d{2})[.\-](\d{1,2})[.\-](\d{1,2})\.?\s*(?:(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?)?",
+                text,
+            )
             if dm:
-                year = f"20{dm.group(1)}"
-                month = dm.group(2).zfill(2)
-                day = dm.group(3).zfill(2)
-                time_part = dm.group(4) or "00:00"
-                if time_part.count(":") == 1:
-                    time_part += ":00"
-                occurred_at = f"{year}-{month}-{day} {time_part}"
+                month, day = int(dm.group(2)), int(dm.group(3))
+                if 1 <= month <= 12 and 1 <= day <= 31:
+                    hour = int(dm.group(4)) if dm.group(4) else 0
+                    minute = int(dm.group(5)) if dm.group(5) else 0
+                    second = int(dm.group(6)) if dm.group(6) else 0
+                    if 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59:
+                        occurred_at = f"20{dm.group(1)}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
 
         if not last4:
             lm = re.search(r"-(\d{4})\s*$", text) or re.search(r"(\d{3,4})\s*[*•]\s*$", text)
