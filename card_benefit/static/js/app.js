@@ -507,6 +507,7 @@
         </div>
         ${/취소|실패|거절/.test(it.raw_text || "") ? `<button class="btn secondary small cancel-notice" data-id="${it.id}">취소 처리</button>` : ""}
         <button class="btn small assign-inbox" data-id="${it.id}">혜택 선택</button>
+        <button class="btn secondary small ignore-inbox" data-id="${it.id}" title="휴지통으로(복원 가능)">무시</button>
       </div>
     `).join("");
 
@@ -514,6 +515,12 @@
       btn.addEventListener("click", () => {
         const item = state.inbox.find((x) => x.id == btn.dataset.id);
         openAssignModal(item);
+      })
+    );
+    inboxList.querySelectorAll(".ignore-inbox").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        state = await api(`/api/inbox/${btn.dataset.id}`, { method: "DELETE" });
+        render();
       })
     );
     inboxList.querySelectorAll(".cancel-notice").forEach((btn) =>
