@@ -297,31 +297,29 @@ def start_stock_monitor():
 # 서비스로 받음 - 어떤 도메인이든 다 되는 범용 방식이라 simple-icons에
 # 없는 서비스도 커버됨).
 # 각 항목: (이름 패턴, simple-icons slug, 파비콘용 공식 도메인, 앱스토어
-# 검색어). 마지막 항목(앱스토어 검색어)은 사용자가 실제로 보여준 스코어
-# 아이콘("U+one")처럼, 웹사이트 파비콘이 아니라 모바일 "앱 아이콘"이
-# 진짜 브랜드 이미지인 서비스를 위한 것 - 있으면 애플 앱스토어 검색
-# API(iTunes Search, 키 없이 공개로 쓸 수 있음)로 그 앱의 실제 아이콘을
-# 받아서 파비콘보다 먼저 시도한다(파비콘은 사이트 전용 아이콘이 없는
-# 경우가 많아서 구글이 generic한 회색 아이콘을 주는 경우가 잦았음).
+# 검색어). simple-icons는 전부 "단색 실루엣" 아이콘이라(그라데이션/미묘한
+# 색조 변화가 있는 진짜 로고가 있어도 그걸 무시하고 brand hex 한 가지
+# 색으로만 칠해짐 - 실제로 그게 부정확하다는 지적을 받음) 이제 애플
+# 말고는 안 쓴다(애플 로고는 실제로도 완전 단색이라 문제 없음). 나머지는
+# 전부 애플 앱스토어 검색 API(iTunes Search, 키 없이 공개로 쓸 수 있음)로
+# 그 앱의 실제(그라데이션 등 색 그대로 살아있는) 아이콘을 받아서 쓴다 -
+# 실패하면 파비콘으로 폴백.
 SUBSCRIPTION_LOGO_SLUGS = [
-    (re.compile(r"넷플릭스|netflix", re.I), "netflix", "netflix.com", None),
+    (re.compile(r"넷플릭스|netflix", re.I), None, "netflix.com", "Netflix"),
     (re.compile(r"디즈니|disney", re.I), None, "disneyplus.com", None),
-    (re.compile(r"네이버", re.I), "naver", "naver.com", None),
+    (re.compile(r"네이버", re.I), None, "naver.com", "네이버"),
     (re.compile(r"쿠팡|coupang", re.I), None, "coupang.com", None),
     (re.compile(r"토스|toss", re.I), None, "toss.im", None),
     (re.compile(r"왓챠|watcha", re.I), None, "watcha.com", None),
     (re.compile(r"웨이브|wavve", re.I), None, "wavve.com", None),
     (re.compile(r"티빙|tving", re.I), None, "tving.com", None),
-    (re.compile(r"유튜브|youtube", re.I), "youtube", "youtube.com", None),
+    (re.compile(r"유튜브|youtube", re.I), None, "youtube.com", "YouTube"),
     (re.compile(r"애플|apple", re.I), "apple", "apple.com", None),
-    (re.compile(r"스포티파이|spotify", re.I), "spotify", "spotify.com", None),
+    (re.compile(r"스포티파이|spotify", re.I), None, "spotify.com", "Spotify"),
     # 2026-11-14: "구독" 아닌 다른 지출 항목(렌탈/통신비 등)에도 로고를
     # 붙여달라는 요청으로 추가 - 더 이상 구독에만 한정하지 않음.
     (re.compile(r"코웨이|coway", re.I), None, "coway.co.kr", "코웨이 IoCare"),
-    # "anthropic" slug는 회사 로고(다른 마크)라 "클로드" 항목엔 안 맞음 -
-    # simple-icons에 제품 자체인 "claude" slug가 따로 있어서 그걸로 교체함
-    # (slugs.md에서 Claude -> claude 직접 확인).
-    (re.compile(r"클로드|claude", re.I), "claude", "claude.ai", None),
+    (re.compile(r"클로드|claude", re.I), None, "claude.ai", "Claude by Anthropic"),
     # lguplus.com/uplus.co.kr 파비콘 둘 다 LG그룹 공통 로고라 U+ 고유의
     # 마젠타 로고가 아니었음(사용자 확인) - 사용자가 직접 보내준 스샷으로
     # 실제 앱 이름이 "U+one"인 걸 확인해서, 그 앱 아이콘을 앱스토어에서
@@ -338,24 +336,17 @@ SUBSCRIPTION_LOGO_SLUGS = [
     # simple-icons엔 "kakaogolf"가 당연히 없어서 svg는 항상 실패하고
     # 바로 앱스토어/파비콘으로 넘어감(의도된 동작).
     (re.compile(r"카카오\s*골프|카카오\s*vx", re.I), "kakaogolf", "kakao.com", "카카오 VX"),
-    (re.compile(r"카카오|kakao", re.I), "kakao", "kakao.com", None),
+    (re.compile(r"카카오|kakao", re.I), None, "kakao.com", "카카오톡"),
 ]
 
 # simple-icons 원본 svg 파일엔 브랜드 색이 안 박혀있어서(순수 모양 데이터만
-# 있고 fill 지정이 없으면 브라우저가 기본값인 검정으로 그림 - 실제로
-# raw.githubusercontent.com에서 netflix.svg/claude.svg 둘 다 직접 받아서
-# <path>에 fill 속성이 전혀 없는 걸 확인함) "로고가 다 흑백이다"라는
-# 신고를 받고서야 알게 됨. simple-icons 자체 데이터(data/simple-icons.json의
-# hex 필드)에서 받아온 공식 브랜드색 - _download_colored_svg가 이걸 svg에
-# 박아 넣는다.
+# 있고 fill 지정이 없으면 브라우저가 기본값인 검정으로 그림) 색을 직접
+# 박아 넣어야 하는데, 이게 "단색 실루엣"이라 그라데이션/미묘한 색조가
+# 있는 진짜 로고는 부정확하게 뭉개버린다는 지적을 받아서 애플만 남기고
+# (애플 로고는 실제로도 완전 단색이라 문제 없음) 나머진 전부 앱스토어
+# 아이콘으로 바꿈. 애플만 simple-icons 자체 데이터(hex 필드)의 공식 색.
 _SIMPLE_ICON_COLORS = {
-    "netflix": "E50914",
-    "naver": "03C75A",
-    "youtube": "FF0000",
     "apple": "000000",
-    "spotify": "1ED760",
-    "claude": "D97757",
-    "kakao": "FFCD00",
 }
 
 
@@ -407,10 +398,14 @@ def _fetch_subscription_logos_once():
     # "있음"으로 보고 넘어가는 구조라 바뀐 게 전혀 반영이 안 되는 문제가
     # 반복됐음 - 그래서 방식을 바꿀 때마다 마커 이름을 새로 붙여서 그때마다
     # 한 번씩은 전부 다시 받게 한다(최초 1회만, 그 다음부턴 정상적으로 캐시 씀).
-    migrated_marker = os.path.join(logo_dir, ".appicon_migrated_v1")
+    migrated_marker = os.path.join(logo_dir, ".appicon_migrated_v2")
     if not os.path.exists(migrated_marker):
         for fname in os.listdir(logo_dir):
-            if fname.endswith(".png"):
+            # v2: simple-icons 단색 svg(넷플릭스/네이버/유튜브/스포티파이/
+            # 클로드/카카오)를 그만 쓰기로 해서 svg도 같이 지운다 - 안 지우면
+            # 프론트가 여전히 그 옛날 단색 svg를 먼저 찾아서 로드해버려서
+            # 새로 받은 앱스토어 png까지 아예 안 감.
+            if fname.endswith(".png") or fname.endswith(".svg"):
                 try:
                     os.remove(os.path.join(logo_dir, fname))
                 except Exception:
