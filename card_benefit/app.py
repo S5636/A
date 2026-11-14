@@ -1055,13 +1055,20 @@ def _attach_match_info(conn, rows, fk_column):
     과거 달 매칭 내역도 match_history로 전부 붙여서(몇 달치를 한 번에 엑셀로
     올려도) "내역" 버튼으로 지난 달 것까지 다 보이게 한다."""
     current_ym = current_year_month()
+    # _match_time_card_label을 넣기 전에 매칭됐던 옛날 내역들은 matched_card_label이
+    # 비어있어서, 그런 경우에만 그 알림 자체의 실제 last4로 보조 조회한다
+    # (등록된 카드로 대신 보여주는 위험한 추측이 아니라, 알림 문자에 실제로
+    # 찍힌 뒷자리를 그대로 찾는 것 - "내역에서 카드명이 통째로 사라졌다"는
+    # 지적을 받고 복구함). matched_card_label이 있으면 그게 최우선이고
+    # 다시 계산되지 않는다.
+    card_label_for = _card_label_matcher(conn)
 
     result = []
     for r in rows:
         item = dict(r)
         item["payment_method"] = _resolve_payment_method(conn, r["card_id"], r["payment_method"])
         history = conn.execute(
-            f"""SELECT id, amount, merchant, occurred_at, matched_card_label
+            f"""SELECT id, amount, merchant, occurred_at, last4, matched_card_label
                FROM inbox_items WHERE {fk_column} = ? ORDER BY occurred_at DESC""",
             (r["id"],),
         ).fetchall()
@@ -1071,11 +1078,11 @@ def _attach_match_info(conn, rows, fk_column):
                 "amount": h["amount"],
                 "merchant": h["merchant"],
                 "occurred_at": h["occurred_at"],
-                # 매칭되는 순간(_match_time_card_label) 1순위로 정해서 찍어둔
-                # 값을 그대로 보여준다 - 여기서 last4/card_id로 다시 계산하지
-                # 않는다(한 번 매칭되면 절대 안 바뀌어야 함). 스냅샷이 없으면
-                # (옛날 데이터 등) 빈칸으로 둔다(추측 금지).
-                "card_label": h["matched_card_label"] or None,
+                # 1순위: 매칭되는 순간 찍어둔 스냅샷(한 번 찍히면 절대 안
+                # 바뀜). 2순위(스냅샷이 없는 옛날 내역만): 그 알림 자체의
+                # 실제 last4로 지금 바로 조회 - 등록된 카드가 아니라 알림에
+                # 실제로 찍힌 뒷자리라 안전함. 둘 다 없으면 빈칸(추측 금지).
+                "card_label": h["matched_card_label"] or card_label_for(h["last4"]) or None,
             }
             for h in history
         ]
