@@ -4785,11 +4785,17 @@ def create_inbox_item_from_image():
     # 해서는 안 고쳐졌었음). 그 줄의 bbox만 크게 잘라 확대하고, 글자 종류를
     # 숫자/구분기호로 제한해서(allowlist) 다시 읽어 더 정확하면 바꿔치기한다.
     # 실패해도(크롭 실패, 재인식 실패 등) 원래 읽은 글자를 그대로 쓴다.
-    _NUMBER_LINE_RE = re.compile(r"^[\d\s:./\-]{4,}$")
+    # 날짜(YY.MM.DD [HH:MM[:SS]]) 모양에만 좁혀서 적용한다 - 카드번호
+    # (마스킹된 점/동그라미가 OCR엔 숫자/점으로 잘못 보여서 일반적인
+    # "숫자+기호" 패턴에 걸려버리면, 마스킹 부분을 숫자로 강제로 읽어서
+    # 되려 더 망가뜨림. 날짜 모양만 정확히 매칭해서 그 경우만 보정한다.
+    _DATE_LINE_RE = re.compile(
+        r"^\d{2}(?:\d{2})?[.\-]\d{1,2}[.\-]\d{1,2}([.\s]+\d{1,2}[:.]\d{2}(?:[:.]\d{2})?)?\.?$"
+    )
     lines = []
     for item in detections:
         bbox, text, _conf = item
-        if pil_img is not None and _NUMBER_LINE_RE.match(text.strip() or ""):
+        if pil_img is not None and _DATE_LINE_RE.match(text.strip() or ""):
             try:
                 xs = [p[0] for p in bbox]
                 ys = [p[1] for p in bbox]
@@ -4802,8 +4808,11 @@ def create_inbox_item_from_image():
                     if zoom > 1:
                         resample = getattr(Image, "Resampling", Image).LANCZOS
                         crop = crop.resize((crop.width * zoom, crop.height * zoom), resample)
+                    # paragraph=True로 맡기면 날짜/시간 조각을 공백 없이
+                    # 붙여버린 사례가 있어서(예: "10"+"01:01" -> "1001:01")
+                    # False로 각 조각을 따로 받아 직접 공백으로 이어붙인다.
                     refined = reader.readtext(
-                        np.array(crop), detail=0, paragraph=True,
+                        np.array(crop), detail=0, paragraph=False,
                         allowlist="0123456789:./-",
                     )
                     refined_text = " ".join(refined).strip()
