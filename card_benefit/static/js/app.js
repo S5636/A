@@ -496,6 +496,19 @@
           return true;
         },
       },
+      {
+        label: "무시",
+        onAction: async (selectedIds) => {
+          // 체크한 것들을 확인창 없이 바로 휴지통으로(복원 가능) - "삭제"랑
+          // 같은 API지만 매번 묻지 않고 바로 처리해달라는 요청으로 추가.
+          state = await api("/api/inbox/bulk-delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: selectedIds }),
+          });
+          return true;
+        },
+      },
     ];
     inboxList.innerHTML = bulkBarHtml("inbox", inboxActions, ids) + items.map((it) => `
       <div class="inbox-item" data-id="${it.id}">
@@ -507,7 +520,6 @@
         </div>
         ${/취소|실패|거절/.test(it.raw_text || "") ? `<button class="btn secondary small cancel-notice" data-id="${it.id}">취소 처리</button>` : ""}
         <button class="btn small assign-inbox" data-id="${it.id}">혜택 선택</button>
-        <button class="btn secondary small ignore-inbox" data-id="${it.id}" title="휴지통으로(복원 가능)">무시</button>
       </div>
     `).join("");
 
@@ -515,12 +527,6 @@
       btn.addEventListener("click", () => {
         const item = state.inbox.find((x) => x.id == btn.dataset.id);
         openAssignModal(item);
-      })
-    );
-    inboxList.querySelectorAll(".ignore-inbox").forEach((btn) =>
-      btn.addEventListener("click", async () => {
-        state = await api(`/api/inbox/${btn.dataset.id}`, { method: "DELETE" });
-        render();
       })
     );
     inboxList.querySelectorAll(".cancel-notice").forEach((btn) =>
