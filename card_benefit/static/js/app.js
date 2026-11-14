@@ -1476,11 +1476,13 @@
     alert(`${result.auto_match_count || 0}건 자동 매칭됐습니다(해당 대출 "당월 상환" 체크, 알림은 큐에서 제외).`);
   });
 
+  const matchConfirmBtn = document.getElementById("match-modal-confirm-selected");
   async function openMatchModal(entityType, item, label) {
     document.getElementById("match-modal-title").textContent = `"${label}" 결제 확인`;
     const currentEl = document.getElementById("match-modal-current");
     const listEl = document.getElementById("match-modal-list");
     listEl.innerHTML = "";
+    matchConfirmBtn.style.display = "none";
     matchModal.classList.add("open");
 
     if (item.matched_this_month) {
@@ -1510,17 +1512,22 @@
           <span style="font-size:11px;color:var(--text-muted);">${c.occurred_at}</span>
         </span>
       </label>
-    `).join("") + `<button class="btn" id="match-modal-confirm-selected" disabled>선택한 항목 매칭 (0건)</button>`;
+    `).join("");
 
+    // 체크박스 다 훑어보려면 길어서 스크롤해야 하는데, 매번 끝까지 내려가야
+    // 매칭 버튼이 나오는 게 불편하다는 지적 받아서 버튼을 목록 바깥(스크롤
+    // 안 되는 상단 modal-actions)으로 옮김 - 여기선 보이기/바인딩만 한다.
+    matchConfirmBtn.style.display = "";
+    matchConfirmBtn.disabled = true;
+    matchConfirmBtn.textContent = "선택한 항목 매칭 (0건)";
     const checks = Array.from(listEl.querySelectorAll(".match-candidate-check"));
-    const confirmBtn = document.getElementById("match-modal-confirm-selected");
     const updateConfirmBtn = () => {
       const n = checks.filter((c) => c.checked).length;
-      confirmBtn.textContent = `선택한 항목 매칭 (${n}건)`;
-      confirmBtn.disabled = n === 0;
+      matchConfirmBtn.textContent = `선택한 항목 매칭 (${n}건)`;
+      matchConfirmBtn.disabled = n === 0;
     };
     checks.forEach((c) => c.addEventListener("change", updateConfirmBtn));
-    confirmBtn.addEventListener("click", async () => {
+    matchConfirmBtn.onclick = async () => {
       const ids = checks.filter((c) => c.checked).map((c) => Number(c.dataset.id));
       if (!ids.length) return;
       state = await api(`/api/${entityType}/${item.id}/confirm-match`, {
@@ -1530,7 +1537,7 @@
       });
       matchModal.classList.remove("open");
       render();
-    });
+    };
   }
 
   // ---- 고정지출 추가/수정 모달 ----
