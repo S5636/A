@@ -1169,17 +1169,6 @@ def _safe_name_tokens(name):
     ]
 
 
-def _log_auto_match_debug(msg):
-    """2026-11-15: 자동매칭이 왜 안 되는지 추측 없이 바로 보려고 임시로
-    추가한 로그 - 원인 확인되면 지울 것."""
-    try:
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "auto_match_debug.log")
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
-    except Exception:
-        pass
-
-
 def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column):
     """받은 알림 하나를 활성 항목(고정지출 또는 보험)에 자동으로 묶는다.
 
@@ -1207,24 +1196,8 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         "AND automatch_excluded = 0",
         (inbox_id,),
     ).fetchone()
-    # 2026-11-15: "코웨이 자동매칭이 왜 안 되냐" 진단용 임시 로그 - 원인
-    # 확인되면 지울 것. 이 조건에 안 걸리면(이미 recurring_id가 있거나
-    # automatch_excluded=1이거나 inbox_items에 그 알림 자체가 없으면)
-    # item이 None으로 나와서 바로 아래에서 찍힌다.
-    if not item:
-        raw = conn.execute(
-            "SELECT merchant, recurring_id, automatch_excluded FROM inbox_items WHERE id = ?",
-            (inbox_id,),
-        ).fetchone()
-        if raw and "코웨이" in (raw["merchant"] or ""):
-            _log_auto_match_debug(
-                f"[{table}] inbox_id={inbox_id} merchant={raw['merchant']!r} - "
-                f"애초에 후보에서 제외됨(recurring_id={raw['recurring_id']}, "
-                f"automatch_excluded={raw['automatch_excluded']})"
-            )
     if not item or not item["amount"]:
         return False
-    _debug_coway = "코웨이" in (item["merchant"] or "")
 
     def is_cash_only(rp):
         # 결제수단이 "현금"이고 연결된 카드도 없는 항목(예: "고양시청 납부")은
@@ -1284,18 +1257,6 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         excluded = [m for m in rp["excluded_merchants"].split("\n") if m]
         return _merchant_base(item["merchant"]) in excluded
 
-    if _debug_coway:
-        coway_rows = [rp for rp in conn.execute(f"SELECT * FROM {table}").fetchall() if "코웨이" in (rp[name_column] or "")]
-        for rp in coway_rows:
-            _log_auto_match_debug(
-                f"[{table}] inbox_id={inbox_id} item(amount={item['amount']}, last4={item['last4']!r}, "
-                f"merchant={item['merchant']!r}) vs rp(id={rp['id']}, name={rp[name_column]!r}, "
-                f"amount={rp[amount_column]}, active={rp['active']}, category={rp['category'] if 'category' in rp.keys() else 'N/A'}, "
-                f"rp_last4={rp_last4(rp)!r}, excluded_merchants={rp['excluded_merchants']!r}, "
-                f"is_variable_amount={is_variable_amount(rp)}, last4_ok={last4_ok(rp)}, "
-                f"merchant_excluded={merchant_excluded(rp)}, in_active_rows={rp['id'] in [a['id'] for a in active_rows]})"
-            )
-
     amount_matches = [
         rp for rp in active_rows
         if not is_variable_amount(rp) and rp[amount_column] == item["amount"]
@@ -1327,13 +1288,9 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         )
         return True
     if amount_matches:
-        if _debug_coway:
-            _log_auto_match_debug(f"[{table}] inbox_id={inbox_id} 금액매칭 {len(amount_matches)}개라 애매해서 중단")
         return False
 
     if not item["merchant"]:
-        if _debug_coway:
-            _log_auto_match_debug(f"[{table}] inbox_id={inbox_id} merchant가 비어있어서 이름매칭 자체를 시도 안 함")
         return False
     merchant_lower = re.sub(r"[()]", "", item["merchant"].lower())
     name_matches = [
@@ -1358,8 +1315,6 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         if len(narrowed) == 1:
             name_matches = narrowed
     if len(name_matches) != 1:
-        if _debug_coway:
-            _log_auto_match_debug(f"[{table}] inbox_id={inbox_id} 이름매칭 {len(name_matches)}개라 중단(0=후보없음, 2+=애매함)")
         return False
 
     label = _match_time_card_label(conn, item, table, name_matches[0]["id"])
@@ -4147,7 +4102,9 @@ def bulk_mark_no_benefit():
         # 카드를 찾을 수 있으면 같이 채워준다(단일 건 처리인 mark_no_benefit은
         # 모달에서 이미 고른 카드를 받아오지만, 여기는 모달 없이 여러 카드가
         # 섞인 채로 선택될 수 있어서 항목마다 last4로 직접 찾아야 함).
-        cards_with_code = conn.execute("SELECT id, last4 FROM cards WHERE last4 != ''").fetchall()
+        cards_with_code = conn.execute(
+            "SELECT id, last4 FROM cards WHERE last4 != '' AND closed = 0"
+        ).fetchall()
         placeholders = ",".join("?" for _ in ids)
         items = conn.execute(
             f"SELECT id, last4, card_id FROM inbox_items WHERE id IN ({placeholders}) AND status = 'pending'",

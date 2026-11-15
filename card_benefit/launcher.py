@@ -174,7 +174,11 @@ def main():
     print("============================================")
     print()
 
-    threading.Thread(target=open_browser_later, daemon=True).start()
+    # START.bat sets this when it just found and stopped an old server on
+    # this port - that means a browser tab from before is presumably still
+    # open, so skip piling on yet another new tab every single restart.
+    if os.environ.get("CBC_WAS_RUNNING") != "1":
+        threading.Thread(target=open_browser_later, daemon=True).start()
 
     import app  # requirements 설치가 끝난 뒤에 import
     app.start_stock_monitor()

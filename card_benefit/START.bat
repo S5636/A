@@ -14,9 +14,22 @@ set FOUND_OLD_PORT=0
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5050 ^| findstr LISTENING') do (
     echo Found old server on port 5050, PID %%a - stopping it.
     set FOUND_OLD_PORT=1
+    rem Also stop the window/tab that owns this process (its parent), not
+    rem just the python.exe process itself - otherwise, under Windows
+    rem Terminal, the old tab/window can be left open with nothing running
+    rem in it instead of actually closing.
+    for /f usebackq %%p in (`powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=%%a').ParentProcessId" 2^>nul`) do (
+        taskkill /F /T /PID %%p >nul 2>nul
+    )
     taskkill /F /T /PID %%a
 )
 if "%FOUND_OLD_PORT%"=="0" echo No old server was using port 5050.
+
+rem Tell launcher.py whether an old server was actually running, so it can
+rem skip auto-opening yet another browser tab on top of the one that is
+rem presumably already open from before (this is a restart, not a first
+rem launch).
+set CBC_WAS_RUNNING=%FOUND_OLD_PORT%
 
 title Card Benefit Checker
 
