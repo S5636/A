@@ -2804,7 +2804,8 @@
     // 뭘로 읽었는지 바로 보여줘서 틀렸으면 바로 알아챌 수 있게 한다.
     importImageLog.innerHTML = `<div class="upload-log-item">` +
       `읽은 내용: ${p.amount != null ? fmt(p.amount) + "원" : "(금액 못 읽음)"}` +
-      `${p.merchant ? " · " + escapeHtml(p.merchant) : ""}${p.occurred_at ? " · " + escapeHtml(p.occurred_at) : ""} ` +
+      `${p.merchant ? " · " + escapeHtml(p.merchant) : ""}${p.occurred_at ? " · " + escapeHtml(p.occurred_at) : ""}` +
+      `${p.last4 ? " · 카드뒷자리 " + escapeHtml(p.last4) : " · (카드뒷자리 못 읽음)"} ` +
       `- 큐에 등록됨, 아래 "받은 결제 알림"에서 확인하세요.</div>`;
     importImageFile.value = "";
   });

@@ -4729,7 +4729,12 @@ def _parse_receipt_ocr(lines):
                         occurred_at = f"20{dm.group(1)}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
 
         if not last4:
-            lm = re.search(r"-(\d{4})\s*$", text) or re.search(r"(\d{3,4})\s*[*•]\s*$", text)
+            # 카드번호가 두 줄로 쪼개져 읽히면("5188-37.\n~0741"처럼) 뒷자리
+            # 앞에 "-"가 아니라 "~"나 다른 깨진 기호가 올 수 있어서, "-"로
+            # 한정하지 않고 "숫자 아닌 글자(또는 줄 맨 앞) 바로 뒤에 오는
+            # 숫자 4개로 끝나는 줄"이면 다 받아준다(승인번호 같은 긴 숫자는
+            # 뒤에서 4번째 자리 바로 앞이 숫자라서 안 걸림).
+            lm = re.search(r"(?:^|\D)(\d{4})\s*$", text) or re.search(r"(\d{3,4})\s*[*•]\s*$", text)
             if lm:
                 last4 = lm.group(1)
 
