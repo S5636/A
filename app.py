@@ -757,6 +757,54 @@ def _dpj_auto_loop():
         if should_restart:
             _self_restart()
 
+        # DPJ 자동수집이 성공했고 신규주문 때문에 재고상태 칸이 비어있는
+        # 건이 생겼으면, 수동으로 DPJ 버튼을 눌렀을 때와 똑같이 STOCK(재고확인)을
+        # 자동으로 이어서 실행한다(사용자 지적: "원래 dpj돌리고 신규있으면
+        # 스톡가는건데 안갔다고" - 기존엔 이 체이닝이 프론트 JS에만 있어서
+        # 사람이 직접 DPJ 버튼을 눌렀을 때만 동작했고, 서버가 30분마다 혼자
+        # 돌리는 자동수집 뒤에는 아무도 STOCK을 호출해주지 않았다).
+        if not _dpj_auto_state['last_error'] and result.get('has_new_orders'):
+            stock_box = {}
+
+            def _run_stock():
+                try:
+                    stock_box['result'] = _stock_check_once()
+                except Exception as e:
+                    stock_box['exception'] = e
+
+            st = threading.Thread(target=_run_stock, daemon=True)
+            st.start()
+            st.join(timeout=DPJ_AUTO_RUN_TIMEOUT_SECONDS)
+            if st.is_alive():
+                smsg = f'자동 STOCK(재고확인)이 {DPJ_AUTO_RUN_TIMEOUT_SECONDS // 60}분이 지나도 끝나지 않아 멈춘 것으로 보입니다.'
+                print(f"[STOCK 자동확인 {now}] {smsg}")
+                _append_dpj_history(now, 'STOCK 시간초과', [smsg])
+                shint, sshould_restart = _note_dpj_outcome(True)
+                _send_ntfy(f'{now} {smsg}{shint}', title='마진보드 STOCK 자동확인 지연')
+                if sshould_restart:
+                    _self_restart()
+            elif 'exception' in stock_box:
+                e = stock_box['exception']
+                print(f"[STOCK 자동확인 {now}] 실패(예외): {type(e).__name__}: {e}")
+                _append_dpj_history(now, 'STOCK 실패(예외)', [f'{type(e).__name__}: {e}'])
+                shint, sshould_restart = _note_dpj_outcome(True)
+                _send_ntfy(f'{now} STOCK 자동확인 실패 - {_friendly_error(e)}{shint}', title='마진보드 STOCK 자동확인 실패')
+                if sshould_restart:
+                    _self_restart()
+            else:
+                sresult = stock_box.get('result') or {}
+                _append_dpj_history(now, 'STOCK 성공' if sresult.get('ok') else 'STOCK 실패', sresult.get('log'))
+                if not sresult.get('ok'):
+                    serr = (sresult.get('log') or ['알 수 없는 오류'])[-1]
+                    print(f"[STOCK 자동확인 {now}] 실패 - {serr}")
+                    shint, sshould_restart = _note_dpj_outcome(True)
+                    _send_ntfy(f'{now} STOCK 자동확인 실패 - {serr}{shint}', title='마진보드 STOCK 자동확인 실패')
+                    if sshould_restart:
+                        _self_restart()
+                else:
+                    _note_dpj_outcome(False)
+                    print(f"[STOCK 자동확인 {now}] 완료 - {sresult.get('checked', 0)}건 확인.")
+
 
 _dpj_auto_thread_started = False
 
@@ -843,8 +891,13 @@ def api_ownerclan_progress():
     return jsonify({'log': ownerclan_auto.get_progress()})
 
 
-@app.route('/api/ownerclan/check_stock', methods=['POST'])
-def api_ownerclan_check_stock():
+def _stock_check_once():
+    """STOCK(재고확인) 1회 실행 - 수동 버튼(/api/ownerclan/check_stock)과
+    DPJ 30분 자동수집 뒤 자동 STOCK 실행이 똑같은 로직을 쓰게 공유 함수로 뺐다
+    (사용자 지적: "원래 dpj돌리고 신규있으면 스톡가는건데 안갔다고" - 그
+    체이닝은 프론트 JS에만 있어서 수동으로 DPJ 버튼을 눌렀을 때만 동작했고,
+    서버가 30분마다 자동으로 돌리는 백그라운드 DPJ 수집에는 이어서 STOCK을
+    실행하는 코드가 아예 없었다)."""
     settings = load_settings()
     # '확인실패'를 저장 안 하게 막은 수정(위 INSERT 루프)은 이 실행 이후부터만
     # 효과가 있다 - 그전에 이미 stock_check 테이블에 저장돼버린 확인실패
@@ -913,7 +966,12 @@ def api_ownerclan_check_stock():
         conn.commit()
         conn.close()
     result['checked'] = len(result.get('results') or [])
-    return jsonify(result)
+    return result
+
+
+@app.route('/api/ownerclan/check_stock', methods=['POST'])
+def api_ownerclan_check_stock():
+    return jsonify(_stock_check_once())
 
 
 DELIVERY_NOTE_KEYS = ['배송메시지', '배송시요청사항', '요청사항', '배송요청사항', '배송메모', '배송 메시지', '배송시요청', '요청 사항']
