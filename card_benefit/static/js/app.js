@@ -1016,7 +1016,7 @@
     document.getElementById("loan-total-monthly-value").textContent =
       `₩${fmt(sumBy(state.loans, (l) => l.due_this_month, "due_amount"))}`;
     document.getElementById("loan-unpaid-total").textContent =
-      `미체크 ₩${fmt(sumBy(state.loans, (l) => l.due_this_month && !l.paid_this_month, "due_amount"))}`;
+      `미확인 ₩${fmt(sumBy(state.loans, (l) => l.due_this_month && !l.paid_this_month, "due_amount"))}`;
 
     const loans = sortedLoans();
     loans.forEach((loan, idx) => {
@@ -1362,6 +1362,11 @@
     const emptyHint = document.getElementById("empty-recurring-hint");
     list.querySelectorAll(".card").forEach((el) => el.remove());
     emptyHint.style.display = state.recurring_payments.length ? "none" : "block";
+
+    const total = sumBy(state.recurring_payments, (r) => r.active, "amount");
+    const loanTotal = sumBy(state.loans, (l) => l.due_this_month, "due_amount");
+    document.getElementById("recurring-total-value").textContent = `₩${fmt(total)}`;
+    document.getElementById("recurring-grand-total-value").textContent = `₩${fmt(total + loanTotal)}`;
 
     document.getElementById("recurring-unmatched-total").textContent =
       `미확인 ₩${fmt(sumBy(state.recurring_payments, (r) => r.active && !r.matched_this_month, "amount"))}`;

@@ -32,8 +32,8 @@
 
   <nav class="view-tabs">
     <button class="view-tab active" data-view="card">💳 카드</button>
-    <button class="view-tab" data-view="loan">🏦 대출</button>
     <button class="view-tab" data-view="recurring">🔁 지출</button>
+    <button class="view-tab" data-view="loan">🏦 대출</button>
     <button class="view-tab" data-view="insurance">🏥 보험</button>
     <button class="view-tab" data-view="stock">📈 주식</button>
   </nav>
@@ -106,13 +106,13 @@
   <div id="loan-view" style="display:none;">
     <section class="monthly-summary">
       <div class="summary-boxes">
-        <div class="summary-box summary-earn">
-          <div class="summary-label">전체 대출잔액 합계</div>
-          <div class="summary-value" id="loan-total-balance-value">0원</div>
-        </div>
         <div class="summary-box summary-cashback">
           <div class="summary-label">당월 상환 금액 합계</div>
           <div class="summary-value" id="loan-total-monthly-value">0원</div>
+        </div>
+        <div class="summary-box summary-earn">
+          <div class="summary-label">전체 대출잔액 합계</div>
+          <div class="summary-value" id="loan-total-balance-value">0원</div>
         </div>
       </div>
     </section>
@@ -134,6 +134,19 @@
   </div>
 
   <div id="recurring-view" style="display:none;">
+    <section class="monthly-summary">
+      <div class="summary-boxes">
+        <div class="summary-box summary-earn">
+          <div class="summary-label">지출만 합계</div>
+          <div class="summary-value" id="recurring-total-value">0원</div>
+        </div>
+        <div class="summary-box summary-cashback">
+          <div class="summary-label">당월 지출 금액 합계</div>
+          <div class="summary-value" id="recurring-grand-total-value">0원</div>
+        </div>
+      </div>
+    </section>
+
     <div id="recurring-card-summary-list" class="summary-jump-row" style="display:none;"></div>
 
     <div class="sort-row">
@@ -238,7 +251,7 @@
       <textarea id="card-memo" rows="2" placeholder="카드 특이사항 등"></textarea>
     </label>
     <label class="checkbox-row">
-      <input type="checkbox" id="card-closed"> 해지된 카드 (결제 알림 자동매칭 대상에서 제외)
+      <input type="checkbox" id="card-closed"> 해지 (결제 알림 자동매칭 대상에서 제외)
     </label>
     <div class="modal-actions">
       <button class="btn secondary" id="card-cancel">취소</button>
