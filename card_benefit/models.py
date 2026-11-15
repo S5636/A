@@ -291,6 +291,25 @@ def init_db():
             "UPDATE inbox_items SET insurance_id = NULL "
             "WHERE insurance_id IS NOT NULL AND insurance_id NOT IN (SELECT id FROM insurances)"
         )
+
+        # 2026-11: "신한 단기카드대출(현금서비스) ..." 알림이 가맹점명 파싱
+        # 버그로 "계좌입금완료" 같은 엉뚱한 줄로 잘못 저장됐던 과거 알림들을
+        # 고쳐진 parse_notification으로 다시 돌려서 바로잡는다. raw_text(알림
+        # 원문)는 그대로 두고 merchant만 다시 계산해 넣는다 - 이미 올바르게
+        # 저장된 건(merchant에 "현금서비스"가 이미 들어있음)은 조건에 안
+        # 걸려서, 서버를 몇 번을 다시 켜도 안전하다(멱등).
+        bad_cash_advance_rows = conn.execute(
+            "SELECT id, raw_text FROM inbox_items "
+            "WHERE raw_text LIKE '%현금서비스%' AND (merchant IS NULL OR merchant NOT LIKE '%현금서비스%')"
+        ).fetchall()
+        for row in bad_cash_advance_rows:
+            fixed_merchant = parse_notification(row["raw_text"])["merchant"]
+            if fixed_merchant:
+                conn.execute(
+                    "UPDATE inbox_items SET merchant = ? WHERE id = ?",
+                    (fixed_merchant, row["id"]),
+                )
+
         conn.commit()
     finally:
         conn.close()
