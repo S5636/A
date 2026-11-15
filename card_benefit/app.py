@@ -1585,7 +1585,12 @@ def _try_auto_match_loan_account_text(conn, inbox_id):
     if not item:
         return False
     text = f"{item['merchant'] or ''} {item['raw_text'] or ''}"
-    if "통장" not in text and "계좌" not in text:
+    # "통장"/"계좌"라고 안 써 있어도 "출금 28,801원 대출이자결산 잔액
+    # -3,000,000원"처럼 "출금"/"잔액"만 쓰는 은행 알림 형식도 있다. "대출"은
+    # 여기 안 넣는다 - "장기카드대출(카드론)"/"단기카드대출(현금서비스)"
+    # 처럼 카드 결제 알림에도 나오는 단어라 넣으면 카드 거래가 대출로
+    # 잘못 매칭 시도될 수 있다.
+    if not any(k in text for k in ("통장", "계좌", "출금", "잔액")):
         return False
     loans = conn.execute(
         "SELECT * FROM loans WHERE withdrawal_account != ''"
@@ -1621,7 +1626,7 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
     if not item or not item["amount"]:
         return False
     text = f"{item['merchant'] or ''} {item['raw_text'] or ''}"
-    if "통장" not in text and "계좌" not in text:
+    if not any(k in text for k in ("통장", "계좌", "출금", "잔액")):
         return False
     try:
         occurred_date = date.fromisoformat((item["occurred_at"] or "")[:10])
