@@ -369,6 +369,19 @@ def parse_notification(text: str) -> dict:
             merchant = m.group(1).strip()
             break
 
+    # 1.5순위: "신한 단기카드대출(현금서비스) 성*윤(6982)"처럼 현금서비스
+    # 알림은 그 줄에 "카드"가 들어있어서(단기카드대출) 아래 2순위 노이즈
+    # 필터에 걸려 버려지고, 그 대신 "계좌입금완료" 같은 의미 없는 줄이
+    # 가맹점으로 잘못 저장됐었다 - 그러면 merchant에 "현금서비스"라는
+    # 글자가 아예 없어서 카드별 전월실적 제외 키워드에 "현금서비스"를
+    # 넣어놔도 걸러지지가 않는다. "현금서비스"가 들어있는 줄은 노이즈
+    # 필터보다 먼저 그대로 가맹점으로 쓴다.
+    if not merchant:
+        for line in lines:
+            if "현금서비스" in line:
+                merchant = line
+                break
+
     # 2순위: 라벨이 없는 알림 형식이면, 노이즈 키워드가 없는 마지막 줄을 추정한다.
     if not merchant:
         for line in reversed(lines):
