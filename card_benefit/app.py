@@ -4673,6 +4673,17 @@ _RECEIPT_CHROME_LABELS = {
     "카드매출전표", "상세내역", "결제내역", "거래내역", "이용내역", "결제상세",
     "주문상세", "구매내역", "영수증",
 }
+# 날짜(YY[YY].MM.DD [HH:MM[:SS]]) 모양의 줄을 찾을 때 공용으로 쓴다 - OCR
+# 재인식 대상을 고를 때도, 날짜 줄이 last4(카드뒷자리) 추출에 잘못 걸리는 걸
+# 막을 때도 똑같이 필요해서 모듈 레벨로 뺐다.
+_DATE_LINE_RE = re.compile(
+    r"^\d{2}(?:\d{2})?[.\-]\d{1,2}[.\-]\d{1,2}([.\s]+\d{1,2}[:.]\d{2}(?:[:.]\d{2})?)?\.?$"
+)
+# last4 추출을 건너뛸지 판단할 땐 줄 전체가 아니라 "날짜 모양을 포함하는지"만
+# 보면 충분하다(뒤에 다른 잡음이 더 붙어 있어도 상관없음) - _DATE_LINE_RE는
+# 줄 전체가 정확히 날짜 모양이어야 해서 "09.2300"처럼 초 자리가 깨지면
+# 전체매칭엔 실패하지만, 그래도 날짜 줄인 건 맞으므로 이걸로 한 번 더 본다.
+_DATE_LIKE_RE = re.compile(r"\d{2}(?:\d{2})?[.\-]\d{1,2}[.\-]\d{1,2}")
 _OCR_READER = None
 
 
@@ -4694,6 +4705,7 @@ def _parse_receipt_ocr(lines):
     last4 = ""
     approval_no = ""
     prev_text = ""
+    recent_lines = []  # 가맹점명을 찾을 때 거슬러 올라갈 최근 줄들(노이즈 포함 그대로)
     for raw_line in lines:
         text = (raw_line or "").strip()
         if not text:
@@ -4704,8 +4716,16 @@ def _parse_receipt_ocr(lines):
             if m and not any(bad in prev_text for bad in _RECEIPT_AMOUNT_BLACKLIST_LABELS):
                 try:
                     amount = float(m.group(1).replace(",", ""))
-                    if prev_text and prev_text not in _RECEIPT_CHROME_LABELS:
-                        merchant = prev_text
+                    # 가맹점명 바로 앞에 화살표(>)나 아이콘 한 글자 같은
+                    # OCR 노이즈가 끼어드는 경우가 있어서, 바로 앞 줄이
+                    # 너무 짧거나 글자가 없으면 그 전 줄들을 거슬러 올라가
+                    # 제일 가까운 "이름같이 생긴"(한글/영문 2자 이상) 줄을 쓴다.
+                    for candidate in reversed(recent_lines):
+                        if candidate in _RECEIPT_CHROME_LABELS:
+                            continue
+                        if re.search(r"[가-힣A-Za-z]{2,}", candidate):
+                            merchant = candidate
+                            break
                 except ValueError:
                     pass
 
@@ -4728,12 +4748,14 @@ def _parse_receipt_ocr(lines):
                     if 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59:
                         occurred_at = f"20{dm.group(1)}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
 
-        if not last4:
+        if not last4 and not _DATE_LIKE_RE.search(text):
             # 카드번호가 두 줄로 쪼개져 읽히면("5188-37.\n~0741"처럼) 뒷자리
             # 앞에 "-"가 아니라 "~"나 다른 깨진 기호가 올 수 있어서, "-"로
             # 한정하지 않고 "숫자 아닌 글자(또는 줄 맨 앞) 바로 뒤에 오는
             # 숫자 4개로 끝나는 줄"이면 다 받아준다(승인번호 같은 긴 숫자는
-            # 뒤에서 4번째 자리 바로 앞이 숫자라서 안 걸림).
+            # 뒤에서 4번째 자리 바로 앞이 숫자라서 안 걸림). 단, 날짜 줄도
+            # "2026.11.10 09.2300"처럼 끝이 숫자 4개라 last4로 잘못 걸릴 수
+            # 있어서 날짜 모양이면 애초에 건너뛴다.
             lm = re.search(r"(?:^|\D)(\d{4})\s*$", text) or re.search(r"(\d{3,4})\s*[*•]\s*$", text)
             if lm:
                 last4 = lm.group(1)
@@ -4742,6 +4764,9 @@ def _parse_receipt_ocr(lines):
             approval_no = text
 
         prev_text = text
+        recent_lines.append(text)
+        if len(recent_lines) > 6:
+            recent_lines.pop(0)
 
     return {
         "amount": amount,
@@ -4790,13 +4815,11 @@ def create_inbox_item_from_image():
     # 해서는 안 고쳐졌었음). 그 줄의 bbox만 크게 잘라 확대하고, 글자 종류를
     # 숫자/구분기호로 제한해서(allowlist) 다시 읽어 더 정확하면 바꿔치기한다.
     # 실패해도(크롭 실패, 재인식 실패 등) 원래 읽은 글자를 그대로 쓴다.
-    # 날짜(YY.MM.DD [HH:MM[:SS]]) 모양에만 좁혀서 적용한다 - 카드번호
-    # (마스킹된 점/동그라미가 OCR엔 숫자/점으로 잘못 보여서 일반적인
-    # "숫자+기호" 패턴에 걸려버리면, 마스킹 부분을 숫자로 강제로 읽어서
-    # 되려 더 망가뜨림. 날짜 모양만 정확히 매칭해서 그 경우만 보정한다.
-    _DATE_LINE_RE = re.compile(
-        r"^\d{2}(?:\d{2})?[.\-]\d{1,2}[.\-]\d{1,2}([.\s]+\d{1,2}[:.]\d{2}(?:[:.]\d{2})?)?\.?$"
-    )
+    # 날짜(YY.MM.DD [HH:MM[:SS]]) 모양에만 좁혀서 적용한다(_DATE_LINE_RE,
+    # 모듈 상단 공용 정의) - 카드번호(마스킹된 점/동그라미가 OCR엔 숫자/점
+    # 으로 잘못 보여서 일반적인 "숫자+기호" 패턴에 걸려버리면, 마스킹
+    # 부분을 숫자로 강제로 읽어서 되려 더 망가뜨림. 날짜 모양만 정확히
+    # 매칭해서 그 경우만 보정한다.
     lines = []
     for item in detections:
         bbox, text, _conf = item
