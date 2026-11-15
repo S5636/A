@@ -1,13 +1,13 @@
 (() => {
   const cardList = document.getElementById("card-list");
   const emptyHint = document.getElementById("empty-hint");
-  const inboxSection = document.getElementById("inbox-section");
+  const inboxToggleBtn = document.getElementById("inbox-toggle");
   const inboxList = document.getElementById("inbox-list");
   const inboxCount = document.getElementById("inbox-count");
-  const noBenefitSection = document.getElementById("no-benefit-section");
+  const noBenefitToggleBtn = document.getElementById("no-benefit-toggle");
   const noBenefitList = document.getElementById("no-benefit-list");
   const noBenefitCount = document.getElementById("no-benefit-count");
-  const trashSection = document.getElementById("trash-section");
+  const trashToggleBtn = document.getElementById("trash-toggle");
   const trashList = document.getElementById("trash-list");
   const trashCount = document.getElementById("trash-count");
 
@@ -468,8 +468,8 @@
   function renderInbox() {
     const items = state.inbox;
     const ids = items.map((it) => it.id);
-    inboxSection.style.display = items.length ? "block" : "none";
-    inboxCount.textContent = items.length ? `${items.length}건` : "";
+    inboxToggleBtn.style.display = items.length ? "" : "none";
+    inboxCount.textContent = items.length ? `${items.length}` : "";
     inboxList.style.display = inboxOpen ? "flex" : "none";
     const inboxActions = [
       {
@@ -548,8 +548,8 @@
   function renderNoBenefit() {
     const items = state.no_benefit || [];
     const ids = items.map((it) => it.id);
-    noBenefitSection.style.display = items.length ? "block" : "none";
-    noBenefitCount.textContent = items.length ? `${items.length}건` : "";
+    noBenefitToggleBtn.style.display = items.length ? "" : "none";
+    noBenefitCount.textContent = items.length ? `${items.length}` : "";
     noBenefitList.style.display = noBenefitOpen ? "flex" : "none";
     const noBenefitActions = [
       {
@@ -603,8 +603,8 @@
   function renderTrash() {
     const items = state.trash || [];
     const ids = items.map((it) => it.id);
-    trashSection.style.display = items.length ? "block" : "none";
-    trashCount.textContent = items.length ? `${items.length}건` : "";
+    trashToggleBtn.style.display = items.length ? "" : "none";
+    trashCount.textContent = items.length ? `${items.length}` : "";
     trashList.style.display = trashOpen ? "flex" : "none";
     const trashActions = [
       {
@@ -652,7 +652,7 @@
 
     state.cards.forEach((card, idx) => {
       const el = document.createElement("div");
-      el.className = "card";
+      el.className = card.closed ? "card card-closed" : "card";
       el.id = `card-${card.id}`;
       el.innerHTML = cardTemplate(card, idx === 0, idx === state.cards.length - 1);
       applyCardColorTint(el, colorForIndex(idx));
@@ -713,8 +713,9 @@
             <button class="move-card-down" data-id="${card.id}" ${isLast ? "disabled" : ""} title="아래로">▼</button>
           </div>
           <span class="card-title-scroll"><span class="card-title">${escapeHtml(shortCardName(card.name))}</span></span>
+          ${card.closed ? `<span class="loan-type-badge card-closed-badge">해지</span>` : ""}
           ${card.last4 ? `<span class="loan-type-badge">${escapeHtml(card.last4)}</span>` : ""}
-          ${card.perf_threshold ? `<span class="perf-badge ${card.perf_met ? "met" : "unmet"}">실적<br>${card.perf_met ? "충족" : "부족"}</span>` : ""}
+          ${!card.closed && card.perf_threshold ? `<span class="perf-badge ${card.perf_met ? "met" : "unmet"}">실적<br>${card.perf_met ? "충족" : "부족"}</span>` : ""}
         </div>
         <div class="card-actions">
           <button class="icon-btn edit-card" data-id="${card.id}" title="카드 수정">✏️</button>
@@ -1362,11 +1363,6 @@
     list.querySelectorAll(".card").forEach((el) => el.remove());
     emptyHint.style.display = state.recurring_payments.length ? "none" : "block";
 
-    const total = sumBy(state.recurring_payments, (r) => r.active, "amount");
-    const loanTotal = sumBy(state.loans, (l) => l.due_this_month, "due_amount");
-    document.getElementById("recurring-total-value").textContent = `₩${fmt(total)}`;
-    document.getElementById("recurring-grand-total-value").textContent = `₩${fmt(total + loanTotal)}`;
-
     document.getElementById("recurring-unmatched-total").textContent =
       `미확인 ₩${fmt(sumBy(state.recurring_payments, (r) => r.active && !r.matched_this_month, "amount"))}`;
 
@@ -1725,12 +1721,12 @@
     document.getElementById("insurance-unmatched-total").textContent =
       `미확인 ₩${fmt(sumBy(state.insurances, (r) => r.active && !r.matched_this_month, "monthly_premium"))}`;
 
-    sortedInsurances().forEach((item, idx) => {
+    sortedInsurances().forEach((item) => {
       const el = document.createElement("div");
       el.className = "card";
       el.id = `insurance-${item.id}`;
       el.innerHTML = insuranceTemplate(item);
-      applyCardColorTint(el, colorForIndex(idx));
+      applyCardColorTint(el, colorForCardId(item.card_id));
       list.appendChild(el);
       wireInsurance(el, item);
     });
@@ -1757,7 +1753,7 @@
               </span>
             </div>
             <div class="card-text-row">
-              <span class="card-method-dim">${item.company ? escapeHtml(item.company) : "보험사 미입력"}</span>
+              <span class="card-method-dim">${item.company ? escapeHtml(item.company) : "보험사 미입력"}${item.payment_method ? " · " + escapeHtml(shortCardName(item.payment_method)) : ""}</span>
               <span class="card-head-right">
                 ${matchHistoryToggleBtn(`insurance-${item.id}`, item.match_history)}
                 <button class="icon-btn edit-insurance" data-id="${item.id}" title="수정">✏️</button>
@@ -2094,7 +2090,7 @@
   }
 
   // ---- 중복 의심 알림 ----
-  const dupSection = document.getElementById("dup-section");
+  const dupToggleBtn = document.getElementById("dup-toggle");
   const dupList = document.getElementById("dup-list");
   let dupOpen = false;
   document.getElementById("dup-toggle").addEventListener("click", () => {
@@ -2104,8 +2100,8 @@
 
   function renderDuplicates() {
     const groups = state.suspected_duplicates || [];
-    dupSection.style.display = groups.length ? "block" : "none";
-    document.getElementById("dup-count").textContent = groups.length ? `${groups.length}묶음` : "";
+    dupToggleBtn.style.display = groups.length ? "" : "none";
+    document.getElementById("dup-count").textContent = groups.length ? `${groups.length}` : "";
     dupList.style.display = dupOpen ? "flex" : "none";
 
     dupList.innerHTML = groups.map((g) => `
@@ -2155,6 +2151,7 @@
     document.getElementById("card-perf-threshold").value = card && card.perf_threshold ? card.perf_threshold : "";
     document.getElementById("card-perf-excluded").value = card ? card.perf_excluded_keywords : "";
     document.getElementById("card-memo").value = card ? card.memo : "";
+    document.getElementById("card-closed").checked = card ? !!card.closed : false;
     cardModal.classList.add("open");
   }
   document.getElementById("btn-add-card").addEventListener("click", () => openCardModal(null));
@@ -2169,6 +2166,7 @@
       perf_threshold: document.getElementById("card-perf-threshold").value || 0,
       perf_excluded_keywords: document.getElementById("card-perf-excluded").value.trim(),
       memo: document.getElementById("card-memo").value.trim(),
+      closed: document.getElementById("card-closed").checked,
     };
     if (!payload.name) { alert("카드 이름을 입력하세요."); return; }
     const url = editingCardId ? `/api/cards/${editingCardId}` : "/api/cards";

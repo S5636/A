@@ -64,23 +64,16 @@
     <div class="summary-jump-row" id="summary-jump-row"></div>
   </section>
 
-  <section id="inbox-section" class="inbox-section" style="display:none;">
-    <h2><button class="memo-toggle" id="inbox-toggle">🔔 받은 결제 알림 <span id="inbox-count" class="inbox-count"></span> ▾</button></h2>
+  <section id="inbox-tabs-section" class="inbox-section">
+    <h2 class="inbox-tabs-row">
+      <button class="memo-toggle" id="inbox-toggle" style="display:none;">🔔 결제 알림 <span id="inbox-count" class="inbox-count"></span></button>
+      <button class="memo-toggle" id="no-benefit-toggle" style="display:none;">🤷 혜택 없음 <span id="no-benefit-count" class="inbox-count"></span></button>
+      <button class="memo-toggle" id="trash-toggle" style="display:none;">🗑️ 휴지통 <span id="trash-count" class="inbox-count"></span></button>
+      <button class="memo-toggle" id="dup-toggle" style="display:none;">⚠️ 중복 의심 <span id="dup-count" class="inbox-count"></span></button>
+    </h2>
     <div id="inbox-list" class="inbox-list" style="display:none;"></div>
-  </section>
-
-  <section id="no-benefit-section" class="inbox-section" style="display:none;">
-    <h2><button class="memo-toggle" id="no-benefit-toggle">🤷 혜택 없음 처리 내역 <span id="no-benefit-count" class="inbox-count"></span> ▾</button></h2>
     <div id="no-benefit-list" class="inbox-list" style="display:none;"></div>
-  </section>
-
-  <section id="trash-section" class="inbox-section" style="display:none;">
-    <h2><button class="memo-toggle" id="trash-toggle">🗑️ 휴지통 <span id="trash-count" class="inbox-count"></span> ▾</button></h2>
     <div id="trash-list" class="inbox-list" style="display:none;"></div>
-  </section>
-
-  <section id="dup-section" class="inbox-section" style="display:none;">
-    <h2><button class="memo-toggle" id="dup-toggle">⚠️ 중복 의심 <span id="dup-count" class="inbox-count"></span> ▾</button></h2>
     <div id="dup-list" class="inbox-list" style="display:none;"></div>
   </section>
 
@@ -141,19 +134,6 @@
   </div>
 
   <div id="recurring-view" style="display:none;">
-    <section class="monthly-summary">
-      <div class="summary-boxes">
-        <div class="summary-box summary-earn">
-          <div class="summary-label">지출만 합계</div>
-          <div class="summary-value" id="recurring-total-value">0원</div>
-        </div>
-        <div class="summary-box summary-cashback">
-          <div class="summary-label">당월 상환 금액 합계</div>
-          <div class="summary-value" id="recurring-grand-total-value">0원</div>
-        </div>
-      </div>
-    </section>
-
     <div id="recurring-card-summary-list" class="summary-jump-row" style="display:none;"></div>
 
     <div class="sort-row">
@@ -256,6 +236,9 @@
     </label>
     <label>메모 (선택)
       <textarea id="card-memo" rows="2" placeholder="카드 특이사항 등"></textarea>
+    </label>
+    <label class="checkbox-row">
+      <input type="checkbox" id="card-closed"> 해지된 카드 (결제 알림 자동매칭 대상에서 제외)
     </label>
     <div class="modal-actions">
       <button class="btn secondary" id="card-cancel">취소</button>

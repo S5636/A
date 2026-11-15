@@ -536,7 +536,12 @@ def serialize_inbox(conn):
         "SELECT * FROM inbox_items WHERE status = 'pending' AND deleted_at IS NULL "
         "ORDER BY occurred_at DESC, id DESC"
     ).fetchall()
-    cards_with_code = conn.execute("SELECT id, name, issuer, last4 FROM cards WHERE last4 != ''").fetchall()
+    # 해지된 카드는 last4가 남아있어도 매칭 후보에서 뺀다 - 실수로 같은
+    # 뒷자리로 결제 알림이 들어와도 해지한 카드의 혜택으로 잘못 배정되지
+    # 않게.
+    cards_with_code = conn.execute(
+        "SELECT id, name, issuer, last4 FROM cards WHERE last4 != '' AND closed = 0"
+    ).fetchall()
     benefits_by_card = {}
     for b in conn.execute(
         "SELECT id, card_id, name, merchant_keywords, calc_mode, always_doubled, rate_table FROM benefits"
@@ -2136,6 +2141,7 @@ def _serialize_cards(conn):
             "cycle_end": (end - timedelta(days=1)).isoformat(),
             "benefits": benefit_list,
             "sort_order": card["sort_order"],
+            "closed": bool(card["closed"]),
         })
     return result
 
@@ -2191,8 +2197,8 @@ def create_card():
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM cards").fetchone()["m"]
         conn.execute(
             """INSERT INTO cards (name, short_name, issuer, last4, reset_day, perf_threshold, memo, sort_order,
-               perf_excluded_keywords)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               perf_excluded_keywords, closed)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (data.get("short_name") or "").strip(),
@@ -2203,6 +2209,7 @@ def create_card():
                 (data.get("memo") or "").strip(),
                 max_order + 1,
                 (data.get("perf_excluded_keywords") or "").strip(),
+                1 if data.get("closed") else 0,
             ),
         )
         conn.commit()
@@ -2234,9 +2241,11 @@ def update_card(card_id):
         except (TypeError, ValueError):
             sort_order = card["sort_order"]
 
+        closed = 1 if data.get("closed", bool(card["closed"])) else 0
+
         conn.execute(
             """UPDATE cards SET name = ?, short_name = ?, issuer = ?, last4 = ?, reset_day = ?,
-               perf_threshold = ?, memo = ?, sort_order = ?, perf_excluded_keywords = ? WHERE id = ?""",
+               perf_threshold = ?, memo = ?, sort_order = ?, perf_excluded_keywords = ?, closed = ? WHERE id = ?""",
             (
                 name,
                 (data.get("short_name", card["short_name"]) or "").strip(),
@@ -2247,6 +2256,7 @@ def update_card(card_id):
                 (data.get("memo", card["memo"]) or "").strip(),
                 sort_order,
                 (data.get("perf_excluded_keywords", card["perf_excluded_keywords"]) or "").strip(),
+                closed,
                 card_id,
             ),
         )

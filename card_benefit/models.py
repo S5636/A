@@ -272,6 +272,7 @@ def init_db():
         _ensure_column(conn, "inbox_items", "matched_card_label", "matched_card_label TEXT DEFAULT ''")
         _ensure_column(conn, "inbox_items", "deleted_at", "deleted_at TEXT DEFAULT NULL")
         _ensure_column(conn, "stocks", "risk_label", "risk_label TEXT DEFAULT ''")
+        _ensure_column(conn, "cards", "closed", "closed INTEGER NOT NULL DEFAULT 0")
 
         # recurring_id/insurance_id는 _ensure_column으로 나중에 추가된 컬럼이라
         # (예전 DB엔 처음부터 있던 게 아니라서) ON DELETE SET NULL 외래키 제약이
