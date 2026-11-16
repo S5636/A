@@ -1236,6 +1236,17 @@
     } catch (_) {
       return;
     }
+    // 사용자 지적: "이게 30분에 한 번씩 돌아가는지 안 돌아가는지 내가 알
+    // 수가 없네" - 실패/신규주문처럼 뭔가 "생겼을 때"만 알림이 뜨니 정상
+    // 주기에는 확인할 방법이 없었다. 마지막/다음 실행 예정 시각을 화면에
+    // 항상 띄워서 조용히 확인할 수 있게 한다.
+    const statusEl = document.getElementById('dpj-auto-status');
+    if (statusEl) {
+      const parts = [];
+      if (data.last_run_at) parts.push(`마지막 자동수집 ${data.last_run_at}${data.last_error ? ' (실패)' : ''}`);
+      if (data.next_run_at) parts.push(`다음 예정 ${data.next_run_at}`);
+      statusEl.textContent = parts.join(' · ') || 'DPJ 자동수집 대기 중...';
+    }
     if (data.last_error) {
       // 자동 수집 자체가 실패했다는 걸 사람이 못 보고 지나치면(창을 안
       // 보고 있는 시간이 대부분일 테니) 계속 실패만 반복될 수 있다 - 실패도

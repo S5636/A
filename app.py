@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from werkzeug.exceptions import HTTPException
@@ -600,6 +600,12 @@ _dpj_auto_state = {
     'last_run_at': '',       # 가장 최근 자동 수집이 끝난 시각(성공/실패 무관)
     'last_error': '',        # 가장 최근 자동 수집이 실패했으면 그 이유(성공하면 빈 문자열)
     'consecutive_failures': 0,  # 연달아 실패한 횟수(아래 재시작 안내 판단용) - 성공하면 0으로 리셋
+    # 사용자 지적: "이게 30분에 한 번씩 돌아가는지 안 돌아가는지 내가 알 수가
+    # 없네" - 실패/신규주문처럼 "뭔가 생겼을 때"만 알림이 오니, 아무 일도
+    # 없는 정상적인 주기에는 확인할 방법이 없었다. 다음 자동 수집 예정
+    # 시각을 저장해두고 화면에 항상 띄워서, 그 시각이 계속 앞으로 움직이는지
+    # 보면 루프가 살아있는지 조용히 확인할 수 있게 한다.
+    'next_run_at': '',
 }
 _dpj_auto_lock = threading.Lock()
 
@@ -671,8 +677,12 @@ def _note_dpj_outcome(failed):
 
 
 def _dpj_auto_loop():
+    with _dpj_auto_lock:
+        _dpj_auto_state['next_run_at'] = (datetime.now() + timedelta(seconds=DPJ_AUTO_INTERVAL_SECONDS)).strftime('%Y-%m-%d %H:%M:%S')
     while True:
         time.sleep(DPJ_AUTO_INTERVAL_SECONDS)
+        with _dpj_auto_lock:
+            _dpj_auto_state['next_run_at'] = (datetime.now() + timedelta(seconds=DPJ_AUTO_INTERVAL_SECONDS)).strftime('%Y-%m-%d %H:%M:%S')
         if _is_dpj_auto_night_now():
             # 야간(21시~다음날 09시)에는 이번 주기는 건너뛰고 그냥 다시
             # 잔다 - last_run_at/last_error를 안 건드려서 "실행은 했는데
