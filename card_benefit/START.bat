@@ -21,7 +21,12 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5050 ^| findstr LISTENING') 
     for /f usebackq %%p in (`powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=%%a').ParentProcessId" 2^>nul`) do (
         taskkill /F /T /PID %%p >nul 2>nul
     )
-    taskkill /F /T /PID %%a
+    rem The parent kill above usually already takes this PID down with it
+    rem (it was its child), so this is just a safety net for when that
+    rem fails - the "could not find process" message when it's already
+    rem gone is expected and harmless, so it's hidden here instead of
+    rem printed as if it were a real failure.
+    taskkill /F /T /PID %%a >nul 2>nul
 )
 if "%FOUND_OLD_PORT%"=="0" echo No old server was using port 5050.
 
