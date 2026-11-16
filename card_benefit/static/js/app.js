@@ -1437,7 +1437,7 @@
               </span>
             </div>
             <div class="card-text-row">
-              <span class="card-method-dim">${item.payment_method ? escapeHtml(item.payment_method) : "결제수단 미입력"}</span>
+              <span class="card-method-dim card-title-scroll">${item.payment_method ? escapeHtml(item.payment_method) : "결제수단 미입력"}</span>
               <span class="card-head-right">
                 ${matchHistoryToggleBtn(`recurring-${item.id}`, item.match_history)}
                 <button class="icon-btn edit-recurring" data-id="${item.id}" title="수정">✏️</button>
@@ -1759,7 +1759,7 @@
               </span>
             </div>
             <div class="card-text-row">
-              <span class="card-method-dim">${item.company ? escapeHtml(item.company) : "보험사 미입력"}${item.payment_method ? " · " + escapeHtml(shortCardName(item.payment_method)) : ""}</span>
+              <span class="card-method-dim card-title-scroll">${item.company ? escapeHtml(item.company) : "보험사 미입력"}${item.payment_method ? " · " + escapeHtml(shortCardName(item.payment_method)) : ""}</span>
               <span class="card-head-right">
                 ${matchHistoryToggleBtn(`insurance-${item.id}`, item.match_history)}
                 <button class="icon-btn edit-insurance" data-id="${item.id}" title="수정">✏️</button>
