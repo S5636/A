@@ -5,6 +5,7 @@ Windows 콘솔 코드페이지에 따라 명령어가 깨져서 해석되는 문
 .bat은 최대한 아무 내용도 없게(순수 영문) 두고 이 스크립트가 안내/설치/실행을 전담한다."""
 import hashlib
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -127,6 +128,40 @@ def _check_and_apply_update():
         print(f"[안내] 업데이트 적용에 실패했습니다(무시하고 지금 버전으로 계속 진행합니다): {type(e).__name__}: {e}")
 
 
+def _close_previous_instance(port=5000):
+    """사용자 요청: "실행 파일 열면 까만 로고 창 뜨는 거, 그 전에 기존 창이
+    꺼지게 해달라 - 코어싱크는 그렇게 되어있다" - 새로 실행할 때 이전에
+    띄워뒀던 마진보드 서버(와 그 콘솔 창)가 아직 떠있으면 자동으로 먼저
+    종료해서, 까만 콘솔 창이 여러 개 쌓이지 않고 항상 최신 창 하나만
+    남게 한다. 윈도우에서만 의미가 있다(netstat/taskkill 사용).
+
+    주의: 이전 창에서 STOCK/ORDER 등 자동화가 한창 진행 중이었다면 그
+    작업도 강제로 함께 끊긴다 - 기존 창을 통째로 종료하는 거라 피할 수 없다."""
+    if platform.system() != 'Windows':
+        return
+    try:
+        result = subprocess.run(['netstat', '-ano'], capture_output=True, text=True, timeout=5)
+    except Exception:
+        return
+    my_pid = os.getpid()
+    pids_to_kill = set()
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 4 and parts[0].upper() == 'TCP' and parts[1].endswith(f':{port}') \
+                and 'LISTENING' in line.upper():
+            pid = parts[-1]
+            if pid.isdigit() and int(pid) != my_pid:
+                pids_to_kill.add(pid)
+    for pid in pids_to_kill:
+        print(f"[안내] 이전에 실행 중이던 마진보드 창을 자동으로 닫습니다(PID {pid})...")
+        try:
+            subprocess.run(['taskkill', '/PID', pid, '/F', '/T'], capture_output=True, timeout=5)
+        except Exception:
+            pass
+    if pids_to_kill:
+        time.sleep(1)
+
+
 def open_browser_later():
     time.sleep(3)
     try:
@@ -148,6 +183,8 @@ def main():
     print("  이유상점 Margin Board")
     print("============================================")
     print()
+
+    _close_previous_instance()
 
     # pip install/playwright install을 매번 무조건 실행하면, pip이 로컬에 이미
     # 다 깔려있어도 매번 네트워크로 버전을 다시 확인하느라 시간이 걸린다
