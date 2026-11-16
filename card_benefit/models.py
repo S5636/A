@@ -310,6 +310,17 @@ def init_db():
                     (fixed_merchant, row["id"]),
                 )
 
+        # 2026-11: "하나은행 비상금대출(마이너스통장)"의 출금계좌가 그냥
+        # "하나은행"으로만 등록돼 있어서, 알림 원문에 은행 이름이 안 찍히고
+        # 계좌번호만 찍히는 형식이라 자동매칭이 안 됐다. 이 대출 하나만
+        # 콕 집어서 계좌 뒷자리로 바꾼다 - 다른 대출이 "하나은행"을 그대로
+        # 쓰고 있어도 그쪽은 건드리지 않는다. 이미 바뀐 뒤에는 조건에 안
+        # 걸려서 여러 번 실행해도 안전함(멱등).
+        conn.execute(
+            "UPDATE loans SET withdrawal_account = '1668' "
+            "WHERE name = '하나은행 비상금대출(마이너스통장)' AND withdrawal_account = '하나은행'"
+        )
+
         conn.commit()
     finally:
         conn.close()
