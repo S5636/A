@@ -1340,16 +1340,17 @@
 
   function sortedRecurring() {
     const items = state.recurring_payments.slice();
-    if (recurringSort === "amount") {
-      items.sort((a, b) => (b.amount || 0) - (a.amount || 0));
-    } else {
-      items.sort((a, b) => {
-        if (!a.payment_day && !b.payment_day) return 0;
-        if (!a.payment_day) return 1;
-        if (!b.payment_day) return -1;
-        return a.payment_day - b.payment_day;
-      });
-    }
+    items.sort((a, b) => {
+      const stoppedDiff = (a.active ? 0 : 1) - (b.active ? 0 : 1);
+      if (stoppedDiff !== 0) return stoppedDiff;
+      if (recurringSort === "amount") {
+        return (b.amount || 0) - (a.amount || 0);
+      }
+      if (!a.payment_day && !b.payment_day) return 0;
+      if (!a.payment_day) return 1;
+      if (!b.payment_day) return -1;
+      return a.payment_day - b.payment_day;
+    });
     return items;
   }
 
