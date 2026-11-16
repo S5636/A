@@ -1604,10 +1604,15 @@ def _try_auto_match_loan_account_text(conn, inbox_id):
     loans = conn.execute(
         "SELECT * FROM loans WHERE withdrawal_account != ''"
     ).fetchall()
+    # 우리은행처럼 "1002-254-781***계좌"같이 계좌번호를 하이픈으로 끊어서
+    # 찍는 은행도 있다. 등록해둔 출금계좌 숫자가 하이픈 때문에 원문에서
+    # 떨어져 보여서 그냥 in text로는 안 걸리니, 원문 쪽도 숫자만 남겨서
+    # 비교한다(마스킹 *은 어차피 숫자가 아니라 제거돼도 비교에 지장 없음).
+    text_digits = _account_digits(text)
     matches = [
         l for l in loans
         if l["withdrawal_account"] in text
-        or (_account_digits(l["withdrawal_account"]) and _account_digits(l["withdrawal_account"]) in text)
+        or (_account_digits(l["withdrawal_account"]) and _account_digits(l["withdrawal_account"]) in text_digits)
     ]
     if len(matches) > 1:
         if "이자상환" in text:
