@@ -1566,6 +1566,15 @@ def _mark_loan_paid_from_inbox(conn, loan_id, inbox_id, amount=None):
         conn.execute("UPDATE loans SET current_balance = ? WHERE id = ?", (balance_after, loan_id))
 
 
+def _account_digits(s):
+    """"하나은행 6681"처럼 은행명을 같이 적어서 사람이 알아보기 쉽게 적어둔
+    출금계좌값에서 숫자만 뽑아낸다. 알림 원문엔 은행명 없이 계좌번호
+    뒷자리만 찍히는 경우가 많아서, 은행명이 섞인 문자열 그대로는 알림
+    본문과 절대 안 맞는다 - 숫자만 따로 비교해야 매칭이 된다."""
+    digits = re.sub(r"\D", "", s or "")
+    return digits
+
+
 def _try_auto_match_loan_account_text(conn, inbox_id):
     """"내 광주은행 통장 → 원리금441779"처럼 카드 결제가 아니라 계좌에서
     바로 빠져나가는 대출 원리금 자동이체 알림은, 혜택을 받을 수 있는
@@ -1595,7 +1604,11 @@ def _try_auto_match_loan_account_text(conn, inbox_id):
     loans = conn.execute(
         "SELECT * FROM loans WHERE withdrawal_account != ''"
     ).fetchall()
-    matches = [l for l in loans if l["withdrawal_account"] in text]
+    matches = [
+        l for l in loans
+        if l["withdrawal_account"] in text
+        or (_account_digits(l["withdrawal_account"]) and _account_digits(l["withdrawal_account"]) in text)
+    ]
     if len(matches) > 1:
         if "이자상환" in text:
             narrowed = [l for l in matches if (l["repayment_type"] or "") == "만기일시상환"]
