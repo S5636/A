@@ -325,6 +325,19 @@ def init_db():
             "WHERE name = '하나은행 비상금대출(마이너스통장)' AND withdrawal_account IN ('하나은행', '1668', '6681')"
         )
 
+        # 2026-11: 같은 문제(출금계좌가 은행명만 있고 계좌번호가 없어서
+        # 자동매칭이 안 됨)가 우리은행 대출이랑 IBK사업자 대출에도 있었다.
+        # 이름 대신 매월 상환일+출금계좌 라벨로 특정해서(이름이 뭔지 화면
+        # 캡처로는 다 안 보여서) 그 대출 하나만 보정한다.
+        conn.execute(
+            "UPDATE loans SET withdrawal_account = '우리은행 1002-254-781' "
+            "WHERE withdrawal_account = '우리은행' AND payment_day = 16 AND monthly_payment = 13000"
+        )
+        conn.execute(
+            "UPDATE loans SET withdrawal_account = 'IBK사업자 395-01-018' "
+            "WHERE withdrawal_account = 'IBK사업자' AND payment_day = 14"
+        )
+
         conn.commit()
     finally:
         conn.close()
