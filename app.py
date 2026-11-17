@@ -731,6 +731,16 @@ def _dpj_auto_loop():
                 _dpj_auto_state['last_error'] = _friendly_error(e)
             print(f"[DPJ 자동수집 {now}] 실패(예외): {type(e).__name__}: {e}")
             _append_dpj_history(now, '실패(예외)', [f'{type(e).__name__}: {e}'])
+            # '다팔자가 아직 바쁜 상태' 오류는 다팔자 자체(자체 자동동기화 등)가
+            # 바쁜 거라 마진보드를 재시작해도 전혀 안 풀린다 - 실제로 몇
+            # 시간씩 이 오류만 반복되면서 재시작만 계속 돌고 아무것도 안
+            # 고쳐지는 걸 확인했다(사용자 지적). 이 경우는 연속실패 카운터에
+            # 아예 반영하지 않고(재시작 후보에서 제외) 그냥 다음 30분 주기에
+            # 다시 시도한다 - 다팔자가 자기 할 일을 끝내면 그때 알아서 된다.
+            if isinstance(e, RuntimeError) and '바쁜 상태' in str(e):
+                _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)} (다팔자 자체가 바쁜 상태라 재시작은 소용없어 생략합니다 - 다음 주기에 다시 시도)',
+                            title='마진보드 DPJ 자동수집 지연')
+                continue
             hint, should_restart = _note_dpj_outcome(True)
             _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)}{hint}', title='마진보드 DPJ 자동수집 실패')
             if should_restart:
