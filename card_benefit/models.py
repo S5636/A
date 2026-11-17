@@ -338,6 +338,40 @@ def init_db():
             "WHERE withdrawal_account = 'IBK사업자' AND payment_day = 14"
         )
 
+        # 2026-11: 카카오뱅크 비상금대출이 아직 대출 탭에 등록이 안 돼 있어서
+        # 추가한다. 마이너스통장형이라 "원금"/"현재 잔액" 의미가 다른 대출과
+        # 달라서(한도성 - 하나은행 비상금대출과 같은 방식), principal을
+        # 대출 한도(300만원)로, current_balance를 최근 거래 내역의 "거래 후
+        # 잔액"으로 넣는다. 이름으로 이미 있는지 확인하고 없을 때만 추가해서
+        # 여러 번 실행해도 중복으로 안 늘어남(멱등).
+        exists = conn.execute(
+            "SELECT 1 FROM loans WHERE name = '카카오뱅크 비상금대출'"
+        ).fetchone()
+        if not exists:
+            max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM loans").fetchone()["m"]
+            conn.execute(
+                """INSERT INTO loans (name, loan_type, principal, current_balance, interest_rate,
+                   repayment_type, start_date, end_date, payment_day, monthly_payment,
+                   withdrawal_account, memo, sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "카카오뱅크 비상금대출",
+                    "개인 신용",
+                    3000000,
+                    2896702,
+                    12.265,
+                    "마이너스통장(수시)",
+                    "2021-08-19",
+                    "2027-08-19",
+                    20,
+                    20080,
+                    "카카오뱅크 3333-01-9748134",
+                    "마이너스통장형이라 '원금'은 대출한도, '현재 잔액'은 지금 당겨쓴 금액. "
+                    "이자는 매달 금액이 달라서(매월 실제로 내는 금액은 최근 이자 기준 추정치).",
+                    max_order + 1,
+                ),
+            )
+
         conn.commit()
     finally:
         conn.close()
