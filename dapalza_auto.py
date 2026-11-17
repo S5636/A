@@ -501,33 +501,46 @@ def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
 
 
 def _find_status_filter_tab(win, label, descendants=None):
-    """'배송준비 (1)'처럼 괄호 숫자가 붙은 주문상태 "필터 탭"을 찾는다. 표
-    안의 주문 행에 찍힌 상태 배지는 괄호 숫자 없이 '배송준비'만 있는
-    글자라서, 라벨 뒤에 ' ('가 붙은 것만 찾으면 그 배지와 안 헷갈린다."""
+    """'배송준비 (1)'같은 주문상태 "필터 탭"을 찾는다. 두 가지 화면 구조를
+    모두 대비한다: (1) 라벨+건수가 한 덩어리 글자("배송준비 (1)")인 경우 -
+    그 접두사로 바로 찾는다(표 안 상태배지는 괄호 숫자가 없어서 안 걸림).
+    (2) 라벨과 건수가 서로 다른 요소로 나뉘어 있어서 글자가 그냥
+    "배송준비"뿐인 경우 - 이땐 표 안 상태배지와 글자가 똑같아서 텍스트만
+    으론 구분이 안 되니, 화면에서 제일 위쪽에 있는 걸 고른다(필터 탭은
+    항상 주문 표보다 위에 있다)."""
     try:
         if descendants is None:
             descendants = win.descendants()
-        candidates = []
+        prefixed = []
+        exact = []
         for c in descendants:
             try:
                 t = c.window_text().strip()
             except Exception:
                 continue
-            if t.startswith(label + ' (') or t.startswith(label + '('):
-                try:
-                    if not c.is_visible():
-                        continue
-                    r = c.rectangle()
-                    area = max(0, r.width()) * max(0, r.height())
-                except Exception:
-                    area = float('inf')
-                if area <= 0:
+            if not t:
+                continue
+            try:
+                if not c.is_visible():
                     continue
-                candidates.append((area, c))
-        if not candidates:
-            return None
-        candidates.sort(key=lambda x: x[0])
-        return candidates[0][1]
+                r = c.rectangle()
+                area = max(0, r.width()) * max(0, r.height())
+                top = r.top
+            except Exception:
+                continue
+            if area <= 0:
+                continue
+            if t.startswith(label + ' (') or t.startswith(label + '('):
+                prefixed.append((area, c))
+            elif t == label:
+                exact.append((top, area, c))
+        if prefixed:
+            prefixed.sort(key=lambda x: x[0])
+            return prefixed[0][1]
+        if exact:
+            exact.sort(key=lambda x: (x[0], x[1]))
+            return exact[0][2]
+        return None
     except Exception:
         return None
 
@@ -605,9 +618,14 @@ def _collect_and_register_tracking(win, L):
     넘어갈 수 있다 - 첫 실행 로그를 보고 다르면 바로 맞춰 고쳐야 한다."""
     L("'배송준비' 필터 적용...")
     _dismiss_sync_toast(win, L)
-    filter_tab = _find_status_filter_tab(win, '배송준비')
+    try:
+        descendants0 = win.descendants()
+    except Exception:
+        descendants0 = None
+    filter_tab = _find_status_filter_tab(win, '배송준비', descendants=descendants0)
     if filter_tab is None:
-        L("'배송준비' 필터 탭을 못 찾았습니다 - 운송장수집/등록을 건너뜁니다.")
+        visible = _dump_controls(win, descendants=descendants0)
+        L(f"'배송준비' 필터 탭을 못 찾았습니다 - 운송장수집/등록을 건너뜁니다. 지금 화면에 보이는 글자들: {visible}")
         return
     try:
         filter_tab.click_input()
