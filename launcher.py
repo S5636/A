@@ -206,13 +206,26 @@ def main():
     print()
 
     print("설치 완료. 서버를 시작합니다.")
-    print("잠시 후 브라우저가 자동으로 열립니다. (안 열리면 http://127.0.0.1:5000 직접 접속하세요)")
+    # 자동 재시작(app.py의 _self_restart) 직후에는 브라우저 탭을 새로 안
+    # 연다 - 사용자는 이미 열어둔 탭이 있을 텐데 재시작마다 또 새 탭이
+    # 뜨면 원치 않는 창이 갑자기 나타나는 걸로 보이고(사용자 지적:
+    # "이창은왜뜨는거냐 그래서계속오류나잖아"), 그 새 탭이 포커스를
+    # 가져가면서 때마침 다음 다팔자 자동화가 엉뚱한 창에 입력을 보내
+    # 또 실패하는 연쇄로 이어질 수 있다(실제로 재시작 직후 바로 다음
+    # DPJ 자동수집이 "저장된 파일을 못 찾았다"로 또 실패한 로그와
+    # 시간대가 겹침).
+    is_self_restart = os.environ.pop('MARGIN_BOARD_SELF_RESTART', None) == '1'
+    if is_self_restart:
+        print("(자동 재시작 - 이미 열려있는 브라우저 탭을 그대로 쓰므로 새 탭을 열지 않습니다.)")
+    else:
+        print("잠시 후 브라우저가 자동으로 열립니다. (안 열리면 http://127.0.0.1:5000 직접 접속하세요)")
     print()
     print("이 창을 닫으면 프로그램이 종료됩니다. 계속 이 창을 켜두세요.")
     print("============================================")
     print()
 
-    threading.Thread(target=open_browser_later, daemon=True).start()
+    if not is_self_restart:
+        threading.Thread(target=open_browser_later, daemon=True).start()
 
     import app  # requirements 설치가 끝난 뒤에 import (미리 하면 설치 전에 실패함)
     # threaded=True가 꼭 필요하다 - DPJ 자동화 요청 하나가 몇 분씩 걸릴 수
