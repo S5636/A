@@ -445,32 +445,6 @@ def _dismiss_sync_toast(win, log=None, descendants=None):
     return False
 
 
-_STATUS_COUNT_RE = re.compile(r'\((\d+)\)')
-
-
-def _read_status_count(win, label, descendants=None, log=None):
-    """'배송준비 (1)'처럼 주문상태 탭에 괄호 숫자로 표시되는 건수를 읽는다.
-    운송장수집/등록을 실제로 할 필요가 있는지(배송준비/신규주문처럼 '배송중'
-    이전 단계 건이 있는지), 그리고 운송장수집으로 뭔가 실제로 수집됐는지
-    (이 건수가 줄었는지) 판단하는 데 쓴다."""
-    try:
-        if descendants is None:
-            descendants = win.descendants()
-        for c in descendants:
-            try:
-                t = c.window_text().strip()
-            except Exception:
-                continue
-            if t.startswith(label):
-                m = _STATUS_COUNT_RE.search(t)
-                if m:
-                    return int(m.group(1))
-    except Exception as e:
-        if log is not None:
-            log(f"'{label}' 건수 읽기 실패: {type(e).__name__}: {e}")
-    return None
-
-
 def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
     """'OOO을 완료하였습니다' 팝업(메인 창 안에 겹쳐 뜨는 내부 모달)을 기다렸다가
     '확인'을 누른다 - 기존 '주문수집' 완료 팝업 처리(_collect_and_upload_impl
@@ -527,35 +501,24 @@ def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
 
 
 def _collect_and_register_tracking(win, L):
-    """사용자 요청: "DPJ 돌고 나서 운송장 수집하고 운송장 등록하고 싶거든?
-    운송장 수집해서 수집된 게 있으면 등록하는 방식으로" + "주문상태가 배송중
-    이전단계일경우 마진보드로돌아가기전에 운송장수집 누르고 수집되면
-    운송장등록 누르고 확인버튼누른다음에 마진보드로돌아가는거지".
+    """사용자 요청: "DPJ 돌고 나서 운송장 수집하고 운송장 등록하고 싶거든?"
 
     다팔자 화면 자체에 '오너클랜 운송장수집'/'운송장등록' 버튼이 이미 있어서
     (사용자 스크린샷으로 확인) 오너클랜 쪽을 따로 스크래핑할 필요 없이 그
-    버튼 두 개만 순서대로 누르면 된다. "수집된 게 있는지"는 완료 팝업
-    문구만으로는 확신할 수 없어서(정확한 문구를 실제로 본 적이 없음), 대신
-    사용자가 직접 가리킨 '배송준비'/'신규주문' 건수가 운송장수집 전후로
-    줄었는지로 판단한다 - 줄었으면 적어도 하나는 운송장이 붙어서 상태가
-    '배송중'으로 넘어갔다는 뜻이다.
+    버튼 두 개를 순서대로 누르면 된다.
+
+    처음엔 "수집된 게 있으면 등록"을 '배송준비' 건수가 줄었는지로 판단하려
+    했는데, 사용자 지적대로 운송장이 수집된다고 해서 '배송준비'→'배송중'으로
+    상태가 자동으로 넘어가는 게 아니라서 그 판단 방법 자체가 틀렸다. 대신
+    사용자 확인("운송장등록 버튼을 수집된 게 하나도 없을 때 눌러도 안전함")에
+    따라 조건 판단 없이 두 버튼을 항상 순서대로 누른다 - 수집된 게 없으면
+    다팔자가 알아서 아무 일도 안 하거나 '등록할 항목 없음' 정도로 끝난다.
 
     주의: 완료 팝업의 실제 문구가 기존 수집 팝업과 다른 템플릿이면(예상:
     'OOO을 완료하였습니다')이 함수가 '확인'을 못 눌러 다음 단계로 못
     넘어갈 수 있다 - 첫 실행 로그(특히 '완료하였습니다 확인 팝업을 못
     찾았습니다' 여부)를 보고 다르면 바로 맞춰 고쳐야 한다."""
-    try:
-        descendants = win.descendants()
-    except Exception:
-        descendants = None
-    before_prep = _read_status_count(win, '배송준비', descendants, L) or 0
-    before_new = _read_status_count(win, '신규주문', descendants, L) or 0
-    before_total = before_prep + before_new
-    if before_total == 0:
-        L('배송준비/신규주문 건이 없습니다(모두 배송중 이상 단계) - 운송장수집/등록은 건너뜁니다.')
-        return
-
-    L(f"배송준비 {before_prep}건 / 신규주문 {before_new}건(배송중 이전 단계) - '오너클랜 운송장수집' 버튼 클릭...")
+    L("'오너클랜 운송장수집' 버튼 클릭...")
     _dismiss_sync_toast(win, L)
     try:
         _click(win, '오너클랜 운송장수집', 'Button', L)
@@ -564,22 +527,10 @@ def _collect_and_register_tracking(win, L):
         return
 
     if not _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
-        L('운송장수집 완료 확인 팝업을 못 받았습니다 - 그래도 건수 변화를 확인해봅니다.')
+        L('운송장수집 완료 확인 팝업을 못 받았습니다 - 그래도 운송장등록은 이어서 시도합니다.')
     time.sleep(1)
 
-    try:
-        after_descendants = win.descendants()
-    except Exception:
-        after_descendants = None
-    after_prep = _read_status_count(win, '배송준비', after_descendants, L)
-    after_new = _read_status_count(win, '신규주문', after_descendants, L)
-    after_total = (after_prep if after_prep is not None else before_prep) + \
-                  (after_new if after_new is not None else before_new)
-    if after_total >= before_total:
-        L(f'운송장수집으로 수집된 게 없는 것으로 보입니다(배송준비+신규주문 {before_total}건 → {after_total}건) - 운송장등록은 건너뜁니다.')
-        return
-
-    L(f"운송장수집으로 일부 수집된 것으로 보입니다(배송준비+신규주문 {before_total}건 → {after_total}건) - '운송장등록' 버튼 클릭...")
+    L("'운송장등록' 버튼 클릭...")
     _dismiss_sync_toast(win, L)
     try:
         _click(win, '운송장등록', 'Button', L)

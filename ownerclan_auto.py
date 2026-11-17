@@ -46,6 +46,16 @@ WHALE_PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile_whale')
 # 지적: "네모네모 창 계속 뜨는데").
 CHROME_PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile_chrome')
 
+# 마진보드 프로세스가 재시작(자동 재시작, 또는 실행 시 "기존 창 자동 닫기")될
+# 때마다 이 파이썬 프로세스의 메모리(_state)는 완전히 비워진다 - 그런데
+# 실제 브라우저 프로세스는 안 죽고 고아로 살아남아서 로그인 상태를 그대로
+# 들고 있는 경우가 많다. 이 포트로 디버그 프로토콜을 열어두면, 새 프로세스가
+# 메모리에 아무 기록이 없어도 CDP로 재접속해서 그 로그인 세션을 그대로
+# 이어받을 수 있다(사용자 지적: "마진보드 창은 안 꺼지고 오너클랜 로그인
+# 창만 꺼졌어? 매번 로그인을 새로 해줘야 되는 거야?" - 재시작마다 재로그인이
+# 필요했던 진짜 원인은 이 기억 상실이었다).
+_CDP_PORT = 17391
+
 _state = {'pw': None, 'context': None, 'page': None}
 
 # Playwright sync API는 만든 스레드에서만 안전하게 쓸 수 있어서, 브라우저를
@@ -264,6 +274,38 @@ def _find_chrome_executable():
     return None
 
 
+def _try_reconnect_existing_browser(L):
+    """이 프로세스 메모리(_state)엔 기록이 없어도(재시작 직후 등), 이전
+    실행이 --remote-debugging-port로 띄워둔 브라우저가 고아 프로세스로나마
+    아직 살아있을 수 있다 - 있으면 죽이지 않고 CDP로 그대로 이어받는다
+    (로그인 세션 유지). 보통(브라우저가 아예 없는 평범한 경우)엔 그냥
+    조용히 실패하는 게 정상이라 실패 시엔 로그를 남기지 않는다."""
+    pw = None
+    try:
+        from playwright.sync_api import sync_playwright
+        pw = sync_playwright().start()
+        browser = pw.chromium.connect_over_cdp(f'http://127.0.0.1:{_CDP_PORT}', timeout=5000)
+        if not browser.contexts:
+            browser.close()
+            pw.stop()
+            return None
+        context = browser.contexts[0]
+        page = context.pages[0] if context.pages else context.new_page()
+        page.evaluate('1')
+        _state['pw'] = pw
+        _state['context'] = context
+        _state['page'] = page
+        L('이전 실행에서 로그인해둔 브라우저를 그대로 이어받았습니다 (다시 로그인할 필요 없음).')
+        return page
+    except Exception:
+        if pw is not None:
+            try:
+                pw.stop()
+            except Exception:
+                pass
+        return None
+
+
 def _get_or_launch_page(L, launch_if_missing=True):
     """반드시 워커 스레드 안에서만 호출한다. 이미 살아있는 브라우저 페이지가
     있으면 그대로 재사용하고, 없으면(그리고 launch_if_missing이면) 새로 띄운다."""
@@ -275,6 +317,13 @@ def _get_or_launch_page(L, launch_if_missing=True):
             if launch_if_missing:
                 L('이전에 열려있던 브라우저 창이 닫혀있어서 다시 엽니다...')
             _cleanup()
+
+    # launch_if_missing이 False인 호출(STOCK/ORDER 등)에서도 재접속은
+    # 시도한다 - 재시작 직후에 "로그인 먼저 해주세요"로 막히는 대신, 이전
+    # 브라우저가 아직 살아있으면 바로 이어서 쓸 수 있게.
+    reconnected = _try_reconnect_existing_browser(L)
+    if reconnected is not None:
+        return reconnected
 
     if not launch_if_missing:
         return None
@@ -296,6 +345,9 @@ def _get_or_launch_page(L, launch_if_missing=True):
         args=[
             '--disable-blink-features=AutomationControlled',
             '--disable-session-crashed-bubble',
+            # 다음 재시작 때 _try_reconnect_existing_browser()가 이 포트로
+            # 다시 접속해서 로그인 세션을 이어받을 수 있게 디버그 포트를 연다.
+            f'--remote-debugging-port={_CDP_PORT}',
         ],
         no_viewport=True,
     )
