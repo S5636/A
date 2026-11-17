@@ -624,8 +624,32 @@ def _collect_and_register_tracking(win, L):
         descendants0 = None
     filter_tab = _find_status_filter_tab(win, '배송준비', descendants=descendants0)
     if filter_tab is None:
-        visible = _dump_controls(win, descendants=descendants0)
-        L(f"'배송준비' 필터 탭을 못 찾았습니다 - 운송장수집/등록을 건너뜁니다. 지금 화면에 보이는 글자들: {visible}")
+        # 실제로 '배송준비 (1)'이라는 글자는 화면에 있는데(토스트로 확인:
+        # "...배송준비 (1) 배송중 (0)...") 못 찾았다 - 화면 전체 글자가
+        # 거대한 블롭 하나로 뭉쳐 노출된 상태로 의심된다. 이 흐름은 엑셀
+        # 다운로드 등을 거친 뒤라서, 수집 흐름 맨 처음(주문관리 탭을 막
+        # 클릭했을 때)처럼 요소들이 더 잘게 쪼개져 노출되던 상태로
+        # 되돌아갈 수 있는지 '주문관리' 탭을 다시 눌러 한 번 더 시도한다.
+        L("'배송준비'를 못 찾아서 '주문관리' 탭을 다시 눌러 재시도합니다...")
+        try:
+            _click(win, '주문관리', 'TabItem', L)
+            time.sleep(1.5)
+            _dismiss_sync_toast(win, L)
+            descendants0 = win.descendants()
+        except Exception as e:
+            L(f"'주문관리' 탭 재클릭 실패({type(e).__name__}) - 그래도 다시 찾아봅니다.")
+            try:
+                descendants0 = win.descendants()
+            except Exception:
+                descendants0 = None
+        filter_tab = _find_status_filter_tab(win, '배송준비', descendants=descendants0)
+    if filter_tab is None:
+        # 재시도해도 안 되면 다음엔 추측 없이 바로 원인을 알 수 있게,
+        # 텍스트만 찍는 _dump_controls 대신 요소 개수와 컨트롤타입/
+        # 클래스명까지 찍는 _dump_structure로 바꾼다.
+        cls, n_desc, info = _dump_structure(win, descendants=descendants0)
+        L(f"'배송준비' 필터 탭을 못 찾았습니다 - 운송장수집/등록을 건너뜁니다. "
+          f"창 클래스: {cls}, 전체 요소 수: {n_desc}, 앞부분 구조: {info}")
         return
     try:
         filter_tab.click_input()
