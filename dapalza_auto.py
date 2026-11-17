@@ -500,47 +500,174 @@ def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
     return False
 
 
+def _find_status_filter_tab(win, label, descendants=None):
+    """'배송준비 (1)'처럼 괄호 숫자가 붙은 주문상태 "필터 탭"을 찾는다. 표
+    안의 주문 행에 찍힌 상태 배지는 괄호 숫자 없이 '배송준비'만 있는
+    글자라서, 라벨 뒤에 ' ('가 붙은 것만 찾으면 그 배지와 안 헷갈린다."""
+    try:
+        if descendants is None:
+            descendants = win.descendants()
+        candidates = []
+        for c in descendants:
+            try:
+                t = c.window_text().strip()
+            except Exception:
+                continue
+            if t.startswith(label + ' (') or t.startswith(label + '('):
+                try:
+                    if not c.is_visible():
+                        continue
+                    r = c.rectangle()
+                    area = max(0, r.width()) * max(0, r.height())
+                except Exception:
+                    area = float('inf')
+                if area <= 0:
+                    continue
+                candidates.append((area, c))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[0])
+        return candidates[0][1]
+    except Exception:
+        return None
+
+
+def _find_checkbox_near(anchor, L=None, max_up=10):
+    """anchor(예: '상태' 컬럼 헤더 글자) 근처에서 체크박스 컨트롤을 찾는다 -
+    표 맨 왼쪽 위의 전체선택 체크박스를 찾는 데 쓴다. _find_near와 같은
+    원칙(좁은 범위부터, 조상을 타고 올라가며 시도)을 체크박스 컨트롤
+    타입 검색에 맞게 응용했다."""
+    container = anchor
+    for _ in range(max_up):
+        try:
+            parent = container.parent()
+        except Exception:
+            break
+        if parent is None:
+            break
+        container = parent
+        try:
+            desc = container.descendants(control_type='CheckBox')
+        except Exception:
+            continue
+        visible = []
+        for c in desc:
+            try:
+                if not c.is_visible():
+                    continue
+                r = c.rectangle()
+                area = max(0, r.width()) * max(0, r.height())
+                if area <= 0:
+                    continue
+                visible.append((area, c))
+            except Exception:
+                continue
+        if visible:
+            visible.sort(key=lambda x: x[0])
+            if L is not None:
+                L(f'체크박스 후보 {len(visible)}개 발견(근처 범위 {len(desc)}개 요소 중) - 가장 작은 것을 전체선택으로 선택.')
+            return visible[0][1]
+    return None
+
+
+def _unfilter_delivery_prep(win, L):
+    """운송장수집/등록이 끝나면 '배송준비' 필터를 다시 눌러 꺼둔다(사용자
+    지시: "마진보드로돌아가기 전에 다시 배송준비 버튼 한번 더 눌러서
+    필터링 해제 해야함" - 상태 필터 탭은 토글이라 같은 탭을 또 누르면
+    빠진다)."""
+    try:
+        _dismiss_sync_toast(win, L)
+        filter_tab = _find_status_filter_tab(win, '배송준비')
+        if filter_tab is not None:
+            filter_tab.click_input()
+            L("'배송준비' 필터 해제 완료.")
+        else:
+            L("'배송준비' 필터 탭을 다시 못 찾아서 필터를 못 껐습니다 - 다팔자 화면에서 직접 확인해주세요.")
+    except Exception as e:
+        L(f"'배송준비' 필터 해제 중 오류: {type(e).__name__}: {e}")
+
+
 def _collect_and_register_tracking(win, L):
-    """사용자 요청: "DPJ 돌고 나서 운송장 수집하고 운송장 등록하고 싶거든?"
+    """사용자 요청: "DPJ 돌고 나서 운송장 수집하고 운송장 등록하고 싶거든?" +
+    사용자가 실제 화면 캡쳐로 알려준 정확한 순서: "배송준비만 필터링해서
+    전체선택하고 운송장등록하면 될거 같아... 송장번호칸이 없을때도
+    운송장등록 버튼이 활성화되는지를 확인못함. 1 활성화안되서 확인버튼
+    안뜸 2 활성화되서 등록하고 확인버튼이 뜸 2가지 상황모두 해결... 마진보드로
+    돌아가기 전에 다시 배송준비 버튼 한번 더 눌러서 필터링 해제 해야함".
 
-    다팔자 화면 자체에 '오너클랜 운송장수집'/'운송장등록' 버튼이 이미 있어서
-    (사용자 스크린샷으로 확인) 오너클랜 쪽을 따로 스크래핑할 필요 없이 그
-    버튼 두 개를 순서대로 누르면 된다.
-
-    처음엔 "수집된 게 있으면 등록"을 '배송준비' 건수가 줄었는지로 판단하려
-    했는데, 사용자 지적대로 운송장이 수집된다고 해서 '배송준비'→'배송중'으로
-    상태가 자동으로 넘어가는 게 아니라서 그 판단 방법 자체가 틀렸다. 대신
-    사용자 확인("운송장등록 버튼을 수집된 게 하나도 없을 때 눌러도 안전함")에
-    따라 조건 판단 없이 두 버튼을 항상 순서대로 누른다 - 수집된 게 없으면
-    다팔자가 알아서 아무 일도 안 하거나 '등록할 항목 없음' 정도로 끝난다.
+    단계: '배송준비' 필터 탭 클릭 → '오너클랜 운송장수집' → 완료 대기 →
+    표 전체선택 체크박스 클릭 → '운송장등록' → (체크한 것 중 송장번호가
+    채워진 게 있으면 완료 팝업이 뜸, 하나도 없으면 버튼이 비활성이라
+    팝업이 아예 안 뜸 - 둘 다 정상 상황으로 취급) → '배송준비' 필터 해제.
 
     주의: 완료 팝업의 실제 문구가 기존 수집 팝업과 다른 템플릿이면(예상:
     'OOO을 완료하였습니다')이 함수가 '확인'을 못 눌러 다음 단계로 못
-    넘어갈 수 있다 - 첫 실행 로그(특히 '완료하였습니다 확인 팝업을 못
-    찾았습니다' 여부)를 보고 다르면 바로 맞춰 고쳐야 한다."""
+    넘어갈 수 있다 - 첫 실행 로그를 보고 다르면 바로 맞춰 고쳐야 한다."""
+    L("'배송준비' 필터 적용...")
+    _dismiss_sync_toast(win, L)
+    filter_tab = _find_status_filter_tab(win, '배송준비')
+    if filter_tab is None:
+        L("'배송준비' 필터 탭을 못 찾았습니다 - 운송장수집/등록을 건너뜁니다.")
+        return
+    try:
+        filter_tab.click_input()
+    except Exception as e:
+        L(f"'배송준비' 필터 탭 클릭 실패({type(e).__name__}) - 운송장수집/등록을 건너뜁니다.")
+        return
+    time.sleep(1)
+
     L("'오너클랜 운송장수집' 버튼 클릭...")
     _dismiss_sync_toast(win, L)
     try:
         _click(win, '오너클랜 운송장수집', 'Button', L)
     except Exception as e:
-        L(f"'오너클랜 운송장수집' 버튼을 못 찾았습니다({type(e).__name__}) - 운송장수집/등록을 건너뜁니다.")
+        L(f"'오너클랜 운송장수집' 버튼을 못 찾았습니다({type(e).__name__}) - 운송장등록은 건너뛰고 필터만 해제합니다.")
+        _unfilter_delivery_prep(win, L)
         return
 
     if not _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
         L('운송장수집 완료 확인 팝업을 못 받았습니다 - 그래도 운송장등록은 이어서 시도합니다.')
     time.sleep(1)
 
+    L('전체선택 체크박스 찾는 중...')
+    try:
+        descendants = win.descendants()
+    except Exception:
+        descendants = None
+    header_anchor = _find_smallest_text_match(win, '상태', None, descendants=descendants)
+    checkbox = _find_checkbox_near(header_anchor, L) if header_anchor is not None else None
+    if checkbox is None:
+        L('전체선택 체크박스를 못 찾았습니다 - 운송장등록을 건너뛰고 필터만 해제합니다.')
+        _unfilter_delivery_prep(win, L)
+        return
+    try:
+        checkbox.click_input()
+        L('전체선택 체크박스 클릭 완료.')
+    except Exception as e:
+        L(f'전체선택 체크박스 클릭 실패({type(e).__name__}) - 운송장등록을 건너뛰고 필터만 해제합니다.')
+        _unfilter_delivery_prep(win, L)
+        return
+    time.sleep(0.5)
+
     L("'운송장등록' 버튼 클릭...")
     _dismiss_sync_toast(win, L)
     try:
         _click(win, '운송장등록', 'Button', L)
     except Exception as e:
-        L(f"'운송장등록' 버튼을 못 찾았습니다({type(e).__name__}) - 운송장등록을 건너뜁니다.")
+        L(f"'운송장등록' 버튼을 못 찾았습니다({type(e).__name__}).")
+        _unfilter_delivery_prep(win, L)
         return
-    if _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
+
+    # 체크한 건 중 송장번호가 채워진 게 하나도 없으면 버튼이 비활성 상태라
+    # 아무 팝업도 안 뜬다(사용자 확인) - 짧게만 기다리다 포기하고 "등록할
+    # 게 없었다"로 본다(정상 상황). 송장번호가 있어서 실제로 등록됐으면
+    # 기존 '완료하였습니다' 패턴으로 확인 팝업이 뜬다.
+    if _wait_for_completion_popup_and_confirm(win, L, wait_seconds=15):
         L('운송장등록 완료.')
     else:
-        L('운송장등록 완료 확인을 못 받았습니다 - 다팔자 화면에서 실제로 등록됐는지 확인해주세요.')
+        L('운송장등록 확인 팝업이 안 떴습니다 - 체크한 건 중 송장번호가 채워진 게 없어서 버튼이 동작 안 했을 수 있습니다(정상적인 상황일 수 있음).')
+
+    _unfilter_delivery_prep(win, L)
 
 
 def _dismiss_invalid_filename_dialog(log=None):
