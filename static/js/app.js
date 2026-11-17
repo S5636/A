@@ -679,6 +679,20 @@
           : '';
         const colWarn = missingCols.length ? ` ※ 이번 파일에 없는 컬럼: ${missingCols.join(', ')}` : '';
         toast(`다팔자 자동 수집 및 반영이 완료되었습니다.${extra}${colWarn}`, missingCols.length ? 'err' : 'ok');
+        // 운송장수집/등록 결과는 토스트로 따로 보여준다(collect-log 패널에
+        // 넣으면 안 됨) - 전체가 성공이면 위에서 로그를 통째로 지우고,
+        // 신규주문이 있으면 바로 아래 runCheckStock(true)가 또 한 번
+        // 지워버려서, 그 패널에 넣는 방식으론 운송장 쪽이 실제로 돌았는지
+        // 건너뛰었는지 화면에서 전혀 확인할 수 없었다(사용자 지적: "로그
+        // 안나왔어").
+        const trackingLines = (data.log || []).filter(
+          (line) => line.includes('운송장') || line.includes('배송준비')
+        );
+        if (trackingLines.length) {
+          const lastLine = trackingLines[trackingLines.length - 1];
+          const isErr = /못 찾았습니다|실패|오류/.test(lastLine);
+          toast(`운송장수집/등록: ${lastLine}`, isErr ? 'err' : 'ok');
+        }
         state.loadedTabs.delete('summary');
         loadDashOrders();
         // 신규주문이 있으면(사용자 요청) STOCK(재고확인)을 이어서 자동으로 실행한다.
