@@ -600,6 +600,32 @@ def _unfilter_delivery_prep(win, L):
         L(f"'배송준비' 필터 해제 중 오류: {type(e).__name__}: {e}")
 
 
+_PREP_COUNT_RE = re.compile(r'배송준비\s*\((\d+)\)')
+
+
+def _read_prep_count(win, descendants=None):
+    """'배송준비 (N)'에서 숫자만 읽는다 - 화면 전체가 블롭 문자열 하나로
+    뭉쳐 노출돼 있어도(실제로 확인된 상황) 그 블롭 안에 이 패턴이 그대로
+    들어있어서 정규식으로 찾을 수 있다 - 클릭 가능한 요소를 찾는 것과는
+    무관하게 '지금 배송준비가 몇 건인지' 숫자만 읽는 용도. 사용자 요청:
+    "배송준비에 아무것도없을때는 수집 등록 단계 뺄수없어?" - 0건이면
+    운송장수집/등록 버튼을 누를 필요조차 없으니 아예 건너뛴다."""
+    try:
+        if descendants is None:
+            descendants = win.descendants()
+        for c in descendants:
+            try:
+                t = c.window_text()
+            except Exception:
+                continue
+            m = _PREP_COUNT_RE.search(t or '')
+            if m:
+                return int(m.group(1))
+    except Exception:
+        pass
+    return None
+
+
 def _collect_and_register_tracking(win, L):
     """사용자 요청: "DPJ 돌고 나서 운송장 수집하고 운송장 등록하고 싶거든?" +
     사용자가 실제 화면 캡쳐로 알려준 정확한 순서: "배송준비만 필터링해서
@@ -616,12 +642,16 @@ def _collect_and_register_tracking(win, L):
     주의: 완료 팝업의 실제 문구가 기존 수집 팝업과 다른 템플릿이면(예상:
     'OOO을 완료하였습니다')이 함수가 '확인'을 못 눌러 다음 단계로 못
     넘어갈 수 있다 - 첫 실행 로그를 보고 다르면 바로 맞춰 고쳐야 한다."""
-    L("'배송준비' 필터 적용...")
     _dismiss_sync_toast(win, L)
     try:
         descendants0 = win.descendants()
     except Exception:
         descendants0 = None
+    prep_count = _read_prep_count(win, descendants0)
+    if prep_count == 0:
+        L('배송준비 0건 - 운송장수집/등록을 건너뜁니다.')
+        return
+    L(f"'배송준비' 필터 적용... (현재 배송준비 {prep_count if prep_count is not None else '?'}건)")
     filter_tab = _find_status_filter_tab(win, '배송준비', descendants=descendants0)
     if filter_tab is None:
         # 실제로 '배송준비 (1)'이라는 글자는 화면에 있는데(토스트로 확인:
