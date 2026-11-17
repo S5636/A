@@ -46,6 +46,26 @@ WHALE_PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile_whale')
 # 지적: "네모네모 창 계속 뜨는데").
 CHROME_PROFILE_DIR = os.path.join(BASE_DIR, 'ownerclan_profile_chrome')
 
+# 마진보드 프로세스가 재시작(자동 재시작, 또는 실행 시 "기존 창 자동 닫기")될
+# 때마다 이 파이썬 프로세스의 메모리(_state)는 완전히 비워진다 - 그런데
+# 실제 브라우저 프로세스는 안 죽고 고아로 살아남아서 로그인 상태를 그대로
+# 들고 있는 경우가 많다. 이 포트로 디버그 프로토콜을 열어두면, 새 프로세스가
+# 메모리에 아무 기록이 없어도 CDP로 재접속해서 그 로그인 세션을 그대로
+# 이어받을 수 있다(사용자 지적: "시동할때 오너클랜 로그인창이 켜져있으면
+# 유지하고 없으면 켜는거 아니었냐" - 맞는 지적, 재시작마다 재로그인이
+# 필요했던 진짜 원인은 이 기억 상실이었다).
+#
+# 2026-11-17: 이 포트를 열고 CDP로 재접속하는 걸 처음 시도했을 때 오너클랜
+# 로그인창이 아예 안 열리는 회귀가 있었다 - 정확한 원인은 못 봤지만(윈도우
+# 환경에서 직접 검증 못 함), 이전 실행이 남긴 고아 브라우저가 이미 이
+# 포트를 쥐고 있는 상태에서 재접속이 실패하면 새로 띄우는 브라우저도 같은
+# 포트를 열려다 충돌했을 가능성이 가장 높다고 보고 완전히 되돌렸었다.
+# 이번엔 그 실패 가능성에 안전장치를 추가한다 - 디버그 포트를 켜고 띄우는
+# 시도가 실패하면, 같은 후보(웨일/크롬/내장)로 그 플래그 없이 한 번 더
+# 시도한다(아래 후보 루프 참고) - 그러면 포트가 진짜 원인이었어도 최소한
+# 창은 뜬다(그 실행에선 CDP 재접속 능력만 없음).
+_CDP_PORT = 17391
+
 _state = {'pw': None, 'context': None, 'page': None}
 
 # Playwright sync API는 만든 스레드에서만 안전하게 쓸 수 있어서, 브라우저를
@@ -264,6 +284,38 @@ def _find_chrome_executable():
     return None
 
 
+def _try_reconnect_existing_browser(L):
+    """이 프로세스 메모리(_state)엔 기록이 없어도(재시작 직후 등), 이전
+    실행이 --remote-debugging-port로 띄워둔 브라우저가 고아 프로세스로나마
+    아직 살아있을 수 있다 - 있으면 죽이지 않고 CDP로 그대로 이어받는다
+    (로그인 세션 유지). 보통(브라우저가 아예 없는 평범한 경우)엔 그냥
+    조용히 실패하는 게 정상이라 실패 시엔 로그를 남기지 않는다."""
+    pw = None
+    try:
+        from playwright.sync_api import sync_playwright
+        pw = sync_playwright().start()
+        browser = pw.chromium.connect_over_cdp(f'http://127.0.0.1:{_CDP_PORT}', timeout=5000)
+        if not browser.contexts:
+            browser.close()
+            pw.stop()
+            return None
+        context = browser.contexts[0]
+        page = context.pages[0] if context.pages else context.new_page()
+        page.evaluate('1')
+        _state['pw'] = pw
+        _state['context'] = context
+        _state['page'] = page
+        L('이전 실행에서 로그인해둔 브라우저를 그대로 이어받았습니다 (다시 로그인할 필요 없음).')
+        return page
+    except Exception:
+        if pw is not None:
+            try:
+                pw.stop()
+            except Exception:
+                pass
+        return None
+
+
 def _get_or_launch_page(L, launch_if_missing=True):
     """반드시 워커 스레드 안에서만 호출한다. 이미 살아있는 브라우저 페이지가
     있으면 그대로 재사용하고, 없으면(그리고 launch_if_missing이면) 새로 띄운다."""
@@ -275,6 +327,13 @@ def _get_or_launch_page(L, launch_if_missing=True):
             if launch_if_missing:
                 L('이전에 열려있던 브라우저 창이 닫혀있어서 다시 엽니다...')
             _cleanup()
+
+    # launch_if_missing이 False인 호출(STOCK/ORDER 등)에서도 재접속은
+    # 시도한다 - 재시작 직후에 "로그인 먼저 해주세요"로 막히는 대신, 이전
+    # 브라우저가 아직 살아있으면 바로 이어서 쓸 수 있게.
+    reconnected = _try_reconnect_existing_browser(L)
+    if reconnected is not None:
+        return reconnected
 
     if not launch_if_missing:
         return None
@@ -296,6 +355,9 @@ def _get_or_launch_page(L, launch_if_missing=True):
         args=[
             '--disable-blink-features=AutomationControlled',
             '--disable-session-crashed-bubble',
+            # 다음 재시작 때 _try_reconnect_existing_browser()가 이 포트로
+            # 다시 접속해서 로그인 세션을 이어받을 수 있게 디버그 포트를 연다.
+            f'--remote-debugging-port={_CDP_PORT}',
         ],
         no_viewport=True,
     )
@@ -339,6 +401,23 @@ def _get_or_launch_page(L, launch_if_missing=True):
                 if attempt < max_attempts:
                     L(f'{name} 브라우저 실행 실패, 재시도 중... ({attempt}/{max_attempts})')
                     time.sleep(1.5)
+        if context is None and last_err is not None:
+            # 디버그 포트(--remote-debugging-port)가 원인일 가능성에 대비한
+            # 안전장치 - 이전 실행이 남긴 고아 브라우저가 이미 그 포트를 쥐고
+            # 있으면 새로 띄우는 것도 같은 포트를 열려다 실패할 수 있다.
+            # 같은 후보로 그 플래그만 빼고 한 번 더 시도한다 - 이러면 포트가
+            # 진짜 원인이었어도 최소한 창은 뜬다(이번 실행은 CDP 재접속
+            # 능력만 포기).
+            L(f'{name} 브라우저 실행이 계속 실패해서({type(last_err).__name__}) 디버그 포트 없이 다시 시도합니다...')
+            launch_kwargs_noport = dict(launch_kwargs)
+            launch_kwargs_noport['args'] = [a for a in launch_kwargs['args']
+                                             if not a.startswith('--remote-debugging-port')]
+            try:
+                context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs_noport)
+                last_err = None
+                L(f'{name} 브라우저가 디버그 포트 없이는 정상적으로 열렸습니다 (다음 재시작 때는 재로그인이 필요할 수 있음).')
+            except Exception as e:
+                last_err = e
         if context is not None:
             break
         if last_err is not None:
