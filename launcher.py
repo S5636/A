@@ -5,7 +5,6 @@ Windows 콘솔 코드페이지에 따라 명령어가 깨져서 해석되는 문
 .bat은 최대한 아무 내용도 없게(순수 영문) 두고 이 스크립트가 안내/설치/실행을 전담한다."""
 import hashlib
 import os
-import platform
 import re
 import subprocess
 import sys
@@ -128,68 +127,6 @@ def _check_and_apply_update():
         print(f"[안내] 업데이트 적용에 실패했습니다(무시하고 지금 버전으로 계속 진행합니다): {type(e).__name__}: {e}")
 
 
-def _close_previous_instance(port=5000):
-    """사용자 요청: "실행 파일 열면 까만 로고 창 뜨는 거, 그 전에 기존 창이
-    꺼지게 해달라 - 코어싱크는 그렇게 되어있다" - 새로 실행할 때 이전에
-    띄워뒀던 마진보드 서버(와 그 콘솔 창)가 아직 떠있으면 자동으로 먼저
-    종료해서, 까만 콘솔 창이 여러 개 쌓이지 않고 항상 최신 창 하나만
-    남게 한다. 윈도우에서만 의미가 있다.
-
-    처음 구현은 taskkill /PID /T(자식 프로세스까지 통째로 종료)를 썼는데,
-    오너클랜 로그인 세션이 들어있는 브라우저(웨일/크롬)가 이전 서버 프로세스의
-    '자식'이라서 같이 죽어버렸다(사용자 지적: "마진보드 창은 안 꺼지고
-    오너클랜 로그인 창만 꺼졌어? 매번 로그인을 새로 해줘야 되는 거야?").
-    이번엔 psutil로 포트를 쥔 이전 서버 프로세스 자신만 콕 집어 종료하고
-    (자식인 브라우저는 그대로 둬서 로그인 상태 유지), 눈에 보이는 검은 창
-    자체는 그 부모(cmd.exe)를 따로 찾아서 닫는다 - 자식을 죽여도 부모 cmd
-    창은 저절로 안 닫히고 "계속하려면 아무 키나..." 상태로 남기 때문이다.
-
-    주의: 이전 창에서 STOCK/ORDER 등 자동화가 한창 진행 중이었다면 그
-    작업(과 그 작업이 새로 띄운 창)은 함께 끊긴다 - 서버 프로세스를
-    종료하는 거라 피할 수 없다. 다만 기존에 로그인해둔 오너클랜 브라우저
-    창 자체는 이제 건드리지 않는다."""
-    if platform.system() != 'Windows':
-        return
-    try:
-        import psutil
-    except ImportError:
-        return
-    my_pid = os.getpid()
-    target_pid = None
-    try:
-        for conn in psutil.net_connections(kind='tcp'):
-            if conn.status == psutil.CONN_LISTEN and conn.laddr and conn.laddr.port == port \
-                    and conn.pid and conn.pid != my_pid:
-                target_pid = conn.pid
-                break
-    except Exception:
-        return
-    if not target_pid:
-        return
-    try:
-        proc = psutil.Process(target_pid)
-    except Exception:
-        return
-    console_proc = None
-    try:
-        parent = proc.parent()
-        if parent is not None and parent.name().lower() == 'cmd.exe':
-            console_proc = parent
-    except Exception:
-        console_proc = None
-    print("[안내] 이전에 실행 중이던 마진보드 창을 자동으로 닫습니다...")
-    try:
-        proc.kill()
-    except Exception:
-        pass
-    if console_proc is not None:
-        try:
-            console_proc.kill()
-        except Exception:
-            pass
-    time.sleep(1)
-
-
 def open_browser_later():
     time.sleep(3)
     try:
@@ -212,7 +149,12 @@ def main():
     print("============================================")
     print()
 
-    _close_previous_instance()
+    # 이전에 떠있던 창/서버를 닫는 건 이제 START.bat(윈도우 콘솔 창의
+    # WINDOWTITLE로 직접 찾아서 종료 - 사용자의 다른 프로그램에서 이미
+    # 검증된 방식)이 python이 시작되기도 전에 먼저 처리한다. psutil로
+    # 포트 소유 프로세스의 부모를 추적하던 이전 방식은 실제로 창이 안
+    # 닫히는 걸로 보여서(사용자 지적: "로그 안닫히고 그대로잖아") 빼고,
+    # 더 간단하고 이미 검증된 .bat 방식으로 옮겼다.
 
     # pip install/playwright install을 매번 무조건 실행하면, pip이 로컬에 이미
     # 다 깔려있어도 매번 네트워크로 버전을 다시 확인하느라 시간이 걸린다
