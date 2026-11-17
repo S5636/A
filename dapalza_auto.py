@@ -445,6 +445,153 @@ def _dismiss_sync_toast(win, log=None, descendants=None):
     return False
 
 
+_STATUS_COUNT_RE = re.compile(r'\((\d+)\)')
+
+
+def _read_status_count(win, label, descendants=None, log=None):
+    """'배송준비 (1)'처럼 주문상태 탭에 괄호 숫자로 표시되는 건수를 읽는다.
+    운송장수집/등록을 실제로 할 필요가 있는지(배송준비/신규주문처럼 '배송중'
+    이전 단계 건이 있는지), 그리고 운송장수집으로 뭔가 실제로 수집됐는지
+    (이 건수가 줄었는지) 판단하는 데 쓴다."""
+    try:
+        if descendants is None:
+            descendants = win.descendants()
+        for c in descendants:
+            try:
+                t = c.window_text().strip()
+            except Exception:
+                continue
+            if t.startswith(label):
+                m = _STATUS_COUNT_RE.search(t)
+                if m:
+                    return int(m.group(1))
+    except Exception as e:
+        if log is not None:
+            log(f"'{label}' 건수 읽기 실패: {type(e).__name__}: {e}")
+    return None
+
+
+def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
+    """'OOO을 완료하였습니다' 팝업(메인 창 안에 겹쳐 뜨는 내부 모달)을 기다렸다가
+    '확인'을 누른다 - 기존 '주문수집' 완료 팝업 처리(_collect_and_upload_impl
+    안)와 똑같은, 이미 검증된 패턴을 운송장수집/운송장등록에도 재사용한다.
+    정확한 문구(예: '운송장 수집을 완료하였습니다')는 실제로 본 적이 없어서
+    '완료하였습니다' 공통 꼬리말로만 찾는다 - '배송완료'/'구매확정' 같은 상태
+    배지는 이 문구 전체를 포함하지 않아서 잘못 걸릴 위험은 없다."""
+    elapsed = 0
+    check_interval = 2
+    while elapsed < wait_seconds:
+        time.sleep(check_interval)
+        elapsed += check_interval
+        try:
+            descendants = win.descendants()
+        except Exception:
+            descendants = None
+        if _dismiss_sync_toast(win, L, descendants=descendants):
+            time.sleep(1)
+        done_marker = _find_smallest_text_match(win, '완료하였습니다', None, descendants=descendants)
+        if done_marker is None:
+            continue
+        L("'완료하였습니다' 메시지 확인됨 - '확인' 버튼 찾는 중...")
+        ok_ctrl = _find_near(done_marker, '확인', L)
+        if ok_ctrl is None:
+            ok_ctrl = _find_smallest_text_match(win, '확인', L, descendants=descendants)
+        if ok_ctrl is None:
+            ok_ctrl = _find_control(win, '확인', 'Button')
+        clicked = False
+        if ok_ctrl is not None:
+            try:
+                ok_ctrl.invoke()
+                clicked = True
+                L("'확인' 버튼 invoke()로 클릭 완료.")
+            except Exception:
+                try:
+                    ok_ctrl.click_input()
+                    clicked = True
+                    L("'확인' 버튼 클릭 완료.")
+                except Exception as e:
+                    L(f"'확인' 버튼 클릭 실패(invoke/click_input 둘 다): {type(e).__name__}: {e}")
+        if clicked:
+            return True
+        L("확인 버튼을 못 찾았거나 클릭에 실패했습니다 - Enter 키로 대체 시도합니다...")
+        try:
+            win.type_keys('{ENTER}')
+            time.sleep(1)
+            if _find_smallest_text_match(win, '완료하였습니다', None) is None:
+                L('Enter 키로 완료 팝업이 닫힌 것으로 보입니다.')
+                return True
+        except Exception as e:
+            L(f'Enter 키 전송 실패: {type(e).__name__}: {e}')
+    L(f"{wait_seconds}초 안에 '완료하였습니다' 확인 팝업을 못 찾았습니다.")
+    return False
+
+
+def _collect_and_register_tracking(win, L):
+    """사용자 요청: "DPJ 돌고 나서 운송장 수집하고 운송장 등록하고 싶거든?
+    운송장 수집해서 수집된 게 있으면 등록하는 방식으로" + "주문상태가 배송중
+    이전단계일경우 마진보드로돌아가기전에 운송장수집 누르고 수집되면
+    운송장등록 누르고 확인버튼누른다음에 마진보드로돌아가는거지".
+
+    다팔자 화면 자체에 '오너클랜 운송장수집'/'운송장등록' 버튼이 이미 있어서
+    (사용자 스크린샷으로 확인) 오너클랜 쪽을 따로 스크래핑할 필요 없이 그
+    버튼 두 개만 순서대로 누르면 된다. "수집된 게 있는지"는 완료 팝업
+    문구만으로는 확신할 수 없어서(정확한 문구를 실제로 본 적이 없음), 대신
+    사용자가 직접 가리킨 '배송준비'/'신규주문' 건수가 운송장수집 전후로
+    줄었는지로 판단한다 - 줄었으면 적어도 하나는 운송장이 붙어서 상태가
+    '배송중'으로 넘어갔다는 뜻이다.
+
+    주의: 완료 팝업의 실제 문구가 기존 수집 팝업과 다른 템플릿이면(예상:
+    'OOO을 완료하였습니다')이 함수가 '확인'을 못 눌러 다음 단계로 못
+    넘어갈 수 있다 - 첫 실행 로그(특히 '완료하였습니다 확인 팝업을 못
+    찾았습니다' 여부)를 보고 다르면 바로 맞춰 고쳐야 한다."""
+    try:
+        descendants = win.descendants()
+    except Exception:
+        descendants = None
+    before_prep = _read_status_count(win, '배송준비', descendants, L) or 0
+    before_new = _read_status_count(win, '신규주문', descendants, L) or 0
+    before_total = before_prep + before_new
+    if before_total == 0:
+        L('배송준비/신규주문 건이 없습니다(모두 배송중 이상 단계) - 운송장수집/등록은 건너뜁니다.')
+        return
+
+    L(f"배송준비 {before_prep}건 / 신규주문 {before_new}건(배송중 이전 단계) - '오너클랜 운송장수집' 버튼 클릭...")
+    _dismiss_sync_toast(win, L)
+    try:
+        _click(win, '오너클랜 운송장수집', 'Button', L)
+    except Exception as e:
+        L(f"'오너클랜 운송장수집' 버튼을 못 찾았습니다({type(e).__name__}) - 운송장수집/등록을 건너뜁니다.")
+        return
+
+    if not _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
+        L('운송장수집 완료 확인 팝업을 못 받았습니다 - 그래도 건수 변화를 확인해봅니다.')
+    time.sleep(1)
+
+    try:
+        after_descendants = win.descendants()
+    except Exception:
+        after_descendants = None
+    after_prep = _read_status_count(win, '배송준비', after_descendants, L)
+    after_new = _read_status_count(win, '신규주문', after_descendants, L)
+    after_total = (after_prep if after_prep is not None else before_prep) + \
+                  (after_new if after_new is not None else before_new)
+    if after_total >= before_total:
+        L(f'운송장수집으로 수집된 게 없는 것으로 보입니다(배송준비+신규주문 {before_total}건 → {after_total}건) - 운송장등록은 건너뜁니다.')
+        return
+
+    L(f"운송장수집으로 일부 수집된 것으로 보입니다(배송준비+신규주문 {before_total}건 → {after_total}건) - '운송장등록' 버튼 클릭...")
+    _dismiss_sync_toast(win, L)
+    try:
+        _click(win, '운송장등록', 'Button', L)
+    except Exception as e:
+        L(f"'운송장등록' 버튼을 못 찾았습니다({type(e).__name__}) - 운송장등록을 건너뜁니다.")
+        return
+    if _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
+        L('운송장등록 완료.')
+    else:
+        L('운송장등록 완료 확인을 못 받았습니다 - 다팔자 화면에서 실제로 등록됐는지 확인해주세요.')
+
+
 def _dismiss_invalid_filename_dialog(log=None):
     """저장창의 파일 목록에서 이미 선택돼 있는 항목을 실수로 한 번 더 클릭하면
     윈도우 탐색기가 그걸 '이름 바꾸기' 시작 신호로 받아들여서, 그 상태에서
@@ -1099,6 +1246,16 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
                 L("오너클랜 주문 파일은 못 받았습니다 - 상세주소 보강 없이 진행합니다.")
         except Exception as e:
             L(f"오너클랜 주문 시도 중 오류(무시, '전체' 파일은 이미 받았음): {type(e).__name__}: {e}")
+
+        # 사용자 요청: "DPJ 돌고 나서 운송장 수집하고 운송장 등록하고
+        # 싶거든" - 마진보드로 돌아가기 전에 마지막으로 시도한다. 실패해도
+        # (버튼을 못 찾았거나 완료 팝업을 못 받았거나) 이미 받은 엑셀
+        # 업로드 결과(result)는 그대로 살린다 - 이건 부가 기능이라 실패를
+        # 주문수집 자체의 실패로 취급하면 안 된다.
+        try:
+            _collect_and_register_tracking(win, L)
+        except Exception as e:
+            L(f"운송장수집/등록 시도 중 오류(무시, 주문수집 결과는 이미 받았음): {type(e).__name__}: {e}")
 
         return result
     except Exception as e:
