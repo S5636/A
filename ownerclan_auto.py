@@ -589,9 +589,14 @@ def setup_login(start_url, wait_seconds=300):
 
 
 def _collect_impl(order_url, target_path, L):
-    page = _get_or_launch_page(L, launch_if_missing=False)
+    # 사용자 지시: "없으면 띄우고 있으면 안 띄우기로 했는데" - 재접속으로도
+    # 못 찾으면(진짜 없으면) 여기서 직접 새 브라우저를 띄운다. 로그인은
+    # 못 돼있겠지만 그 상태는 바로 아래 _is_logged_in 체크가 안내해주고,
+    # 사용자가 그 창에서 로그인하면 다음 실행부턴 바로 된다 - 매번 별도로
+    # '오너클랜 로그인 설정' 버튼을 먼저 눌러야 하는 불편을 없앤다.
+    page = _get_or_launch_page(L, launch_if_missing=True)
     if page is None:
-        L("아직 로그인된 브라우저가 없습니다 - 먼저 '오너클랜 로그인 설정'을 눌러 로그인해주세요. (마진보드 프로그램을 새로 켰다면 로그인을 다시 한 번 해주셔야 합니다.)")
+        L("브라우저를 띄우지 못했습니다 - 잠시 후 다시 시도해주세요.")
         return False
 
     L('오너클랜 페이지를 여는 중 (백그라운드, 로그인 설정 때 열어둔 창을 그대로 씁니다)...')
@@ -1068,15 +1073,17 @@ def _check_one_stock(page, order_url, code, option, L):
 
 
 def _check_stock_impl(order_url, items, L):
-    page = _get_or_launch_page(L, launch_if_missing=False)
+    # 사용자 지시: "없으면 띄우고 있으면 안 띄우기로 했는데" - _collect_impl과
+    # 같은 이유로 재접속 실패 시 여기서도 직접 새 브라우저를 띄운다.
+    page = _get_or_launch_page(L, launch_if_missing=True)
     if page is None:
         # 예전엔 여기서 빈 리스트([])를 그냥 돌려줬는데, 그러면 check_stock()이
         # 이걸 '확인할 게 하나도 없어서 정상적으로 0건'과 구분 못 하고 똑같이
         # ok=True로 리턴해버려서, 화면엔 "재고상태 확인 완료 (0건)"이라는
-        # 성공 토스트가 떴다 - 사실은 로그인된 브라우저가 없어서 자동화를
+        # 성공 토스트가 떴다 - 사실은 브라우저를 띄우지도 못해서 자동화를
         # 시작도 못 한 실패인데 성공처럼 보인 사고. 예외를 던져서 check_stock()의
         # 실패 처리 경로(ok=False + 실패 토스트)를 타게 한다.
-        raise RuntimeError("아직 로그인된 브라우저가 없습니다 - 먼저 '오너클랜 로그인 설정'을 눌러 로그인해주세요.")
+        raise RuntimeError("브라우저를 띄우지 못했습니다 - 잠시 후 다시 시도해주세요.")
 
     results = []
     for code, option in items:
@@ -1531,9 +1538,11 @@ def _wait_for_payment_finish(page, L, max_wait=600):
 
 
 def _place_orders_impl(order_url, items, L):
-    page = _get_or_launch_page(L, launch_if_missing=False)
+    # 사용자 지시: "없으면 띄우고 있으면 안 띄우기로 했는데" - 위 두 함수와
+    # 같은 이유로 재접속 실패 시 여기서도 직접 새 브라우저를 띄운다.
+    page = _get_or_launch_page(L, launch_if_missing=True)
     if page is None:
-        raise RuntimeError("아직 로그인된 브라우저가 없습니다 - 먼저 '오너클랜 로그인 설정'을 눌러 로그인해주세요.")
+        raise RuntimeError("브라우저를 띄우지 못했습니다 - 잠시 후 다시 시도해주세요.")
 
     results = []
     for item in items:
