@@ -1304,9 +1304,13 @@ _start_dpj_auto_scheduler()
 
 # 사용자 지시: "스타트 파일 켤때 체크하기로 했잖아" - 서버가 켜질 때 바로
 # 오너클랜 브라우저가 있는지 확인해서, 있으면(재접속) 그대로 두고 없으면
-# 새로 띄워둔다. Playwright 브라우저 창을 띄우는 작업이라 몇 초 걸릴 수
-# 있어서, 서버 시작 자체를 막지 않게 백그라운드 스레드에서 돌린다.
-threading.Thread(target=ownerclan_auto.ensure_browser_open, daemon=True).start()
+# 새로 띄워서 발주내역 주소로 이동시켜둔다. 처음엔 주소를 안 넘겨서
+# 새로 띄운 창이 about:blank인 채로 떠서 "오너클랜 창이 안 열렸다"는
+# 오해로 이어졌다 - 반드시 설정된 주소를 넘긴다. Playwright 브라우저
+# 창을 띄우는 작업이라 몇 초 걸릴 수 있어서, 서버 시작 자체를 막지 않게
+# 백그라운드 스레드에서 돌린다.
+threading.Thread(target=ownerclan_auto.ensure_browser_open,
+                  args=(load_settings().get('ownerclan_url', ''),), daemon=True).start()
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

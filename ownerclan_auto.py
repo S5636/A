@@ -679,21 +679,36 @@ def ensure_background():
         pass
 
 
-def _ensure_browser_open_impl(L):
-    # 방금 새로 띄운 거면(로그인 전) 화면에 그대로 보여야 사용자가 바로
-    # 로그인할 수 있다 - 여기서 최소화하면 로그인이 필요하다는 걸 못 보고
-    # 지나칠 수 있어서, ensure_background()와 달리 여기서는 최소화하지 않는다.
+def _ensure_browser_open_impl(start_url, L):
     page = _get_or_launch_page(L, launch_if_missing=True)
-    return page is not None
+    if page is None:
+        return False
+    # _get_or_launch_page는 페이지 객체만 보장할 뿐 아무 곳으로도 이동하지
+    # 않는다 - 그래서 방금 새로 띄운 창은 about:blank인 채로 떠서 사용자
+    # 눈에는 "오너클랜 창이 안 열렸다"로 보였다(실제로 겪은 문제: 창은
+    # 떴는데 about:blank만 보임). 아직 아무 데도 안 간 새 페이지면 발주내역
+    # 주소로 직접 이동시킨다 - 이미 쓰던 페이지(재접속)면 사용자가 보던
+    # 화면을 건드리지 않게 그대로 둔다.
+    try:
+        if page.url in ('about:blank', '') and start_url:
+            page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
+            _set_window_state(page, 'normal', L)
+            try:
+                page.bring_to_front()
+            except Exception:
+                pass
+    except Exception as e:
+        L(f'오너클랜 페이지 이동 실패(무시, 창 자체는 열려있음): {_friendly_error(e)}')
+    return True
 
 
-def ensure_browser_open():
+def ensure_browser_open(start_url=''):
     """사용자 지시: "스타트 파일 켤때 체크하기로 했잖아" - STOCK/ORDER 등을
     처음 누르기 전에, 서버가 시작될 때 미리 한 번 확인해서 오너클랜
-    브라우저가 이미 떠있으면(재접속) 그대로 두고 없으면 새로 띄워둔다.
-    띄운 직후엔 화면을 가리지 않게 최소화한다(ensure_background와 같은
-    이유). 로그인이 안 돼있을 수 있는데, 그건 사용자가 그 창을 눈치채고
-    직접 로그인하면 된다 - 여기서는 "창이 존재하는 상태"만 보장한다."""
+    브라우저가 이미 떠있으면(재접속) 그대로 두고 없으면 새로 띄워서
+    발주내역 주소로 이동시켜둔다. 로그인이 안 돼있을 수 있는데, 그건
+    사용자가 그 창을 보고 직접 로그인하면 된다 - 여기서는 "창이 열려서
+    실제 페이지를 보여주는 상태"만 보장한다."""
     log = []
 
     def L(msg):
@@ -707,7 +722,7 @@ def ensure_browser_open():
         L('playwright가 아직 설치되어 있지 않습니다 - 다음에 다시 시도합니다.')
         return {'ok': False, 'log': log}
     try:
-        opened = _run_on_worker(_ensure_browser_open_impl, L)
+        opened = _run_on_worker(_ensure_browser_open_impl, start_url, L)
         return {'ok': bool(opened), 'log': log}
     except Exception as e:
         L(f'시동 시 오너클랜 브라우저 확인 중 오류: {_friendly_error(e)}')
