@@ -1102,12 +1102,19 @@ def _check_one_stock(page, order_url, code, option, L):
     # 옵션 목록 자체가 없는 단일 상품. 페이지 전체에서 '품절'을 느슨하게
     # (exact=False) 찾으면 리뷰/추천상품/안내문구 등 상품 자체와 무관한
     # 곳에 있는 글자까지 걸려서, 실제로는 정상인데도 품절로 잘못 나오는
-    # 사고가 있었다(실제로 다 정상인 상품 3개가 전부 품절로 나옴).
-    # '품절'이라는 글자 딱 그것만이 요소의 전체 텍스트인 경우(진짜 품절
-    # 배지/라벨일 가능성이 높음)로 exact=True로 좁혀서, 긴 문장 속에
-    # 우연히 '품절'이라는 단어가 섞여 있는 경우는 걸러낸다.
+    # 사고가 있었다(실제로 다 정상인 상품 3개가 전부 품절로 나옴) - 그래서
+    # '품절'이라는 글자 딱 그것만이 요소의 전체 텍스트인 경우로 exact=True로
+    # 좁혔었다. 그런데 실제 품절 배지 문구가 "품절"이 아니라 "품절된
+    # 상품입니다."였다(사용자 스크린샷으로 확인: 한 달째 품절인 상품이
+    # exact=True 조건에 안 걸려서 계속 '정상'으로 잘못 나왔음). "품절된
+    # 상품입니다"라는 더 구체적인 문구는 exact=False로 찾아도 리뷰/추천상품
+    # 등에 우연히 섞여 나올 위험이 사실상 없으니 이것도 같이 찾는다 - 둘
+    # 중 하나라도 있으면 품절로 본다.
     try:
-        has_soldout = page.get_by_text('품절', exact=True).count() > 0
+        has_soldout = (
+            page.get_by_text('품절', exact=True).count() > 0
+            or page.get_by_text('품절된 상품입니다', exact=False).count() > 0
+        )
     except Exception as e:
         L(f"[{code}] 상품 페이지 상태 확인 실패: {type(e).__name__}: {e}")
         return '확인실패', None, False, ship_fee, bundle_max_qty
