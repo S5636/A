@@ -222,7 +222,13 @@ def init_db():
     # 기준으로 완전히 바꿨으니 마커 버전을 v4로 올려서 한 번 더 전체
     # 초기화한다 - 앞으로 이 함수의 판정 로직을 또 바꿀 때마다 이 버전을
     # 올려야 새로 반영된다.
-    recalc_marker = os.path.join(BASE_DIR, '.stock_recalc_v4_done')
+    # v5: 옵션 없는 단일상품의 품절 판정이 exact=True로 '품절' 글자 딱
+    # 그것만 찾아서, 실제 배지 문구인 "품절된 상품입니다."를 못 잡고
+    # '정상'으로 잘못 저장된 건들이 있었다(사용자 지적: "스톡 잘못돌린바람에
+    # 잘못된값들어가있으니까 다시 안돌리는데" - 한 번 채워진 칸은 재확인
+    # 대상에서 빠지는 구조라 로직만 고치면 끝이 아니라, 이미 틀리게 저장된
+    # 값도 한 번은 지워줘야 새 로직으로 다시 확인된다).
+    recalc_marker = os.path.join(BASE_DIR, '.stock_recalc_v5_done')
     if not os.path.exists(recalc_marker):
         conn2 = sqlite3.connect(DB_PATH)
         conn2.execute("DELETE FROM stock_check")
