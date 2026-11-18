@@ -584,20 +584,41 @@ def _find_checkbox_near(anchor, L=None, max_up=10):
 
 
 def _unfilter_delivery_prep(win, L):
-    """운송장수집/등록이 끝나면 '배송준비' 필터를 다시 눌러 꺼둔다(사용자
+    """운송장수집/등록이 끝나면 필터를 반드시 해제하고 돌아간다(사용자
     지시: "마진보드로돌아가기 전에 다시 배송준비 버튼 한번 더 눌러서
-    필터링 해제 해야함" - 상태 필터 탭은 토글이라 같은 탭을 또 누르면
-    빠진다)."""
+    필터링 해제 해야함").
+
+    처음엔 '배송준비' 탭을 다시 찾아 토글 해제하는 방식이었는데, 그 탭을
+    못 찾으면(화면이 블롭 하나로 뭉쳐 보이는 문제) 필터가 그대로 '배송준비'에
+    남아버렸다 - 그 상태로 다음 DPJ 자동수집 주기가 돌면 전체 주문관리
+    엑셀 저장 자체가 "주문 데이터가 없습니다"로 실패했다(사용자 스크린샷으로
+    확인: 배송준비 필터가 0건으로 남은 채 다음 엑셀 저장이 실패). 같은
+    탭을 다시 찾아 토글하는 대신, 지금 어떤 필터가 걸려있든 상관없이
+    전체 보기로 돌아가는 '전체' 탭을 누른다 - 더 확실하다."""
     try:
         _dismiss_sync_toast(win, L)
-        filter_tab = _find_status_filter_tab(win, '배송준비')
-        if filter_tab is not None:
-            filter_tab.click_input()
-            L("'배송준비' 필터 해제 완료.")
+        all_tab = _find_status_filter_tab(win, '전체')
+        if all_tab is None:
+            L("'전체' 탭을 못 찾아서 '주문관리' 탭을 다시 눌러 재시도합니다...")
+            try:
+                _click(win, '주문관리', 'TabItem', L)
+                time.sleep(1.5)
+                _dismiss_sync_toast(win, L)
+            except Exception as e:
+                L(f"'주문관리' 탭 재클릭 실패({type(e).__name__}).")
+            all_tab = _find_status_filter_tab(win, '전체')
+        if all_tab is not None:
+            all_tab.click_input()
+            L("'전체' 탭 클릭으로 필터 해제 완료.")
         else:
-            L("'배송준비' 필터 탭을 다시 못 찾아서 필터를 못 껐습니다 - 다팔자 화면에서 직접 확인해주세요.")
+            try:
+                cls, n_desc, info = _dump_structure(win)
+            except Exception:
+                cls, n_desc, info = '(조회 실패)', 0, []
+            L(f"'전체' 탭을 끝내 못 찾아서 필터를 못 껐습니다 - 다음 DPJ 주기에 영향을 줄 수 있습니다. "
+              f"창 클래스: {cls}, 전체 요소 수: {n_desc}, 앞부분 구조: {info}")
     except Exception as e:
-        L(f"'배송준비' 필터 해제 중 오류: {type(e).__name__}: {e}")
+        L(f"필터 해제 중 오류: {type(e).__name__}: {e}")
 
 
 _PREP_COUNT_RE = re.compile(r'배송준비\s*\((\d+)\)')
