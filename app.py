@@ -1302,5 +1302,11 @@ def api_settings_save():
 # 시작 걱정은 없다.
 _start_dpj_auto_scheduler()
 
+# 사용자 지시: "스타트 파일 켤때 체크하기로 했잖아" - 서버가 켜질 때 바로
+# 오너클랜 브라우저가 있는지 확인해서, 있으면(재접속) 그대로 두고 없으면
+# 새로 띄워둔다. Playwright 브라우저 창을 띄우는 작업이라 몇 초 걸릴 수
+# 있어서, 서버 시작 자체를 막지 않게 백그라운드 스레드에서 돌린다.
+threading.Thread(target=ownerclan_auto.ensure_browser_open, daemon=True).start()
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

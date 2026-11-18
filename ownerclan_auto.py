@@ -679,6 +679,41 @@ def ensure_background():
         pass
 
 
+def _ensure_browser_open_impl(L):
+    # 방금 새로 띄운 거면(로그인 전) 화면에 그대로 보여야 사용자가 바로
+    # 로그인할 수 있다 - 여기서 최소화하면 로그인이 필요하다는 걸 못 보고
+    # 지나칠 수 있어서, ensure_background()와 달리 여기서는 최소화하지 않는다.
+    page = _get_or_launch_page(L, launch_if_missing=True)
+    return page is not None
+
+
+def ensure_browser_open():
+    """사용자 지시: "스타트 파일 켤때 체크하기로 했잖아" - STOCK/ORDER 등을
+    처음 누르기 전에, 서버가 시작될 때 미리 한 번 확인해서 오너클랜
+    브라우저가 이미 떠있으면(재접속) 그대로 두고 없으면 새로 띄워둔다.
+    띄운 직후엔 화면을 가리지 않게 최소화한다(ensure_background와 같은
+    이유). 로그인이 안 돼있을 수 있는데, 그건 사용자가 그 창을 눈치채고
+    직접 로그인하면 된다 - 여기서는 "창이 존재하는 상태"만 보장한다."""
+    log = []
+
+    def L(msg):
+        log.append(msg)
+
+    if platform.system() != 'Windows':
+        return {'ok': False, 'log': log}
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        L('playwright가 아직 설치되어 있지 않습니다 - 다음에 다시 시도합니다.')
+        return {'ok': False, 'log': log}
+    try:
+        opened = _run_on_worker(_ensure_browser_open_impl, L)
+        return {'ok': bool(opened), 'log': log}
+    except Exception as e:
+        L(f'시동 시 오너클랜 브라우저 확인 중 오류: {_friendly_error(e)}')
+        return {'ok': False, 'log': log}
+
+
 def collect_and_upload(order_url, save_folder=None, save_filename='oc.xlsx'):
     """로그인 설정 때 띄워놓고 백그라운드로 보낸 그 브라우저 창을 그대로 재사용해서
     조회기간을 1개월로 맞추고 엑셀다운로드를 눌러 발주내역 파일을 받는다."""
