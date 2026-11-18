@@ -697,6 +697,20 @@ def _ensure_browser_open_impl(start_url, L):
                 page.bring_to_front()
             except Exception:
                 pass
+            # 사용자 스크린샷으로 확인: 브라우저에 아이디/비밀번호가 저장돼
+            # 있으면 로그인 폼이 자동으로 채워진 채로 뜬다 - 그러면 로그인
+            # 버튼까지 바로 눌러준다("로그인버튼 안누르냐?"). 비밀번호 칸이
+            # 비어있으면(저장된 게 없어 처음 로그인해야 하는 경우) 빈 채로
+            # 제출해봐야 오류만 날 뿐이니 누르지 않고 사용자가 직접
+            # 입력하게 둔다.
+            try:
+                page.wait_for_timeout(1500)  # 브라우저 자동완성이 채워질 시간을 준다
+                pw_value = page.locator('input[type="password"]').first.input_value(timeout=3000)
+                if pw_value:
+                    L('아이디/비밀번호가 브라우저에 저장돼 있어 자동으로 채워진 것으로 보입니다 - 로그인 버튼을 눌러봅니다.')
+                    page.get_by_role('button', name='로그인', exact=True).first.click(timeout=5000)
+            except Exception as e:
+                L(f'자동 로그인 버튼 클릭은 건너뜁니다(저장된 정보가 없거나 확인 실패로 보임): {type(e).__name__}')
     except Exception as e:
         L(f'오너클랜 페이지 이동 실패(무시, 창 자체는 열려있음): {_friendly_error(e)}')
     return True
