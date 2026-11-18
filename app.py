@@ -28,11 +28,15 @@ DB_PATH = os.path.join(BASE_DIR, 'shop_data.db')
 FEES_PATH = os.path.join(BASE_DIR, 'fees_config.json')
 SETTINGS_PATH = os.path.join(BASE_DIR, 'settings.json')
 SETTLEMENT_UPLOAD_DIR = r'C:\Users\SEONG\Desktop\이유상점_정산\정산_업로드_대기'
-# STOCK(재고확인) 대상에서 제외할, 이미 다 끝난 주문상태(사용자 지적: "배송완료
-# 구매확정 반품 취소는 할필요가 없는데") - 취소/반품 계열은 calc_engine의
-# is_cancelled가 걸러주지만, 정상적으로 다 끝난 배송완료/구매확정/교환완료는
-# is_cancelled가 아니라서 따로 걸러야 한다.
-FINISHED_SELL_STATUSES = {'배송완료', '구매확정', '교환완료'}
+# STOCK(재고확인) 대상에서 제외할 주문상태(사용자 지적: "배송완료 구매확정
+# 반품 취소는 할필요가 없는데") - 취소/반품 계열은 calc_engine의 is_cancelled가
+# 걸러주지만, 정상적으로 다 끝난 배송완료/구매확정/교환완료는 is_cancelled가
+# 아니라서 따로 걸러야 한다. '배송중'도 포함한다 - 이미 운송장이 등록돼
+# 발송된 건은 재고를 다시 확인할 이유가 없다(사용자 지적: "배송중으로
+# 넘어간거는 돌면안되는데") - 지금까진 '한 번 확인되면(stock_status 채워짐)
+# 다음부턴 대상에서 빠짐' 쪽에 우연히 기대고 있었을 뿐, 이 상태 자체를
+# 명시적으로 제외하진 않았다.
+FINISHED_SELL_STATUSES = {'배송완료', '구매확정', '교환완료', '배송중'}
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
