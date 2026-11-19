@@ -414,15 +414,15 @@ def init_db():
         # 잡히게 한다. 이미 복원된 뒤에는 다시 실행해도 중복 안 생기게
         # 존재 여부부터 확인한다(멱등).
         toss_prime = conn.execute(
-            "SELECT id FROM recurring_payments WHERE name = '토스프라임'"
+            "SELECT id, card_id FROM recurring_payments WHERE name = '토스프라임'"
         ).fetchone()
         if toss_prime:
-            restored_exists = conn.execute(
-                "SELECT 1 FROM inbox_items WHERE recurring_id = ? AND occurred_at = ? AND amount = ?",
+            restored = conn.execute(
+                "SELECT id FROM inbox_items WHERE recurring_id = ? AND occurred_at = ? AND amount = ?",
                 (toss_prime["id"], "2026-11-03 23:05:00", 5900),
             ).fetchone()
-            if not restored_exists:
-                conn.execute(
+            if not restored:
+                cur = conn.execute(
                     """INSERT INTO inbox_items
                        (raw_text, amount, merchant, occurred_at, status, recurring_id, source)
                        VALUES (?, ?, ?, ?, 'pending', ?, 'restored')""",
@@ -431,6 +431,39 @@ def init_db():
                         5900, "토스페이_컨텐츠 비바리퍼블리카", "2026-11-03 23:05:00", toss_prime["id"],
                     ),
                 )
+                restored_id = cur.lastrowid
+            else:
+                restored_id = restored["id"]
+
+            # 구독/보험 매칭분은 _auto_spend(실적 합계)에는 잡히지만, 카드별
+            # "기본적립" 같은 혜택의 사용내역 목록(usage_logs 기반)에는 원래
+            # 안 뜬다 - 서로 다른 테이블이라서다. 근데 사용자가 실적 숫자를
+            # 이 목록으로 눈으로 직접 대조해서 확인하길 원해서, 실제 금액
+            # 변동 없이(할인 0원, 기존 "기본적립" 다른 항목들도 전부 0%로
+            # 찍혀있어서 그 카드 자체가 기본 할인율 0%인 캐치올 혜택) 이
+            # 건도 똑같은 형식으로 같이 보이게 usage_logs에도 넣는다.
+            if toss_prime["card_id"]:
+                basic_benefit = conn.execute(
+                    "SELECT id FROM benefits WHERE card_id = ? AND name = '기본적립'",
+                    (toss_prime["card_id"],),
+                ).fetchone()
+                if basic_benefit:
+                    log_exists = conn.execute(
+                        "SELECT 1 FROM usage_logs WHERE source_inbox_id = ? AND benefit_id = ?",
+                        (restored_id, basic_benefit["id"]),
+                    ).fetchone()
+                    if not log_exists:
+                        conn.execute(
+                            """INSERT INTO usage_logs
+                               (benefit_id, used_value, used_at, merchant, memo, raw_value, source_inbox_id)
+                               VALUES (?, 0, ?, ?, ?, ?, ?)""",
+                            (
+                                basic_benefit["id"], "2026-11-03",
+                                "토스페이_컨텐츠 비바리퍼블리카",
+                                "결제 5,900원 → 할인 0원(0%)",
+                                5900, restored_id,
+                            ),
+                        )
 
         conn.commit()
     finally:
