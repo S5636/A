@@ -708,9 +708,20 @@ def serialize_inbox(conn):
 
 
 def serialize_no_benefit(conn):
+    # 고정지출/보험으로 연결된 "혜택없음" 알림은 inbox_items.card_id가 아니라
+    # recurring_payments.card_id/insurances.card_id로만 카드가 정해지는데
+    # (_auto_spend가 실적 잡을 때 쓰는 것과 같은 방식), 여기서 card_id만
+    # 보면 그게 비어있어서 카드별 "혜택없음" 목록에서 통째로 빠져버린다 -
+    # 실적엔 잡히는데 내역엔 안 보이는 사고(실제로 지적받음). COALESCE로
+    # card_id가 없으면 연결된 고정지출/보험의 카드로 대신 채운다.
     rows = conn.execute(
-        """SELECT inbox_items.*, cards.name AS card_name
-           FROM inbox_items LEFT JOIN cards ON cards.id = inbox_items.card_id
+        """SELECT inbox_items.*,
+                  COALESCE(inbox_items.card_id, recurring_payments.card_id, insurances.card_id) AS effective_card_id,
+                  cards.name AS card_name
+           FROM inbox_items
+           LEFT JOIN recurring_payments ON recurring_payments.id = inbox_items.recurring_id
+           LEFT JOIN insurances ON insurances.id = inbox_items.insurance_id
+           LEFT JOIN cards ON cards.id = COALESCE(inbox_items.card_id, recurring_payments.card_id, insurances.card_id)
            WHERE inbox_items.status = 'no_benefit' AND inbox_items.deleted_at IS NULL
            ORDER BY inbox_items.occurred_at DESC, inbox_items.id DESC"""
     ).fetchall()
@@ -721,7 +732,7 @@ def serialize_no_benefit(conn):
             "amount": r["amount"],
             "merchant": r["merchant"],
             "occurred_at": r["occurred_at"],
-            "card_id": r["card_id"],
+            "card_id": r["effective_card_id"],
             "card_name": r["card_name"],
         }
         for r in rows
