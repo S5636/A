@@ -387,7 +387,7 @@
     const logsHtml = history.length
       ? history.map((h) => `
           <div class="log-item">
-            <span>${h.occurred_at} · ${h.merchant ? escapeHtml(h.merchant) + " " : ""}${fmt(h.amount)}원${h.card_label ? " · " + escapeHtml(h.card_label) : ""}</span>
+            <span>${shortDate(h.occurred_at)} · ${h.merchant ? escapeHtml(h.merchant) + " " : ""}${fmt(h.amount)}원${h.card_label ? " · " + escapeHtml(h.card_label) : ""}</span>
             <button class="unlink-match" data-inbox-id="${h.id}">해제</button>
           </div>
         `).join("")
@@ -533,7 +533,7 @@
         <input type="checkbox" class="bulk-item-check" data-id="${it.id}" ${bulkSelections.inbox.has(it.id) ? "checked" : ""}>
         <div class="inbox-item-info">
           <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
-          <div class="inbox-item-sub">${it.occurred_at}${it.matched_card_name ? " · " + escapeHtml(shortCardName(it.matched_card_name)) : ""}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""}</div>
+          <div class="inbox-item-sub">${shortDate(it.occurred_at)}${it.matched_card_name ? " · " + escapeHtml(shortCardName(it.matched_card_name)) : ""}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""}</div>
           ${it.matched_benefit_name ? `<div class="inbox-item-sub">🎯 ${escapeHtml(shortBenefitName(it.matched_benefit_name))}</div>` : ""}
         </div>
         ${/취소|실패|거절/.test(it.raw_text || "") ? `<button class="btn secondary small cancel-notice" data-id="${it.id}">취소 처리</button>` : ""}
@@ -589,7 +589,7 @@
         <input type="checkbox" class="bulk-item-check" data-id="${it.id}" ${bulkSelections.noBenefit.has(it.id) ? "checked" : ""}>
         <div class="inbox-item-info">
           <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
-          <div class="inbox-item-sub">${it.occurred_at}${it.card_name ? " · " + escapeHtml(shortCardName(it.card_name)) : ""}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""}</div>
+          <div class="inbox-item-sub">${shortDate(it.occurred_at)}${it.card_name ? " · " + escapeHtml(shortCardName(it.card_name)) : ""}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""}</div>
         </div>
         <div class="benefit-buttons">
           <button class="btn secondary small reopen-no-benefit" data-id="${it.id}">재확인</button>
@@ -644,7 +644,7 @@
         <input type="checkbox" class="bulk-item-check" data-id="${it.id}" ${bulkSelections.trash.has(it.id) ? "checked" : ""}>
         <div class="inbox-item-info">
           <div class="inbox-item-amount">${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</div>
-          <div class="inbox-item-sub">${it.occurred_at}${it.card_name ? " · " + escapeHtml(shortCardName(it.card_name)) : ""}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""}</div>
+          <div class="inbox-item-sub">${shortDate(it.occurred_at)}${it.card_name ? " · " + escapeHtml(shortCardName(it.card_name)) : ""}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""}</div>
         </div>
         <div class="benefit-buttons">
           <button class="btn secondary small restore-trash" data-id="${it.id}">복원</button>
@@ -717,7 +717,7 @@
         <div class="log-list ${cardNoBenefitOpen ? "open" : ""}">
           ${cardNoBenefitItems.map((it) => `
             <div class="log-item">
-              <span>${it.occurred_at}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""} · ${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</span>
+              <span>${shortDate(it.occurred_at)}${it.merchant ? " · " + escapeHtml(displayMerchant(it.merchant)) : ""} · ${it.amount != null ? fmt(it.amount) + "원" : "(금액 미확인)"}</span>
               <button class="reopen-no-benefit-card" data-id="${it.id}">재확인</button>
             </div>
           `).join("")}
@@ -771,7 +771,7 @@
     return b.logs.length
       ? b.logs.map((l) => {
           const timePart = l.notif_occurred_at ? l.notif_occurred_at.split(" ")[1]?.slice(0, 5) : "";
-          const dateLabel = timePart ? `${l.used_at} ${timePart}` : l.used_at;
+          const dateLabel = timePart ? `${shortDate(l.used_at)} ${timePart}` : shortDate(l.used_at);
           const merchantLabel = l.merchant ? `<strong>${escapeHtml(displayMerchant(l.merchant))}</strong> · ` : "";
           // memo가 이미 "결제 X원 → 잔돈/할인 Y원" 형태로 금액을 포함하면
           // 앞에 금액을 또 안 보여준다 (같은 금액이 두 번 찍히는 것 방지)
@@ -1068,7 +1068,7 @@
     const infoLine = [
       loan.interest_rate ? `${loan.interest_rate}%` : "",
       loan.repayment_type ? escapeHtml(shortRepayType(loan.repayment_type)) : "",
-      loan.end_date ? `만기 ${loan.end_date}${ddayText}` : "",
+      loan.end_date ? `만기 ${shortDate(loan.end_date)}${ddayText}` : "",
       loan.withdrawal_account ? escapeHtml(loan.withdrawal_account) : "",
     ].filter(Boolean).join(" / ");
     const dueText = loan.due_this_month
@@ -1080,7 +1080,7 @@
     const logsHtml = loan.payments.length
       ? loan.payments.map((p) => `
           <div class="log-item">
-            <span>${p.paid_at} · ${p.amount >= 0 ? "상환" : "증가"} ${fmt(Math.abs(p.amount))}원 → 잔액 ${fmt(p.balance_after)}원${p.memo ? " · " + escapeHtml(p.memo) : ""}</span>
+            <span>${shortDate(p.paid_at)} · ${p.amount >= 0 ? "상환" : "증가"} ${fmt(Math.abs(p.amount))}원 → 잔액 ${fmt(p.balance_after)}원${p.memo ? " · " + escapeHtml(p.memo) : ""}</span>
             <button class="delete-loan-payment" data-id="${p.id}">삭제</button>
           </div>
         `).join("")
@@ -1544,7 +1544,7 @@
         <input type="checkbox" class="match-candidate-check" data-id="${c.id}">
         <span>
           ${c.name_matched ? '<span style="color:var(--good);font-weight:700;">이름일치 </span>' : ""}${fmt(c.amount)}원${c.merchant ? " · " + escapeHtml(c.merchant) : ""}${c.card_label ? " · " + escapeHtml(c.card_label) : ""}${statusLabel[c.status] || ""}<br>
-          <span style="font-size:11px;color:var(--text-muted);">${c.occurred_at}</span>
+          <span style="font-size:11px;color:var(--text-muted);">${shortDate(c.occurred_at)}</span>
         </span>
       </label>
     `).join("");
@@ -1761,9 +1761,9 @@
   function insuranceTemplate(item) {
     const infoLine = [
       item.insured_name && item.insured_name !== "본인" ? `피보험자 ${item.insured_name}` : "",
-      item.start_date ? `가입 ${item.start_date}` : "",
-      item.payment_end_date ? `납입완료 ${item.payment_end_date}` : "",
-      item.maturity_date ? `만기 ${item.maturity_date}` : "",
+      item.start_date ? `가입 ${shortDate(item.start_date)}` : "",
+      item.payment_end_date ? `납입완료 ${shortDate(item.payment_end_date)}` : "",
+      item.maturity_date ? `만기 ${shortDate(item.maturity_date)}` : "",
     ].filter(Boolean).join(" / ");
     return `
       <div class="card-head">
@@ -2098,7 +2098,7 @@
             <span class="inbox-item-amount">${fmt(m.amount)}원</span>
             ${m.merchant ? " · " + escapeHtml(m.merchant) : ""}
           </label>
-          <div class="inbox-item-sub">${m.occurred_at}${m.claimed ? " · 청구함" : ""}</div>
+          <div class="inbox-item-sub">${shortDate(m.occurred_at)}${m.claimed ? " · 청구함" : ""}</div>
         </div>
       </div>
     `).join("");
@@ -2138,7 +2138,7 @@
           <div class="inbox-item">
             <div class="inbox-item-info">
               <div class="inbox-item-amount">${fmt(it.amount)}원</div>
-              <div class="inbox-item-sub">${it.occurred_at}${it.card_label ? " · " + escapeHtml(shortCardName(it.card_label)) : ""} · ${it.source === "notification" ? "알림" : it.source === "excel" ? "엑셀" : "미상"}</div>
+              <div class="inbox-item-sub">${shortDate(it.occurred_at)}${it.card_label ? " · " + escapeHtml(shortCardName(it.card_label)) : ""} · ${it.source === "notification" ? "알림" : it.source === "excel" ? "엑셀" : "미상"}</div>
               <div class="inbox-item-sub">${escapeHtml(it.linked_label)}</div>
             </div>
             <button class="btn secondary small dup-ignore" data-id="${it.id}">중복 아님</button>
@@ -2865,7 +2865,7 @@
     // 뭘로 읽었는지 바로 보여줘서 틀렸으면 바로 알아챌 수 있게 한다.
     importImageLog.innerHTML = `<div class="upload-log-item">` +
       `읽은 내용: ${p.amount != null ? fmt(p.amount) + "원" : "(금액 못 읽음)"}` +
-      `${p.merchant ? " · " + escapeHtml(p.merchant) : ""}${p.occurred_at ? " · " + escapeHtml(p.occurred_at) : ""}` +
+      `${p.merchant ? " · " + escapeHtml(p.merchant) : ""}${p.occurred_at ? " · " + escapeHtml(shortDate(p.occurred_at)) : ""}` +
       `${p.last4 ? " · 카드뒷자리 " + escapeHtml(p.last4) : " · (카드뒷자리 못 읽음)"} ` +
       `- 큐에 등록됨, 아래 "받은 결제 알림"에서 확인하세요.</div>`;
     importImageFile.value = "";
