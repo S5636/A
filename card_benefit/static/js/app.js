@@ -769,6 +769,7 @@
       <div class="perf-row perf-row-sub">
         <span>전월 ${fmt(card.perf_spend)}원 / ${fmt(card.perf_threshold)}원${autoTag}</span>
         <button class="perf-edit" data-id="${card.id}" data-spend="${card.perf_spend}">수정</button>
+        <a class="btn secondary small" href="/api/export/card-diag/${card.id}.txt" download>실적 진단 파일</a>
       </div>
     `;
   }
