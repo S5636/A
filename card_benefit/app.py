@@ -2975,8 +2975,15 @@ def unlink_match(inbox_id):
                         f"UPDATE {table} SET excluded_merchants = ? WHERE id = ?",
                         ("\n".join(existing), fk_id),
                     )
+        # status/card_id/benefit_id도 같이 pending으로 되돌려야 "받은 알림"
+        # 큐에 다시 뜬다(serialize_inbox가 status='pending'만 보여줌). 이걸
+        # 안 돌려놓으면, 이 알림이 recurring_id 말고 benefit_id로도 같이
+        # 배정돼 있던 경우(해외 1원짜리 사고처럼 두 군데 다 걸려있던 경우)
+        # status가 'assigned'로 남아서 "해제"를 눌러도 큐에 다시 안 살아나고
+        # 그냥 없어진 것처럼 보이는 버그가 있었다(실제로 발생 확인됨).
         conn.execute(
-            "UPDATE inbox_items SET recurring_id = NULL, insurance_id = NULL, automatch_excluded = 1 WHERE id = ?",
+            "UPDATE inbox_items SET recurring_id = NULL, insurance_id = NULL, automatch_excluded = 1, "
+            "status = 'pending', card_id = NULL, benefit_id = NULL WHERE id = ?",
             (inbox_id,),
         )
         conn.commit()
