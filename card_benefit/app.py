@@ -4833,6 +4833,17 @@ def _parse_receipt_ocr(lines):
                                 break
                     if 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59:
                         occurred_at = f"20{dm.group(1)}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+            else:
+                # "11/03 23:05"처럼 연도 없이 월/일을 "/"로 적는 카드사
+                # 알림톡(카카오톡 "알림톡 도착") 캡쳐 형식도 있다. 연도가
+                # 안 찍혀 있지만 알림이니 당연히 최근(올해) 날짜라 올해로
+                # 본다 - 지어내는 게 아니라 알림이라는 성격상 확실한 값.
+                dm2 = re.match(r"^(\d{1,2})/(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$", text)
+                if dm2:
+                    month, day = int(dm2.group(1)), int(dm2.group(2))
+                    hour, minute, second = int(dm2.group(3)), int(dm2.group(4)), int(dm2.group(5) or 0)
+                    if 1 <= month <= 12 and 1 <= day <= 31 and 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59:
+                        occurred_at = f"{datetime.now().year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
 
         if not last4 and not _DATE_LIKE_RE.search(text):
             # 카드번호가 두 줄로 쪼개져 읽히면("5188-37.\n~0741"처럼) 뒷자리
@@ -4853,6 +4864,21 @@ def _parse_receipt_ocr(lines):
         recent_lines.append(text)
         if len(recent_lines) > 6:
             recent_lines.pop(0)
+
+    if amount is None:
+        # 카드매출전표/상세내역 캡쳐가 아니라 "알림톡 도착" 같은 카드사 결제알림
+        # 캡쳐일 수 있다. 이 형식은 금액이 "일시불 5,900원"처럼 레이블과 한
+        # 줄에 붙어 있고(위 로직은 금액만 혼자 줄인 경우만 잡음), 가맹점명도
+        # 금액보다 아래(마지막 줄)에 나와서 위의 "금액 앞쪽을 거슬러 올라가는"
+        # 방식으로는 못 찾는다. 문자 알림 붙여넣기용으로 이미 검증된
+        # parse_notification()을 그대로 재사용한다(중복 로직 새로 안 짬).
+        notif = parse_notification("\n".join(lines))
+        if notif["amount"] is not None:
+            amount = notif["amount"]
+            if not merchant:
+                merchant = notif["merchant"]
+            if not last4:
+                last4 = notif["last4"]
 
     return {
         "amount": amount,
