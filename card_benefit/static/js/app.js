@@ -541,10 +541,12 @@
         },
       },
       {
-        label: "무시",
+        label: "바로 삭제",
         onAction: async (selectedIds) => {
           // 체크한 것들을 확인창 없이 바로 휴지통으로(복원 가능) - "삭제"랑
           // 같은 API지만 매번 묻지 않고 바로 처리해달라는 요청으로 추가.
+          // "무시"라는 이름이 "삭제"랑 헷갈린다는 지적으로 이름만 바꿈
+          // (둘 다 휴지통행, 확인창 있고 없고 차이만 있음).
           state = await api("/api/inbox/bulk-delete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -801,7 +803,7 @@
           return `
           <div class="log-item">
             <span>${dateLabel} · ${merchantLabel}${valuePart}</span>
-            <button class="delete-log" data-id="${l.id}">삭제</button>
+            <button class="delete-log" data-id="${l.id}">배정 취소</button>
           </div>`;
         }).join("")
       : `<div class="log-item"><span>이번 기간 사용 기록 없음</span></div>`;
@@ -1003,6 +1005,10 @@
     );
     el.querySelectorAll(".delete-log").forEach((btn) =>
       btn.addEventListener("click", async () => {
+        // 이건 휴지통으로 가는 "삭제"가 아니라 혜택 배정 자체를 취소하는
+        // 거라 이름/확인창을 분리했다 - 원래 알림이 고정지출/보험에도 같이
+        // 연결돼 있던 거면 그 연결까지 전부 풀리고 "받은 알림" 큐로 돌아간다.
+        if (!confirm("이 혜택 배정을 취소할까요? 휴지통으로 가는 게 아니라 \"받은 알림\" 큐로 돌아가고, 고정지출/보험에 같이 연결돼 있었다면 그 연결도 같이 풀립니다.")) return;
         state = await api(`/api/logs/${btn.dataset.id}`, { method: "DELETE" });
         render();
       })
@@ -2736,7 +2742,7 @@
   document.getElementById("assign-cancel").addEventListener("click", () => assignModal.classList.remove("open"));
 
   document.getElementById("assign-discard").addEventListener("click", async () => {
-    if (!confirm("이 알림을 무시할까요? (광고 등 결제와 무관한 알림일 때)")) return;
+    if (!confirm("이 알림을 휴지통으로 보낼까요? 휴지통에서 다시 복원할 수 있습니다. (광고 등 결제와 무관한 알림일 때)")) return;
     state = await api(`/api/inbox/${assigningItem.id}`, { method: "DELETE" });
     assignModal.classList.remove("open");
     render();
