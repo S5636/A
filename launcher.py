@@ -127,6 +127,55 @@ def _check_and_apply_update():
         print(f"[안내] 업데이트 적용에 실패했습니다(무시하고 지금 버전으로 계속 진행합니다): {type(e).__name__}: {e}")
 
 
+def _close_previous_instances():
+    """이전에 떠있던 마진보드 창(과 그 콘솔)을 전부 찾아서 닫는다.
+
+    START.bat의 taskkill(WINDOWTITLE/포트)만으로는 과거 여러 번의
+    실행에서 남은 고아 창들이 계속 쌓이는 문제가 있었다(사용자 확인:
+    "왜 아직도 로그 못끄는거야" - 하루 전 세션까지 화면에 그대로
+    남아있었음). taskkill의 포트 기준 탐색은 "지금 포트 5000을 쥔
+    딱 하나"만 찾는데, 그보다 먼저 떠 있다가 이미 포트를 다른 고아
+    프로세스에게 넘겨준 더 오래된 고아들은 전혀 못 찾는다. 여기서는
+    포트가 아니라 "python.exe이면서 명령줄에 이 launcher.py 경로가
+    들어있는" 모든 프로세스를 psutil로 직접 찾아서, 그 프로세스
+    자신과 그 부모(콘솔을 쥔 cmd 등)를 kill한다 - 자식(오너클랜
+    브라우저 등)은 건드리지 않는다(kill()은 그 프로세스 자신만
+    종료하고 자식까지 내려가지 않는다 - /T처럼 트리 전체를 죽이는
+    게 아니다)."""
+    try:
+        import psutil
+    except ImportError:
+        return
+    my_pid = os.getpid()
+    this_script = os.path.abspath(__file__)
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if proc.pid == my_pid:
+                continue
+            name = (proc.info.get('name') or '').lower()
+            if name != 'python.exe':
+                continue
+            cmdline = proc.info.get('cmdline') or []
+            if not any(os.path.abspath(arg) == this_script for arg in cmdline if arg):
+                continue
+        except Exception:
+            continue
+        print(f"[안내] 이전에 떠있던 마진보드 프로세스를 정리합니다(PID {proc.pid})...")
+        try:
+            parent = proc.parent()
+        except Exception:
+            parent = None
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        if parent is not None:
+            try:
+                parent.kill()
+            except Exception:
+                pass
+
+
 def open_browser_later():
     time.sleep(3)
     try:
@@ -149,12 +198,12 @@ def main():
     print("============================================")
     print()
 
-    # 이전에 떠있던 창/서버를 닫는 건 이제 START.bat(윈도우 콘솔 창의
-    # WINDOWTITLE로 직접 찾아서 종료 - 사용자의 다른 프로그램에서 이미
-    # 검증된 방식)이 python이 시작되기도 전에 먼저 처리한다. psutil로
-    # 포트 소유 프로세스의 부모를 추적하던 이전 방식은 실제로 창이 안
-    # 닫히는 걸로 보여서(사용자 지적: "로그 안닫히고 그대로잖아") 빼고,
-    # 더 간단하고 이미 검증된 .bat 방식으로 옮겼다.
+    # START.bat이 python이 시작되기도 전에 WINDOWTITLE/포트 기준으로 1차
+    # 정리를 하지만, 그건 "지금 포트 5000을 쥔 딱 하나"만 찾아서 여러
+    # 세대에 걸쳐 쌓인 더 오래된 고아 창까지는 못 잡는다(사용자 확인:
+    # "왜 아직도 로그 못끄는거야" - 하루 전 세션까지 남아있었음). 여기서
+    # 명령줄 기준으로 전부 쓸어서 2차로 정리한다.
+    _close_previous_instances()
 
     # pip install/playwright install을 매번 무조건 실행하면, pip이 로컬에 이미
     # 다 깔려있어도 매번 네트워크로 버전을 다시 확인하느라 시간이 걸린다
