@@ -718,7 +718,16 @@ def _collect_and_register_tracking(win, L):
         _unfilter_delivery_prep(win, L)
         return
 
-    if not _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
+    # 사용자 지적: "근데 왜 자동화가 겹치냐고" - 운송장수집 완료 팝업을
+    # 180초까지 기다리고 있었는데, 정확한 팝업 문구를 실제로 확인한 적이
+    # 없어서('완료하였습니다'로 추측만 함) 그 문구가 다르면 매번 180초를
+    # 그냥 날렸을 수 있다. 여기에 기존 주문수집 자체의 대기시간(최대 5분
+    # 창 준비 + 최대 10분 수집완료 대기)과 엑셀 다운로드 2회가 겹치면
+    # DPJ_AUTO_RUN_TIMEOUT_SECONDS(15분)를 넘기기 쉬웠고, 그러면 다음
+    # 30분 주기가 "이미 다른 자동화가 진행 중"으로 겹쳐 보였다 - 진짜
+    # 동시 실행이 아니라 한 주기가 너무 오래 걸려서 다음 주기와 맞물린
+    # 것이었다. 이 추측성 대기를 60초로 줄여 낭비를 최소화한다.
+    if not _wait_for_completion_popup_and_confirm(win, L, wait_seconds=60):
         L('운송장수집 완료 확인 팝업을 못 받았습니다 - 그래도 운송장등록은 이어서 시도합니다.')
     time.sleep(1)
 
