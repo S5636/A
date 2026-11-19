@@ -1600,18 +1600,6 @@
 
   const methodSelect = document.getElementById("recurring-method-select");
   const methodInput = document.getElementById("recurring-method");
-  const CUSTOM_METHOD = "__custom__";
-
-  methodSelect.addEventListener("change", () => {
-    if (methodSelect.value === CUSTOM_METHOD) {
-      methodInput.style.display = "";
-      methodInput.value = "";
-      methodInput.focus();
-    } else {
-      methodInput.style.display = "none";
-      methodInput.value = "";
-    }
-  });
 
   function normMethod(s) {
     return (s || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -1662,15 +1650,21 @@
     const cardOption = item && item.card_id ? options.find((o) => o.value === `card:${item.card_id}`) : null;
     const textMatched = !cardOption && options.find((o) => o.value !== undefined && normMethod(o.label) === normMethod(current));
     const matched = cardOption || textMatched;
+    // "직접 입력"은 없앴다 - 카드는 무조건 드롭다운에서 고르게 강제한다
+    // (텍스트로 "씨티(0104)"처럼 직접 입력해두면 카드탭과 연결이 안 돼서
+    // 실적 집계 등에서 누락되는 사고가 실제로 있었음). 예전에 직접 입력
+    // 해둔 값이 지금 목록에 없으면(현재 등록된 카드/기존 값과 안 맞으면)
+    // 고를 수 없는 값이니 읽기 전용으로 보여주기만 하고, 저장하려면
+    // 드롭다운에서 다시 골라야 한다.
     methodSelect.innerHTML = [
       `<option value="">선택 안 함</option>`,
       ...options.map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`),
-      `<option value="${CUSTOM_METHOD}">직접 입력</option>`,
     ].join("");
     if (current && !matched) {
-      methodSelect.value = CUSTOM_METHOD;
+      methodSelect.value = "";
       methodInput.style.display = "";
-      methodInput.value = current;
+      methodInput.value = current + " (목록에 없는 예전 값 - 드롭다운에서 다시 골라주세요)";
+      methodInput.disabled = true;
     } else {
       methodSelect.value = matched ? matched.value : "";
       methodInput.style.display = "none";
@@ -1708,7 +1702,7 @@
       category: document.getElementById("recurring-category").value.trim(),
       amount: document.getElementById("recurring-amount").value || 0,
       card_id: isCardChoice ? Number(methodSelect.value.slice(5)) : null,
-      payment_method: isCardChoice ? "" : (methodSelect.value === CUSTOM_METHOD ? methodInput.value.trim() : methodSelect.value),
+      payment_method: isCardChoice ? "" : methodSelect.value,
       payment_day: document.getElementById("recurring-day").value || 0,
       billing_cycle: document.getElementById("recurring-billing-cycle").value,
       usage_period: (() => {
@@ -1849,18 +1843,6 @@
 
   const insuranceMethodSelect = document.getElementById("insurance-method-select");
   const insuranceMethodInput = document.getElementById("insurance-method");
-  const CUSTOM_METHOD_INS = "__custom__";
-
-  insuranceMethodSelect.addEventListener("change", () => {
-    if (insuranceMethodSelect.value === CUSTOM_METHOD_INS) {
-      insuranceMethodInput.style.display = "";
-      insuranceMethodInput.value = "";
-      insuranceMethodInput.focus();
-    } else {
-      insuranceMethodInput.style.display = "none";
-      insuranceMethodInput.value = "";
-    }
-  });
 
   function openInsuranceModal(item) {
     editingInsuranceId = item ? item.id : null;
@@ -1875,15 +1857,17 @@
     const cardOption = item && item.card_id ? options.find((o) => o.value === `card:${item.card_id}`) : null;
     const textMatched = !cardOption && options.find((o) => normMethod(o.label) === normMethod(current));
     const matched = cardOption || textMatched;
+    // "직접 입력" 없앰 - 결제수단은 무조건 드롭다운에서 고르게 강제한다
+    // (recurring-method-select와 같은 이유).
     insuranceMethodSelect.innerHTML = [
       `<option value="">선택 안 함</option>`,
       ...options.map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`),
-      `<option value="${CUSTOM_METHOD_INS}">직접 입력</option>`,
     ].join("");
     if (current && !matched) {
-      insuranceMethodSelect.value = CUSTOM_METHOD_INS;
+      insuranceMethodSelect.value = "";
       insuranceMethodInput.style.display = "";
-      insuranceMethodInput.value = current;
+      insuranceMethodInput.value = current + " (목록에 없는 예전 값 - 드롭다운에서 다시 골라주세요)";
+      insuranceMethodInput.disabled = true;
     } else {
       insuranceMethodSelect.value = matched ? matched.value : "";
       insuranceMethodInput.style.display = "none";
@@ -1911,7 +1895,7 @@
       insured_name: document.getElementById("insurance-insured-name").value.trim() || "본인",
       monthly_premium: document.getElementById("insurance-premium").value || 0,
       card_id: isCardChoice ? Number(insuranceMethodSelect.value.slice(5)) : null,
-      payment_method: isCardChoice ? "" : (insuranceMethodSelect.value === CUSTOM_METHOD_INS ? insuranceMethodInput.value.trim() : insuranceMethodSelect.value),
+      payment_method: isCardChoice ? "" : insuranceMethodSelect.value,
       payment_day: document.getElementById("insurance-day").value || 0,
       start_date: document.getElementById("insurance-start-date").value.trim(),
       payment_end_date: document.getElementById("insurance-payment-end-date").value.trim(),
