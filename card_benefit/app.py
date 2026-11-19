@@ -4325,124 +4325,148 @@ def _set_column_widths(ws, widths):
         ws.column_dimensions[col].width = width
 
 
+def _card_diag_lines(conn, card):
+    """카드 한 장에 대한 실적 진단 텍스트(줄 리스트)를 만든다 - 단일 카드용
+    라우트와 전체 카드용 라우트가 같이 쓴다. _auto_spend와 완전히 똑같은
+    조건으로 "이번 달 실적에 잡힌 알림"을 전부 한 줄씩 나열하고 합계를
+    보여줘서, 어느 알림이 실적엔 잡히는데 혜택별 목록(결제금액)에는 안
+    보이는지(예: 사이클 기준 vs 달력 기준 경계 차이, 배정된 혜택이 삭제된
+    경우 등) 바로 알 수 있게 한다."""
+    card_id = card["id"]
+    ref_date = date.today()
+    this_month = current_year_month(ref_date)
+    prev_month = previous_year_month(ref_date)
+    cyc_start, cyc_end = cycle_bounds(card["reset_day"], ref_date)
+
+    def spend_rows(year_month):
+        base = """SELECT inbox_items.id, inbox_items.amount, inbox_items.merchant,
+                      inbox_items.occurred_at, inbox_items.status, inbox_items.benefit_id,
+                      inbox_items.recurring_id, inbox_items.insurance_id,
+                      recurring_payments.name AS recurring_name,
+                      recurring_payments.card_id AS recurring_card_id,
+                      recurring_payments.payment_method AS recurring_payment_method,
+                      insurances.company AS insurance_company,
+                      insurances.card_id AS insurance_card_id,
+                      insurances.payment_method AS insurance_payment_method,
+                      benefits.name AS benefit_name
+               FROM inbox_items
+               LEFT JOIN recurring_payments ON recurring_payments.id = inbox_items.recurring_id
+               LEFT JOIN insurances ON insurances.id = inbox_items.insurance_id
+               LEFT JOIN benefits ON benefits.id = inbox_items.benefit_id
+               WHERE substr(inbox_items.occurred_at, 1, 7) = ?"""
+        # 1) card_id/상태로 직접 잡히는 것 + recurring/insurance가 card_id FK로
+        # 바로 연결된 것(_auto_spend의 1차 쿼리와 동일).
+        direct = conn.execute(
+            base + """
+               AND (
+                   (inbox_items.recurring_id IS NULL AND inbox_items.insurance_id IS NULL
+                    AND inbox_items.card_id = ? AND inbox_items.status IN ('assigned', 'no_benefit'))
+                   OR (inbox_items.recurring_id IS NOT NULL AND recurring_payments.card_id = ?)
+                   OR (inbox_items.insurance_id IS NOT NULL AND insurances.card_id = ?)
+               )
+               ORDER BY inbox_items.occurred_at""",
+            (year_month, card_id, card_id, card_id),
+        ).fetchall()
+        # 2) card_id FK가 비어서(결제수단을 텍스트로 직접 입력해둔 옛날 등록분)
+        # 카드 뒷자리로 보조 매칭하는 것 - SQL 함수가 아니라 파이썬에서 직접
+        # card_codes_match를 돌려야 해서 _auto_spend처럼 따로 조회한다.
+        text_candidates = conn.execute(
+            base + """
+               AND (
+                   (inbox_items.recurring_id IS NOT NULL AND recurring_payments.card_id IS NULL)
+                   OR (inbox_items.insurance_id IS NOT NULL AND insurances.card_id IS NULL)
+               )
+               ORDER BY inbox_items.occurred_at""",
+            (year_month,),
+        ).fetchall()
+        text_matched = [
+            r for r in text_candidates
+            if card["last4"] and card_codes_match(
+                _extract_method_last4(r["recurring_payment_method"] or r["insurance_payment_method"]),
+                card["last4"],
+            )
+        ]
+        return list(direct) + text_matched
+
+    lines = []
+    lines.append(f"카드: {card['name']} (id={card_id}, last4={card['last4']})")
+    lines.append(f"결제일(reset_day): {card['reset_day']}")
+    lines.append(f"이번 결제 사이클(혜택별 '결제금액' 목록 기준): {cyc_start} ~ {cyc_end}")
+    lines.append(f"실적 제외 키워드: {card['perf_excluded_keywords'] or DEFAULT_PERFORMANCE_EXCLUDED_KEYWORDS}")
+    lines.append("")
+
+    for label, ym in (("당월(이번 달, 달력 기준)", this_month), ("전월", prev_month)):
+        rows = spend_rows(ym)
+        lines.append(f"=== {label} {ym} - 실적에 잡히는 알림 목록 ===")
+        total = 0
+        for r in rows:
+            excluded = is_performance_excluded(r["merchant"], card["perf_excluded_keywords"])
+            link = "직접배정" if (not r["recurring_id"] and not r["insurance_id"]) else (
+                f"고정지출:{r['recurring_name']}" if r["recurring_id"] else f"보험:{r['insurance_company']}"
+            )
+            benefit_part = f", 혜택:{r['benefit_name']}" if r["benefit_name"] else (
+                ", 혜택:(삭제됨 또는 없음)" if r["benefit_id"] else ""
+            )
+            mark = "(실적 제외 키워드에 걸려서 합계에선 빠짐)" if excluded else ""
+            lines.append(
+                f"  {r['occurred_at']} · {r['merchant']} · {r['amount']:,.0f}원 "
+                f"· status={r['status']} · 연결={link}{benefit_part} {mark}"
+            )
+            if not excluded:
+                total += r["amount"] or 0
+        lines.append(f"  -> 합계: {total:,.0f}원 (건수 {len(rows)})")
+        lines.append("")
+
+    benefits = conn.execute(
+        "SELECT id, name FROM benefits WHERE card_id = ? ORDER BY sort_order ASC, id ASC", (card_id,)
+    ).fetchall()
+    lines.append("=== 혜택별 목록(화면에 보이는 '결제금액')에 잡히는 사이클 기준 사용내역 합계 ===")
+    for b in benefits:
+        used = conn.execute(
+            "SELECT COALESCE(SUM(raw_value), 0) AS total FROM usage_logs WHERE benefit_id = ? "
+            "AND used_at >= ? AND used_at < ?",
+            (b["id"], cyc_start.isoformat(), cyc_end.isoformat()),
+        ).fetchone()["total"]
+        lines.append(f"  {b['name']}: {used:,.0f}원")
+
+    return lines
+
+
 @app.route("/api/export/card-diag/<int:card_id>.txt")
 def export_card_diag(card_id):
-    """"당월 실적 숫자가 화면에 보이는 혜택별 결제금액 합이랑 안 맞는다"
-    같은 걸 확인할 때, 캡처 주고받으며 하나씩 짚어보는 대신 버튼 한 번
-    눌러서 파일로 바로 받을 수 있게 만든 진단용 다운로드. _auto_spend와
-    완전히 똑같은 조건으로 "이번 달 실적에 잡힌 알림"을 전부 한 줄씩
-    나열하고 합계를 보여줘서, 어느 알림이 실적엔 잡히는데 혜택별 목록
-    (결제금액)에는 안 보이는지(예: 사이클 기준 vs 달력 기준 경계 차이,
-    배정된 혜택이 삭제된 경우 등) 바로 알 수 있게 한다."""
+    """카드 한 장의 실적 진단 파일 - 버튼 한 번으로 바로 다운로드."""
     conn = get_conn()
     try:
         card = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
         if not card:
             return "카드를 찾을 수 없습니다.", 404
-
-        ref_date = date.today()
-        this_month = current_year_month(ref_date)
-        prev_month = previous_year_month(ref_date)
-        cyc_start, cyc_end = cycle_bounds(card["reset_day"], ref_date)
-
-        def spend_rows(year_month):
-            base = """SELECT inbox_items.id, inbox_items.amount, inbox_items.merchant,
-                          inbox_items.occurred_at, inbox_items.status, inbox_items.benefit_id,
-                          inbox_items.recurring_id, inbox_items.insurance_id,
-                          recurring_payments.name AS recurring_name,
-                          recurring_payments.card_id AS recurring_card_id,
-                          recurring_payments.payment_method AS recurring_payment_method,
-                          insurances.company AS insurance_company,
-                          insurances.card_id AS insurance_card_id,
-                          insurances.payment_method AS insurance_payment_method,
-                          benefits.name AS benefit_name
-                   FROM inbox_items
-                   LEFT JOIN recurring_payments ON recurring_payments.id = inbox_items.recurring_id
-                   LEFT JOIN insurances ON insurances.id = inbox_items.insurance_id
-                   LEFT JOIN benefits ON benefits.id = inbox_items.benefit_id
-                   WHERE substr(inbox_items.occurred_at, 1, 7) = ?"""
-            # 1) card_id/상태로 직접 잡히는 것 + recurring/insurance가 card_id FK로
-            # 바로 연결된 것(_auto_spend의 1차 쿼리와 동일).
-            direct = conn.execute(
-                base + """
-                   AND (
-                       (inbox_items.recurring_id IS NULL AND inbox_items.insurance_id IS NULL
-                        AND inbox_items.card_id = ? AND inbox_items.status IN ('assigned', 'no_benefit'))
-                       OR (inbox_items.recurring_id IS NOT NULL AND recurring_payments.card_id = ?)
-                       OR (inbox_items.insurance_id IS NOT NULL AND insurances.card_id = ?)
-                   )
-                   ORDER BY inbox_items.occurred_at""",
-                (year_month, card_id, card_id, card_id),
-            ).fetchall()
-            # 2) card_id FK가 비어서(결제수단을 텍스트로 직접 입력해둔 옛날 등록분)
-            # 카드 뒷자리로 보조 매칭하는 것 - SQL 함수가 아니라 파이썬에서 직접
-            # card_codes_match를 돌려야 해서 _auto_spend처럼 따로 조회한다.
-            text_candidates = conn.execute(
-                base + """
-                   AND (
-                       (inbox_items.recurring_id IS NOT NULL AND recurring_payments.card_id IS NULL)
-                       OR (inbox_items.insurance_id IS NOT NULL AND insurances.card_id IS NULL)
-                   )
-                   ORDER BY inbox_items.occurred_at""",
-                (year_month,),
-            ).fetchall()
-            text_matched = [
-                r for r in text_candidates
-                if card["last4"] and card_codes_match(
-                    _extract_method_last4(r["recurring_payment_method"] or r["insurance_payment_method"]),
-                    card["last4"],
-                )
-            ]
-            return list(direct) + text_matched
-
-        lines = []
-        lines.append(f"카드: {card['name']} (id={card_id}, last4={card['last4']})")
-        lines.append(f"결제일(reset_day): {card['reset_day']}")
-        lines.append(f"이번 결제 사이클(혜택별 '결제금액' 목록 기준): {cyc_start} ~ {cyc_end}")
-        lines.append(f"실적 제외 키워드: {card['perf_excluded_keywords'] or DEFAULT_PERFORMANCE_EXCLUDED_KEYWORDS}")
-        lines.append("")
-
-        for label, ym in (("당월(이번 달, 달력 기준)", this_month), ("전월", prev_month)):
-            rows = spend_rows(ym)
-            lines.append(f"=== {label} {ym} - 실적에 잡히는 알림 목록 ===")
-            total = 0
-            for r in rows:
-                excluded = is_performance_excluded(r["merchant"], card["perf_excluded_keywords"])
-                link = "직접배정" if (not r["recurring_id"] and not r["insurance_id"]) else (
-                    f"고정지출:{r['recurring_name']}" if r["recurring_id"] else f"보험:{r['insurance_company']}"
-                )
-                benefit_part = f", 혜택:{r['benefit_name']}" if r["benefit_name"] else (
-                    ", 혜택:(삭제됨 또는 없음)" if r["benefit_id"] else ""
-                )
-                mark = "(실적 제외 키워드에 걸려서 합계에선 빠짐)" if excluded else ""
-                lines.append(
-                    f"  {r['occurred_at']} · {r['merchant']} · {r['amount']:,.0f}원 "
-                    f"· status={r['status']} · 연결={link}{benefit_part} {mark}"
-                )
-                if not excluded:
-                    total += r["amount"] or 0
-            lines.append(f"  -> 합계: {total:,.0f}원 (건수 {len(rows)})")
-            lines.append("")
-
-        benefits = conn.execute(
-            "SELECT id, name FROM benefits WHERE card_id = ? ORDER BY sort_order ASC, id ASC", (card_id,)
-        ).fetchall()
-        lines.append("=== 혜택별 목록(화면에 보이는 '결제금액')에 잡히는 사이클 기준 사용내역 합계 ===")
-        for b in benefits:
-            used = conn.execute(
-                "SELECT COALESCE(SUM(raw_value), 0) AS total FROM usage_logs WHERE benefit_id = ? "
-                "AND used_at >= ? AND used_at < ?",
-                (b["id"], cyc_start.isoformat(), cyc_end.isoformat()),
-            ).fetchone()["total"]
-            lines.append(f"  {b['name']}: {used:,.0f}원")
-
-        text = "\n".join(lines)
+        text = "\n".join(_card_diag_lines(conn, card))
     finally:
         conn.close()
 
     resp = make_response(text)
     resp.headers["Content-Type"] = "text/plain; charset=utf-8"
     resp.headers["Content-Disposition"] = f'attachment; filename="card_{card_id}_diag.txt"'
+    return resp
+
+
+@app.route("/api/export/all-cards-diag.txt")
+def export_all_cards_diag():
+    """카드마다 하나씩 따로 받으러 다니지 않게, 등록된 카드 전부를 한
+    파일에 순서대로 이어붙여서 한 번에 받는 버전."""
+    conn = get_conn()
+    try:
+        cards = conn.execute("SELECT * FROM cards WHERE closed = 0 ORDER BY sort_order ASC, id ASC").fetchall()
+        blocks = []
+        for card in cards:
+            blocks.append("\n".join(_card_diag_lines(conn, card)))
+        text = ("\n" + "=" * 60 + "\n\n").join(blocks)
+    finally:
+        conn.close()
+
+    resp = make_response(text)
+    resp.headers["Content-Type"] = "text/plain; charset=utf-8"
+    resp.headers["Content-Disposition"] = 'attachment; filename="all_cards_diag.txt"'
     return resp
 
 
