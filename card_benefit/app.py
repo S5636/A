@@ -2975,6 +2975,13 @@ def unlink_match(inbox_id):
                         f"UPDATE {table} SET excluded_merchants = ? WHERE id = ?",
                         ("\n".join(existing), fk_id),
                     )
+        # 이 알림이 recurring_id/insurance_id 말고 benefit_id로도 같이
+        # 배정돼 있었으면(혜택 내역에 usage_logs 행까지 있는 경우), 그것도
+        # 같이 지워야 한다 - 안 지우면 "해제"로 알림 큐엔 돌아왔는데 혜택
+        # 내역 목록에는 여전히 남아서 같은 알림이 두 군데(알림 큐 + 혜택
+        # 내역)에 동시에 떠버리는 사고가 난다(완전히 풀리는 게 아니라
+        # 반쪽만 풀리는 상태였음 - 실제로 지적받고 발견함).
+        conn.execute("DELETE FROM usage_logs WHERE source_inbox_id = ?", (inbox_id,))
         # status/card_id/benefit_id도 같이 pending으로 되돌려야 "받은 알림"
         # 큐에 다시 뜬다(serialize_inbox가 status='pending'만 보여줌). 이걸
         # 안 돌려놓으면, 이 알림이 recurring_id 말고 benefit_id로도 같이
@@ -3883,8 +3890,12 @@ def delete_log(log_id):
         if log and log["source_inbox_id"]:
             # 받은 알림에서 배정되어 만들어진 기록이면, 삭제할 때 알림을
             # 없애버리지 않고 "받은 결제 알림" 목록으로 되돌린다(다시 배정 가능).
+            # recurring_id/insurance_id도 같이 지운다 - 안 지우면 pending으로
+            # 돌아간 알림이 고정지출/보험 내역 쪽에는 여전히 남아서 "알림 큐
+            # + 내역"에 동시에 떠버린다(unlink_match의 반대 방향 같은 문제).
             conn.execute(
-                "UPDATE inbox_items SET status = 'pending', card_id = NULL, benefit_id = NULL WHERE id = ?",
+                "UPDATE inbox_items SET status = 'pending', card_id = NULL, benefit_id = NULL, "
+                "recurring_id = NULL, insurance_id = NULL WHERE id = ?",
                 (log["source_inbox_id"],),
             )
         conn.commit()
