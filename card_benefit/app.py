@@ -542,6 +542,9 @@ def serialize_inbox(conn):
     cards_with_code = conn.execute(
         "SELECT id, name, issuer, last4 FROM cards WHERE last4 != '' AND closed = 0"
     ).fetchall()
+    all_open_cards = conn.execute(
+        "SELECT id, name, issuer FROM cards WHERE closed = 0"
+    ).fetchall()
     benefits_by_card = {}
     for b in conn.execute(
         "SELECT id, card_id, name, merchant_keywords, calc_mode, always_doubled, rate_table FROM benefits"
@@ -584,6 +587,17 @@ def serialize_inbox(conn):
             if len(candidates) == 1:
                 card, matched_benefit = candidates[0]
                 matched_doubled = matched_benefit["calc_mode"] == "change_under_1000"
+
+        # 위 두 방법(뒷자리, 발급사+가맹점키워드 동시매칭) 다 실패해도, 발급사만
+        # 봤을 때 등록된 카드가 "정확히 하나"면 일단 카드만이라도 맞춰준다
+        # (뒷자리를 아직 안 등록해놨거나, 가맹점 자동매칭 키워드가 없는/
+        # OCR이 가맹점명을 살짝 다르게 읽은 경우에도 카드 자체는 하나로
+        # 특정 가능하므로). 혜택까지는 못 정하니 "해당없음" 그대로 두고
+        # 사람이 혜택만 고르게 한다 - 혜택은 추측하지 않는다.
+        if not card and r["issuer"]:
+            issuer_cards = [c for c in all_open_cards if c["issuer"] == r["issuer"]]
+            if len(issuer_cards) == 1:
+                card = issuer_cards[0]
 
         # 더모아 안내장상 "이동통신요금 자동이체"만 특별적립(2배) 대상이고,
         # "즉시납부"(그때그때 수동으로 낸 것)는 자동이체가 아니라서 2배 대상이
