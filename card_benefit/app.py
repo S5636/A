@@ -1991,29 +1991,12 @@ def _serialize_cards(conn):
         # 혜택 구간이 정해지므로, 지난달 알림 합계를 그 기준으로 쓴다.
         # 안내장의 "전월 이용금액 제외 대상"(공과금·세금·상품권 등)은 혜택
         # 대상이어도 실적 합계에서는 뺀다.
-        #
-        # 고정지출(구독)/보험료로 매칭된 알림은 _try_auto_match의 설계대로
-        # status가 'pending'인 채로 남고 card_id도 안 채워진다(recurring_id/
-        # insurance_id만 채워짐) - "카드로 결제한 구독/보험료도 실적엔 잡혀야
-        # 한다"는 의도였는데 이 함수는 card_id만 보고 있어서 정작 전부
-        # 빠지고 있었다(실제 버그로 확인됨). recurring_payments.card_id /
-        # insurances.card_id로 이 카드에 연결된 것들도 같이 더한다.
         def _auto_spend(year_month):
             rows = conn.execute(
                 """SELECT amount, merchant FROM inbox_items
                    WHERE card_id = ? AND status IN ('assigned', 'no_benefit')
-                   AND substr(occurred_at, 1, 7) = ?
-                   UNION ALL
-                   SELECT inbox_items.amount, inbox_items.merchant FROM inbox_items
-                   JOIN recurring_payments ON recurring_payments.id = inbox_items.recurring_id
-                   WHERE recurring_payments.card_id = ?
-                   AND substr(inbox_items.occurred_at, 1, 7) = ?
-                   UNION ALL
-                   SELECT inbox_items.amount, inbox_items.merchant FROM inbox_items
-                   JOIN insurances ON insurances.id = inbox_items.insurance_id
-                   WHERE insurances.card_id = ?
-                   AND substr(inbox_items.occurred_at, 1, 7) = ?""",
-                (card["id"], year_month, card["id"], year_month, card["id"], year_month),
+                   AND substr(occurred_at, 1, 7) = ?""",
+                (card["id"], year_month),
             ).fetchall()
             return sum(
                 r["amount"] for r in rows
