@@ -4838,7 +4838,9 @@ def _parse_receipt_ocr(lines):
                 # 알림톡(카카오톡 "알림톡 도착") 캡쳐 형식도 있다. 연도가
                 # 안 찍혀 있지만 알림이니 당연히 최근(올해) 날짜라 올해로
                 # 본다 - 지어내는 게 아니라 알림이라는 성격상 확실한 값.
-                dm2 = re.match(r"^(\d{1,2})/(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$", text)
+                # 시간 구분자가 OCR에서 ":"가 "."으로 잘못 읽히는 경우("23:05"가
+                # "23.05"로 오인식)가 흔해서 위 날짜 패턴과 똑같이 둘 다 받아준다.
+                dm2 = re.match(r"^(\d{1,2})/(\d{1,2})\s+(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?$", text)
                 if dm2:
                     month, day = int(dm2.group(1)), int(dm2.group(2))
                     hour, minute, second = int(dm2.group(3)), int(dm2.group(4)), int(dm2.group(5) or 0)
@@ -4865,14 +4867,21 @@ def _parse_receipt_ocr(lines):
         if len(recent_lines) > 6:
             recent_lines.pop(0)
 
+    # 카드사 발급사(issuer)는 위 로직에서 전혀 안 뽑고 있었다 - last4로 카드
+    # 매칭이 안 되면(마스킹 "0*0*"처럼 등록된 카드와 자릿수/모양이 안 맞는
+    # 경우 등) issuer+가맹점 키워드로 보조 매칭하는 기존 로직이 있는데,
+    # OCR 업로드는 issuer를 아예 안 채워서 그 보조 매칭 기회 자체가 없었다.
+    # 문자 알림 붙여넣기용으로 이미 검증된 parse_notification()을 그대로
+    # 재사용해서(중복 로직 새로 안 짬) issuer를 뽑고, 영수증 형식 로직이
+    # 금액/가맹점을 못 찾았을 때는 그 결과도 같이 보충한다.
+    notif = parse_notification("\n".join(lines))
+    issuer = notif["issuer"]
     if amount is None:
-        # 카드매출전표/상세내역 캡쳐가 아니라 "알림톡 도착" 같은 카드사 결제알림
+        # 영수증/상세내역 캡쳐가 아니라 "알림톡 도착" 같은 카드사 결제알림
         # 캡쳐일 수 있다. 이 형식은 금액이 "일시불 5,900원"처럼 레이블과 한
         # 줄에 붙어 있고(위 로직은 금액만 혼자 줄인 경우만 잡음), 가맹점명도
         # 금액보다 아래(마지막 줄)에 나와서 위의 "금액 앞쪽을 거슬러 올라가는"
-        # 방식으로는 못 찾는다. 문자 알림 붙여넣기용으로 이미 검증된
-        # parse_notification()을 그대로 재사용한다(중복 로직 새로 안 짬).
-        notif = parse_notification("\n".join(lines))
+        # 방식으로는 못 찾는다.
         if notif["amount"] is not None:
             amount = notif["amount"]
             if not merchant:
@@ -4885,6 +4894,7 @@ def _parse_receipt_ocr(lines):
         "merchant": merchant,
         "occurred_at": occurred_at,
         "last4": last4,
+        "issuer": issuer,
         "approval_no": approval_no,
     }
 
@@ -4976,9 +4986,9 @@ def create_inbox_item_from_image():
     try:
         cur = conn.execute(
             """INSERT INTO inbox_items
-               (raw_text, amount, last4, merchant, occurred_at, approval_no, source, status)
-               VALUES (?, ?, ?, ?, ?, ?, 'screenshot', 'pending')""",
-            (raw_text, parsed["amount"], parsed["last4"], parsed["merchant"], occurred_at,
+               (raw_text, amount, last4, issuer, merchant, occurred_at, approval_no, source, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'screenshot', 'pending')""",
+            (raw_text, parsed["amount"], parsed["last4"], parsed["issuer"], parsed["merchant"], occurred_at,
              parsed["approval_no"]),
         )
         _try_auto_match_all(conn, cur.lastrowid)

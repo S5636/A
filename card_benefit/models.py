@@ -444,6 +444,12 @@ _ISSUER_HINTS = [
 ]
 _NOISE_KEYWORDS = ["승인", "일시불", "할부", "카드", "누적", "이용", "잔액", "한도", "포인트"]
 _MERCHANT_LABEL_RE = re.compile(r"^가맹점(?:명)?\s*[:：]\s*(.+)$")
+# 카카오톡 "알림톡 도착" 캡쳐를 OCR로 읽으면, 실제 알림 내용 밑에 카톡
+# 자체의 메시지 전송시각("오후 11:05")까지 한 줄로 같이 찍혀서 들어오는
+# 경우가 있다. 이게 알림 본문 중 제일 마지막 줄이 되면 "마지막 줄 = 가맹점"
+# 추정 로직에 걸려서 가맹점명 대신 이 시각이 들어가 버리므로 노이즈로
+# 걸러낸다.
+_KAKAO_TIMESTAMP_RE = re.compile(r"^(오전|오후)\s*\d{1,2}[:.]\d{2}$")
 
 
 def parse_notification(text: str) -> dict:
@@ -500,7 +506,7 @@ def parse_notification(text: str) -> dict:
     # 2순위: 라벨이 없는 알림 형식이면, 노이즈 키워드가 없는 마지막 줄을 추정한다.
     if not merchant:
         for line in reversed(lines):
-            if not line or any(k in line for k in _NOISE_KEYWORDS):
+            if not line or any(k in line for k in _NOISE_KEYWORDS) or _KAKAO_TIMESTAMP_RE.match(line):
                 continue
             merchant = line
             break
