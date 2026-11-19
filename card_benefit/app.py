@@ -2017,7 +2017,7 @@ def _serialize_cards(conn):
                    LEFT JOIN inbox_items ON inbox_items.id = usage_logs.source_inbox_id
                    WHERE usage_logs.benefit_id = ?
                    AND usage_logs.used_at >= ? AND usage_logs.used_at < ?
-                   ORDER BY usage_logs.used_at DESC, usage_logs.id DESC""",
+                   ORDER BY COALESCE(inbox_items.occurred_at, usage_logs.used_at) DESC, usage_logs.id DESC""",
                 (b["id"], log_start.isoformat(), log_end.isoformat()),
             ).fetchall()
             # "사용"(used)은 한도에서 깎인 할인/적립액 합계고, payment_sum은 그
