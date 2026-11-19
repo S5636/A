@@ -687,6 +687,7 @@ def serialize_inbox(conn):
             "matched_benefit_id": matched_benefit["id"] if matched_benefit else None,
             "matched_benefit_name": matched_benefit["name"] if matched_benefit else None,
             "matched_benefit_doubled": matched_doubled,
+            "is_foreign": is_foreign,
         })
     return items
 
@@ -3581,6 +3582,20 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
             if category == TIME_BLOCKED_LABEL:
                 block_reason = block_reason or "시간외 결제"
                 category = ""
+            elif not category and is_foreign_merchant(merchant) and any(
+                c["label"] == "해외" for c in parse_rate_table_categories(benefit["rate_table"])
+            ):
+                # ANTHROPIC/PayPal처럼 가맹점명만 봐서는 "해외" 키워드가 전혀
+                # 안 걸리는 해외 결제는, is_foreign_merchant로 확실히 해외라고
+                # 판단되면 "해외" 업종으로 한 번 더 찾는다 - 안 그러면 할인율은
+                # 우연히 맞아도(기본 할인율과 같아서) 업종 추적(일/월 횟수,
+                # 업종별 월적립한도)이 전혀 안 걸려서 기록에 업종이 안 남는다.
+                percent, cap, daily_limit, monthly_limit, monthly_point_cap, time_blocked = rate_table_entry_by_label(
+                    benefit["rate_table"], "해외", effective_discount_percent, benefit["per_txn_cap"], hour
+                )
+                category = "해외"
+                if time_blocked:
+                    block_reason = block_reason or "시간외 결제"
         capped_note = ""
         if category and used_at and not block_reason:
             if daily_limit and _category_usage_count(conn, benefit_id, category, used_at, before_log_id=exclude_log_id) >= daily_limit:

@@ -2361,6 +2361,24 @@
     return [defaultPercent, defaultCap, "", false];
   }
 
+  function hasRateTableLabel(rateTableJson, label) {
+    if (!rateTableJson || !label) return false;
+    let rows;
+    try {
+      rows = JSON.parse(rateTableJson);
+    } catch (e) {
+      return false;
+    }
+    if (!Array.isArray(rows)) return false;
+    return rows.some((entry) => {
+      if (!Array.isArray(entry) || !entry.length) return false;
+      const rawKeywords = String(entry[0]);
+      const colonIdx = rawKeywords.indexOf(":");
+      const entryLabel = colonIdx >= 0 ? rawKeywords.slice(0, colonIdx) : rawKeywords;
+      return entryLabel === label;
+    });
+  }
+
   function rateTableEntryByLabel(rateTableJson, label, defaultPercent, defaultCap, hour) {
     if (!rateTableJson || !label) return [defaultPercent, defaultCap, false];
     let rows;
@@ -2587,6 +2605,19 @@
       } else {
         const merchant = (assigningItem && assigningItem.merchant) || "";
         [percent, cap, label, timeBlocked] = matchRateTable(merchant, benefit.rate_table, benefit.discount_percent, benefit.per_txn_cap, hour);
+        // ANTHROPIC/PayPal처럼 가맹점명만 봐서는 "해외" 키워드가 전혀 안
+        // 걸리는 해외 결제는, 서버가 이미 is_foreign으로 확실히 판단해준
+        // 걸 받아서(서버와 같은 로직 - serialize_inbox의 is_foreign_merchant)
+        // "해외" 업종으로 한 번 더 찾아본다 - 안 그러면 미리보기에 업종
+        // 이름이 안 붙고 금액만 맞게 나와서(우연히 기본 할인율과 같을 때)
+        // 뭘로 적립된 건지 전혀 안 보였다.
+        if (!label && assigningItem && assigningItem.is_foreign && hasRateTableLabel(benefit.rate_table, "해외")) {
+          const [fp, fc, ft] = rateTableEntryByLabel(benefit.rate_table, "해외", benefit.discount_percent, benefit.per_txn_cap, hour);
+          percent = fp;
+          cap = fc;
+          label = "해외";
+          timeBlocked = ft;
+        }
       }
       if (timeBlocked) {
         preview.style.display = "block";
