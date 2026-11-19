@@ -131,7 +131,7 @@
       preview.style.display = "none";
       return;
     }
-    preview.textContent = `사용기간: ${startVal} ~ ${usagePeriodEndDate(startVal)}`;
+    preview.textContent = `사용기간: ${shortDateRange(`${startVal} ~ ${usagePeriodEndDate(startVal)}`)}`;
     preview.style.display = "";
   }
 
@@ -175,6 +175,13 @@
 
   function shortDate(iso) {
     return (iso || "").replaceAll("-", "").slice(2);
+  }
+
+  function shortDateRange(range) {
+    // "2026-11-19 ~ 2026-12-18"처럼 날짜 두 개가 " ~ "로 이어진 문자열은
+    // shortDate를 통째로 적용하면 앞쪽 "20"만 잘려서 뒤쪽은 안 줄어든다.
+    // " ~ "로 나눠서 각각 따로 줄인 다음 다시 합친다.
+    return (range || "").split(" ~ ").map(shortDate).join(" ~ ");
   }
 
   function shortCardName(name) {
@@ -1092,12 +1099,12 @@
     const amortHtml = amortRows.length
       ? amortRows.map((r) => `
           <div class="log-item">
-            <span>${r.seq}회 · ${r.date} · 이자 ${fmt(r.interest)} · 원금 ${fmt(r.principal)} → 잔액 ${fmt(r.balance)}</span>
+            <span>${r.seq}회 · ${shortDate(r.date)} · 이자 ${fmt(r.interest)} · 원금 ${fmt(r.principal)} → 잔액 ${fmt(r.balance)}</span>
           </div>
         `).join("")
       : "";
     const amortDoneLabel = amortRows.length
-      ? `${amortRows[amortRows.length - 1].date} 완납 예정(총 ${amortRows.length}회, 현재 조건 유지 가정)`
+      ? `${shortDate(amortRows[amortRows.length - 1].date)} 완납 예정(총 ${amortRows.length}회, 현재 조건 유지 가정)`
       : "";
 
     const reorderHtml = showReorder ? `
@@ -1467,7 +1474,7 @@
           </div>
         </div>
       </div>
-      ${item.usage_period ? `<div class="perf-row-sub">사용기간 ${escapeHtml(item.usage_period)}</div>` : ""}
+      ${item.usage_period ? `<div class="perf-row-sub">사용기간 ${escapeHtml(shortDateRange(item.usage_period))}</div>` : ""}
       ${memoToggleTemplate(`recurring-${item.id}`, item.memo)}
       ${matchHistoryTemplate(`recurring-${item.id}`, item.match_history, { showToggle: false })}
     `;
