@@ -4774,7 +4774,7 @@ def _parse_receipt_ocr(lines):
     approval_no = ""
     prev_text = ""
     recent_lines = []  # 가맹점명을 찾을 때 거슬러 올라갈 최근 줄들(노이즈 포함 그대로)
-    for raw_line in lines:
+    for line_idx, raw_line in enumerate(lines):
         text = (raw_line or "").strip()
         if not text:
             continue
@@ -4810,9 +4810,21 @@ def _parse_receipt_ocr(lines):
             if dm:
                 month, day = int(dm.group(2)), int(dm.group(3))
                 if 1 <= month <= 12 and 1 <= day <= 31:
-                    hour = int(dm.group(4)) if dm.group(4) else 0
-                    minute = int(dm.group(5)) if dm.group(5) else 0
-                    second = int(dm.group(6)) if dm.group(6) else 0
+                    if dm.group(4):
+                        hour, minute, second = int(dm.group(4)), int(dm.group(5)), int(dm.group(6) or 0)
+                    else:
+                        # 날짜만 있고 시간이 같은 줄에 없는 경우 - "거래일
+                        # 2026.11.08 18:02"처럼 라벨/값이 표 형태인 상세내역
+                        # 화면은 OCR이 날짜와 시간을 서로 다른 줄로 따로
+                        # 읽는 경우가 있다. 바로 다음 줄들 중 시간만 있는
+                        # 모양("18:02")이 있으면 그걸로 보충하고, 없으면
+                        # 00:00:00으로 둔다(지어내지 않음).
+                        hour, minute, second = 0, 0, 0
+                        for next_line in lines[line_idx + 1:line_idx + 3]:
+                            tm = re.match(r"^(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?$", (next_line or "").strip())
+                            if tm:
+                                hour, minute, second = int(tm.group(1)), int(tm.group(2)), int(tm.group(3) or 0)
+                                break
                     if 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59:
                         occurred_at = f"20{dm.group(1)}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
 
