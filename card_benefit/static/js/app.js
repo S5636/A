@@ -77,6 +77,24 @@
   let inboxOpen = false;
   let noBenefitOpen = false;
   let trashOpen = false;
+
+  // 알림 모달의 4개 탭(결제 알림/혜택없음/휴지통/중복의심)은 아코디언처럼
+  // 하나만 열리게 한다 - 다른 탭을 누르면 이전에 열려있던 건 자동으로
+  // 닫고 누른 탭만 연다(같은 탭을 다시 누르면 닫음).
+  function toggleAlertTab(which) {
+    const wasOpen = { inbox: inboxOpen, noBenefit: noBenefitOpen, trash: trashOpen, dup: dupOpen }[which];
+    inboxOpen = false;
+    noBenefitOpen = false;
+    trashOpen = false;
+    dupOpen = false;
+    if (!wasOpen) {
+      if (which === "inbox") inboxOpen = true;
+      else if (which === "noBenefit") noBenefitOpen = true;
+      else if (which === "trash") trashOpen = true;
+      else if (which === "dup") dupOpen = true;
+    }
+    render();
+  }
   // null = 진짜 이번 달(필터 없음). "YYYY-MM" 문자열이면 카드 탭의 "사용내역"
   // 목록뿐 아니라 한도/잔여/전월실적까지 전부 그 달 기준으로 같이 바뀐다.
   // (배정 모달은 예외 - 알림 자체의 결제 달 기준으로 따로 불러옴, 아래 참고)
@@ -564,10 +582,7 @@
     );
     wireBulkBar(inboxList, "inbox", ids, inboxActions);
   }
-  document.getElementById("inbox-toggle").addEventListener("click", () => {
-    inboxOpen = !inboxOpen;
-    render();
-  });
+  document.getElementById("inbox-toggle").addEventListener("click", () => toggleAlertTab("inbox"));
 
   // ---- 혜택 없음 처리 내역 ----
   function renderNoBenefit() {
@@ -620,10 +635,7 @@
     );
     wireBulkBar(noBenefitList, "noBenefit", ids, noBenefitActions);
   }
-  document.getElementById("no-benefit-toggle").addEventListener("click", () => {
-    noBenefitOpen = !noBenefitOpen;
-    render();
-  });
+  document.getElementById("no-benefit-toggle").addEventListener("click", () => toggleAlertTab("noBenefit"));
 
   // ---- 휴지통 ----
   function renderTrash() {
@@ -667,10 +679,7 @@
     );
     wireBulkBar(trashList, "trash", ids, trashActions);
   }
-  document.getElementById("trash-toggle").addEventListener("click", () => {
-    trashOpen = !trashOpen;
-    render();
-  });
+  document.getElementById("trash-toggle").addEventListener("click", () => toggleAlertTab("trash"));
 
   // ---- 카드 목록 ----
   function renderCards() {
@@ -2126,10 +2135,7 @@
   const dupToggleBtn = document.getElementById("dup-toggle");
   const dupList = document.getElementById("dup-list");
   let dupOpen = false;
-  document.getElementById("dup-toggle").addEventListener("click", () => {
-    dupOpen = !dupOpen;
-    render();
-  });
+  document.getElementById("dup-toggle").addEventListener("click", () => toggleAlertTab("dup"));
 
   function renderDuplicates() {
     const groups = state.suspected_duplicates || [];
