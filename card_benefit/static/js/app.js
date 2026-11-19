@@ -2687,6 +2687,11 @@
       alert("먼저 카드와 혜택을 등록해주세요.");
       return;
     }
+    // "혜택 선택"은 이제 알림 모달 안에서 눌리는데, 그 알림 모달이 열린
+    // 채로 이 모달을 또 열면 같은 z-index라 먼저 열려있던 알림 모달에
+    // 가려져서 뒤에서 조용히 열리기만 하고 화면엔 아무 반응이 없었다
+    // (혜택 선택 버튼이 안 먹히는 것처럼 보였던 원인). 먼저 닫아준다.
+    alertsModal.classList.remove("open");
     assigningItem = item;
     document.getElementById("assign-raw-text").textContent = item.raw_text;
     // "업종 직접 선택"은 모달을 열 때마다 "자동인식"으로 초기화한다 - 안
