@@ -1991,12 +1991,32 @@ def _serialize_cards(conn):
         # 혜택 구간이 정해지므로, 지난달 알림 합계를 그 기준으로 쓴다.
         # 안내장의 "전월 이용금액 제외 대상"(공과금·세금·상품권 등)은 혜택
         # 대상이어도 실적 합계에서는 뺀다.
+        #
+        # 고정지출(구독)/보험료로 매칭된 알림은 status가 'pending'인 채로
+        # 남고 card_id도 안 채워진다(recurring_id/insurance_id만 채워짐) -
+        # "카드로 결제한 구독/보험료도 실적엔 잡혀야 한다"는 원래 의도와
+        # 다르게 이 함수가 card_id만 보고 있어서 그런 건들이 다 누락되고
+        # 있었다. recurring_payments.card_id/insurances.card_id로 연결된
+        # 것도 같이 잡아야 하는데, UNION으로 따로 더하면 한 알림이 양쪽
+        # 조건에 동시에 걸릴 때(혜택 배정도 돼 있고 recurring_id도 걸려있는
+        # 경우) 이중으로 더해지는 사고가 났었다(실제로 한 번 터뜨림). 그래서
+        # UNION이 아니라 "알림 한 건당 딱 한 번만" 스캔되는 단일 SELECT로
+        # 바꾸고, 세 조건을 서로 겹칠 수 없게(recurring_id/insurance_id가
+        # NULL인지 아닌지로 딱 나뉘게) 짜서 물리적으로 이중 집계가 안
+        # 나게 만든다.
         def _auto_spend(year_month):
             rows = conn.execute(
-                """SELECT amount, merchant FROM inbox_items
-                   WHERE card_id = ? AND status IN ('assigned', 'no_benefit')
-                   AND substr(occurred_at, 1, 7) = ?""",
-                (card["id"], year_month),
+                """SELECT inbox_items.amount, inbox_items.merchant FROM inbox_items
+                   LEFT JOIN recurring_payments ON recurring_payments.id = inbox_items.recurring_id
+                   LEFT JOIN insurances ON insurances.id = inbox_items.insurance_id
+                   WHERE substr(inbox_items.occurred_at, 1, 7) = ?
+                   AND (
+                       (inbox_items.recurring_id IS NULL AND inbox_items.insurance_id IS NULL
+                        AND inbox_items.card_id = ? AND inbox_items.status IN ('assigned', 'no_benefit'))
+                       OR (inbox_items.recurring_id IS NOT NULL AND recurring_payments.card_id = ?)
+                       OR (inbox_items.insurance_id IS NOT NULL AND insurances.card_id = ?)
+                   )""",
+                (year_month, card["id"], card["id"], card["id"]),
             ).fetchall()
             return sum(
                 r["amount"] for r in rows
