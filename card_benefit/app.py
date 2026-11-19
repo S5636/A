@@ -709,34 +709,62 @@ def serialize_inbox(conn):
 
 def serialize_no_benefit(conn):
     # 고정지출/보험으로 연결된 "혜택없음" 알림은 inbox_items.card_id가 아니라
-    # recurring_payments.card_id/insurances.card_id로만 카드가 정해지는데
-    # (_auto_spend가 실적 잡을 때 쓰는 것과 같은 방식), 여기서 card_id만
-    # 보면 그게 비어있어서 카드별 "혜택없음" 목록에서 통째로 빠져버린다 -
-    # 실적엔 잡히는데 내역엔 안 보이는 사고(실제로 지적받음). COALESCE로
-    # card_id가 없으면 연결된 고정지출/보험의 카드로 대신 채운다.
+    # recurring_payments.card_id/insurances.card_id로 카드가 정해지는데,
+    # card_id만 보면 그게 비어있어서 카드별 "혜택없음" 목록에서 통째로
+    # 빠져버린다 - 실적엔 잡히는데 내역엔 안 보이는 사고(실제로 지적받음).
+    # 근데 그 card_id를 "지금 당장" 값으로 채우면 또 다른 사고가 난다 -
+    # 고정지출/보험의 결제카드를 나중에 바꾸면 이미 지나간 달 알림까지
+    # 전부 새 카드로 보여버림(실제로 발생). 그래서 매칭 당시 찍어둔
+    # matched_card_label 스냅샷으로 카드를 찾고, 스냅샷이 없는 옛날
+    # 데이터만 지금 card_id를 보조로 쓴다(_auto_spend와 동일한 우선순위).
+    cards = conn.execute("SELECT id, name, short_name, last4 FROM cards").fetchall()
+    card_by_label = {(c["short_name"] or c["name"]): c for c in cards}
+    card_by_id = {c["id"]: c for c in cards}
+
     rows = conn.execute(
         """SELECT inbox_items.*,
-                  COALESCE(inbox_items.card_id, recurring_payments.card_id, insurances.card_id) AS effective_card_id,
-                  cards.name AS card_name
+                  recurring_payments.card_id AS recurring_card_id,
+                  recurring_payments.payment_method AS recurring_payment_method,
+                  insurances.card_id AS insurance_card_id,
+                  insurances.payment_method AS insurance_payment_method
            FROM inbox_items
            LEFT JOIN recurring_payments ON recurring_payments.id = inbox_items.recurring_id
            LEFT JOIN insurances ON insurances.id = inbox_items.insurance_id
-           LEFT JOIN cards ON cards.id = COALESCE(inbox_items.card_id, recurring_payments.card_id, insurances.card_id)
            WHERE inbox_items.status = 'no_benefit' AND inbox_items.deleted_at IS NULL
            ORDER BY inbox_items.occurred_at DESC, inbox_items.id DESC"""
     ).fetchall()
-    return [
-        {
+
+    def effective_card(r):
+        if r["card_id"]:
+            return card_by_id.get(r["card_id"])
+        if not r["recurring_id"] and not r["insurance_id"]:
+            return None
+        if r["matched_card_label"]:
+            return card_by_label.get(r["matched_card_label"])
+        live_card_id = r["recurring_card_id"] if r["recurring_id"] else r["insurance_card_id"]
+        if live_card_id:
+            return card_by_id.get(live_card_id)
+        method = r["recurring_payment_method"] if r["recurring_id"] else r["insurance_payment_method"]
+        last4 = _extract_method_last4(method)
+        if last4:
+            for c in cards:
+                if c["last4"] and card_codes_match(c["last4"], last4):
+                    return c
+        return None
+
+    result = []
+    for r in rows:
+        card = effective_card(r)
+        result.append({
             "id": r["id"],
             "raw_text": r["raw_text"],
             "amount": r["amount"],
             "merchant": r["merchant"],
             "occurred_at": r["occurred_at"],
-            "card_id": r["effective_card_id"],
-            "card_name": r["card_name"],
-        }
-        for r in rows
-    ]
+            "card_id": card["id"] if card else None,
+            "card_name": card["name"] if card else None,
+        })
+    return result
 
 
 def serialize_trash(conn):
@@ -2009,56 +2037,51 @@ def _serialize_cards(conn):
         # "카드로 결제한 구독/보험료도 실적엔 잡혀야 한다"는 원래 의도와
         # 다르게 이 함수가 card_id만 보고 있어서 그런 건들이 다 누락되고
         # 있었다. recurring_payments.card_id/insurances.card_id로 연결된
-        # 것도 같이 잡아야 하는데, UNION으로 따로 더하면 한 알림이 양쪽
-        # 조건에 동시에 걸릴 때(혜택 배정도 돼 있고 recurring_id도 걸려있는
-        # 경우) 이중으로 더해지는 사고가 났었다(실제로 한 번 터뜨림). 그래서
-        # UNION이 아니라 "알림 한 건당 딱 한 번만" 스캔되는 단일 SELECT로
-        # 바꾸고, 세 조건을 서로 겹칠 수 없게(recurring_id/insurance_id가
-        # NULL인지 아닌지로 딱 나뉘게) 짜서 물리적으로 이중 집계가 안
-        # 나게 만든다.
+        # 것도 같이 잡아야 하는데, 그 card_id를 "지금 당장" 조회해서 쓰면
+        # 안 된다 - 고정지출/보험의 결제카드를 나중에 바꾸면(예: "다음 달부터
+        # A카드 대신 B카드로 낼게") 이미 지나간 달의 알림까지 전부 새 카드
+        # 실적으로 둔갑해버리는 사고가 난다(실제로 발생 확인됨). 그래서
+        # inbox_items.matched_card_label(매칭되던 "그 순간"에 찍어둔 카드
+        # 이름 스냅샷 - 나중에 카드를 바꿔도 절대 안 바뀜)을 우선 쓰고,
+        # 그 스냅샷이 없는 옛날 데이터만 지금 card_id를 보조로 쓴다.
         def _auto_spend(year_month):
+            own_label = card["short_name"] or card["name"]
             rows = conn.execute(
-                """SELECT inbox_items.amount, inbox_items.merchant FROM inbox_items
+                """SELECT inbox_items.amount, inbox_items.merchant, inbox_items.recurring_id,
+                          inbox_items.insurance_id, inbox_items.matched_card_label,
+                          recurring_payments.card_id AS recurring_card_id,
+                          recurring_payments.payment_method AS recurring_payment_method,
+                          insurances.card_id AS insurance_card_id,
+                          insurances.payment_method AS insurance_payment_method
+                   FROM inbox_items
                    LEFT JOIN recurring_payments ON recurring_payments.id = inbox_items.recurring_id
                    LEFT JOIN insurances ON insurances.id = inbox_items.insurance_id
                    WHERE substr(inbox_items.occurred_at, 1, 7) = ?
                    AND (
                        (inbox_items.recurring_id IS NULL AND inbox_items.insurance_id IS NULL
                         AND inbox_items.card_id = ? AND inbox_items.status IN ('assigned', 'no_benefit'))
-                       OR (inbox_items.recurring_id IS NOT NULL AND recurring_payments.card_id = ?)
-                       OR (inbox_items.insurance_id IS NOT NULL AND insurances.card_id = ?)
+                       OR inbox_items.recurring_id IS NOT NULL
+                       OR inbox_items.insurance_id IS NOT NULL
                    )""",
-                (year_month, card["id"], card["id"], card["id"]),
+                (year_month, card["id"]),
             ).fetchall()
-            total = sum(
+
+            def belongs_to_this_card(r):
+                if not r["recurring_id"] and not r["insurance_id"]:
+                    return True  # 직접배정/혜택없음 - 위 WHERE에서 이미 card_id로 걸러짐
+                if r["matched_card_label"]:
+                    return r["matched_card_label"] == own_label
+                live_card_id = r["recurring_card_id"] if r["recurring_id"] else r["insurance_card_id"]
+                if live_card_id:
+                    return live_card_id == card["id"]
+                # card_id FK도 없는 옛날 "텍스트로 직접 입력" 등록분은 뒷자리로 보조 매칭.
+                method = r["recurring_payment_method"] if r["recurring_id"] else r["insurance_payment_method"]
+                return bool(card["last4"]) and card_codes_match(_extract_method_last4(method), card["last4"])
+
+            return sum(
                 r["amount"] for r in rows
-                if not is_performance_excluded(r["merchant"], card["perf_excluded_keywords"])
+                if belongs_to_this_card(r) and not is_performance_excluded(r["merchant"], card["perf_excluded_keywords"])
             )
-            # 고정지출/보험을 등록할 때 카드를 드롭다운으로 고르지 않고
-            # "씨티(0104)"처럼 결제수단을 텍스트로 직접 입력해둔 경우(card_id
-            # FK가 비어서 위 쿼리로는 못 잡음)도 있다. 그런 건 뒷자리로
-            # 보조 매칭한다(card_id가 있는 건 위에서 이미 셌으니 card_id IS
-            # NULL인 것만 봐서 중복 집계 안 되게 한다).
-            if card["last4"]:
-                text_rows = conn.execute(
-                    """SELECT inbox_items.amount, inbox_items.merchant,
-                              COALESCE(recurring_payments.payment_method, insurances.payment_method) AS payment_method
-                       FROM inbox_items
-                       LEFT JOIN recurring_payments ON recurring_payments.id = inbox_items.recurring_id
-                       LEFT JOIN insurances ON insurances.id = inbox_items.insurance_id
-                       WHERE substr(inbox_items.occurred_at, 1, 7) = ?
-                       AND (
-                           (inbox_items.recurring_id IS NOT NULL AND recurring_payments.card_id IS NULL)
-                           OR (inbox_items.insurance_id IS NOT NULL AND insurances.card_id IS NULL)
-                       )""",
-                    (year_month,),
-                ).fetchall()
-                total += sum(
-                    r["amount"] for r in text_rows
-                    if card_codes_match(_extract_method_last4(r["payment_method"]), card["last4"])
-                    and not is_performance_excluded(r["merchant"], card["perf_excluded_keywords"])
-                )
-            return total
 
         auto_prev_spend = _auto_spend(prev_month)
         auto_this_month_spend = _auto_spend(this_month)
