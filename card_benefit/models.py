@@ -406,6 +406,32 @@ def init_db():
                     (restore_balance, toss_loan["id"]),
                 )
 
+        # 2026-11: "해제"가 완전히 안 풀리던 버그(코드에서 고침, app.py의
+        # unlink_match/delete_log) 때문에 조작하던 중 "토스프라임" 11/3
+        # 결제 알림이 실수로 완전히 삭제됐다. 사용자 확인 후 원본 그대로
+        # (금액/일시/가맹점) 복원한다. recurring_id로 토스프라임에 연결해서
+        # 지출 내역에도 뜨고, 그 구독의 card_id(씨티 리워드)로 실적에도
+        # 잡히게 한다. 이미 복원된 뒤에는 다시 실행해도 중복 안 생기게
+        # 존재 여부부터 확인한다(멱등).
+        toss_prime = conn.execute(
+            "SELECT id FROM recurring_payments WHERE name = '토스프라임'"
+        ).fetchone()
+        if toss_prime:
+            restored_exists = conn.execute(
+                "SELECT 1 FROM inbox_items WHERE recurring_id = ? AND occurred_at = ? AND amount = ?",
+                (toss_prime["id"], "2026-11-03 23:05:00", 5900),
+            ).fetchone()
+            if not restored_exists:
+                conn.execute(
+                    """INSERT INTO inbox_items
+                       (raw_text, amount, merchant, occurred_at, status, recurring_id, source)
+                       VALUES (?, ?, ?, ?, 'pending', ?, 'restored')""",
+                    (
+                        "마이그레이션으로 복원 - 토스프라임 11/3 결제(해제 버그로 유실됨)",
+                        5900, "토스페이_컨텐츠 비바리퍼블리카", "2026-11-03 23:05:00", toss_prime["id"],
+                    ),
+                )
+
         conn.commit()
     finally:
         conn.close()
