@@ -1576,6 +1576,20 @@ def _account_digits(s):
     return digits
 
 
+def _is_loan_reminder_text(text):
+    """"내일 2026.11.20은 사잇돌대출(1980) 원금과 이자 45,729원을 갚는
+    날이에요"/"계좌 잔액이 45,650원 부족해요. 계좌를 채워주세요"처럼,
+    은행 앱이 실제 출금 전에 미리 보내는 안내/경고 알림은 결제가 아직
+    일어나지도 않은 상태를 알려주는 거라, 대출 상환으로 자동 기록하면
+    안 된다(실제로 "토스뱅크 사잇돌대출"에서 이 알림 두 건이 진짜 상환인
+    것처럼 두 번 잘못 기록돼서 잔액이 틀어진 사고가 있었음). 이런 문구가
+    있으면 금액/계좌가 맞아도 매칭 자체를 하지 않는다."""
+    return any(
+        k in text
+        for k in ("부족해요", "부족합니다", "채워주세요", "채워주시", "갚는 날", "내는 날", "출금 예정", "결제 예정")
+    )
+
+
 def _try_auto_match_loan_account_text(conn, inbox_id):
     """"내 광주은행 통장 → 원리금441779"처럼 카드 결제가 아니라 계좌에서
     바로 빠져나가는 대출 원리금 자동이체 알림은, 혜택을 받을 수 있는
@@ -1601,6 +1615,8 @@ def _try_auto_match_loan_account_text(conn, inbox_id):
     # 처럼 카드 결제 알림에도 나오는 단어라 넣으면 카드 거래가 대출로
     # 잘못 매칭 시도될 수 있다.
     if not any(k in text for k in ("통장", "계좌", "출금", "잔액")):
+        return False
+    if _is_loan_reminder_text(text):
         return False
     loans = conn.execute(
         "SELECT * FROM loans WHERE withdrawal_account != ''"
@@ -1646,6 +1662,8 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
         return False
     text = f"{item['merchant'] or ''} {item['raw_text'] or ''}"
     if not any(k in text for k in ("통장", "계좌", "출금", "잔액")):
+        return False
+    if _is_loan_reminder_text(text):
         return False
     try:
         occurred_date = date.fromisoformat((item["occurred_at"] or "")[:10])

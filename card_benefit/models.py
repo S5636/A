@@ -372,6 +372,40 @@ def init_db():
                 ),
             )
 
+        # 2026-11: "토스뱅크 사잇돌대출"에서 실제 출금 전에 미리 보내는
+        # 안내/경고 알림("내일이 상환일" / "계좌 잔액 부족") 2건이 진짜
+        # 상환인 것처럼 자동으로 잘못 기록돼서 잔액이 틀어졌다(실제 상환일은
+        # 매월 20일인데, 그 전에 두 번 먼저 깎여 있었음). 원인은 코드에서
+        # 고쳤고(app.py의 _is_loan_reminder_text), 여기서는 잘못 기록된
+        # 그 2건을 지우고 잔액을 그 전 상태로 되돌린다. 지워질 행들보다
+        # 먼저 기록된 행이 있으면 그 행의 balance_after로, 없으면 대출원금
+        # (principal)으로 복원한다. 이미 지워진 뒤에는 bad_payments가
+        # 비어서 다시 실행해도 안전함(멱등).
+        toss_loan = conn.execute(
+            "SELECT id, principal FROM loans WHERE name = '토스뱅크 사잇돌대출'"
+        ).fetchone()
+        if toss_loan:
+            bad_payments = conn.execute(
+                "SELECT id FROM loan_payments WHERE loan_id = ? AND memo = '알림 자동확인' "
+                "AND paid_at IN ('2026-11-17', '2026-11-19') AND amount IN (45650, 46000) "
+                "ORDER BY id ASC",
+                (toss_loan["id"],),
+            ).fetchall()
+            if bad_payments:
+                earliest_id = bad_payments[0]["id"]
+                prior = conn.execute(
+                    "SELECT balance_after FROM loan_payments WHERE loan_id = ? AND id < ? "
+                    "ORDER BY id DESC LIMIT 1",
+                    (toss_loan["id"], earliest_id),
+                ).fetchone()
+                restore_balance = prior["balance_after"] if prior else toss_loan["principal"]
+                for bp in bad_payments:
+                    conn.execute("DELETE FROM loan_payments WHERE id = ?", (bp["id"],))
+                conn.execute(
+                    "UPDATE loans SET current_balance = ?, paid_check_month = '' WHERE id = ?",
+                    (restore_balance, toss_loan["id"]),
+                )
+
         conn.commit()
     finally:
         conn.close()
