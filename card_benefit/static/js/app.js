@@ -10,6 +10,23 @@
   const trashToggleBtn = document.getElementById("trash-toggle");
   const trashList = document.getElementById("trash-list");
   const trashCount = document.getElementById("trash-count");
+  const alertsBtn = document.getElementById("btn-alerts");
+  const alertsTotalCount = document.getElementById("alerts-total-count");
+  const alertsModal = document.getElementById("alerts-modal");
+
+  // 결제 알림/혜택없음/휴지통/중복의심 네 가지를 합쳐서 헤더의 "알림"
+  // 버튼 하나로 보여준다 - 넷 중 하나라도 render될 때마다 호출해서
+  // 버튼 표시 여부/합계 숫자를 최신으로 맞춘다.
+  function updateAlertsButton() {
+    const total = (state.inbox || []).length
+      + (state.no_benefit || []).length
+      + (state.trash || []).length
+      + (state.suspected_duplicates || []).length;
+    alertsBtn.style.display = total ? "" : "none";
+    alertsTotalCount.textContent = total ? `${total}` : "";
+  }
+  alertsBtn.addEventListener("click", () => alertsModal.classList.add("open"));
+  document.getElementById("alerts-close").addEventListener("click", () => alertsModal.classList.remove("open"));
 
   const CARD_COLORS = ["#a78bfa", "#ec4899", "#fab219", "#22c55e", "#3987e5", "#f97316"];
 
@@ -471,6 +488,7 @@
     inboxToggleBtn.style.display = items.length ? "" : "none";
     inboxCount.textContent = items.length ? `${items.length}` : "";
     inboxList.style.display = inboxOpen ? "flex" : "none";
+    updateAlertsButton();
     const inboxActions = [
       {
         label: "혜택X",
@@ -551,6 +569,7 @@
     noBenefitToggleBtn.style.display = items.length ? "" : "none";
     noBenefitCount.textContent = items.length ? `${items.length}` : "";
     noBenefitList.style.display = noBenefitOpen ? "flex" : "none";
+    updateAlertsButton();
     const noBenefitActions = [
       {
         label: "삭제",
@@ -606,6 +625,7 @@
     trashToggleBtn.style.display = items.length ? "" : "none";
     trashCount.textContent = items.length ? `${items.length}` : "";
     trashList.style.display = trashOpen ? "flex" : "none";
+    updateAlertsButton();
     const trashActions = [
       {
         label: "복원",
@@ -2109,6 +2129,7 @@
     dupToggleBtn.style.display = groups.length ? "" : "none";
     document.getElementById("dup-count").textContent = groups.length ? `${groups.length}` : "";
     dupList.style.display = dupOpen ? "flex" : "none";
+    updateAlertsButton();
 
     dupList.innerHTML = groups.map((g) => `
       <div class="dup-group">
