@@ -4804,7 +4804,8 @@ def _parse_receipt_ocr(lines):
             # OCR이 숫자를 잘못 읽은 거니 그 날짜는 통째로 버린다(엉뚱한
             # 날짜를 저장하느니 빈칸이 낫다 - 추측 금지).
             dm = re.search(
-                r"(\d{2})[.\-](\d{1,2})[.\-](\d{1,2})\.?\s*(?:(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?)?",
+                r"(\d{2})[.\-](\d{1,2})[.\-](\d{1,2})\.?\s*"
+                r"(?:(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?|(\d{2})(\d{2})(\d{2})?(?!\d))?",
                 text,
             )
             if dm:
@@ -4812,6 +4813,11 @@ def _parse_receipt_ocr(lines):
                 if 1 <= month <= 12 and 1 <= day <= 31:
                     if dm.group(4):
                         hour, minute, second = int(dm.group(4)), int(dm.group(5)), int(dm.group(6) or 0)
+                    elif dm.group(7):
+                        # "180206"처럼 시:분:초 사이에 구분자(:,.)가 아예 없이
+                        # 붙어서 읽히는 경우("2026.11.08 180206") - 숫자
+                        # 2자리씩 끊어서 시/분/초로 본다.
+                        hour, minute, second = int(dm.group(7)), int(dm.group(8)), int(dm.group(9) or 0)
                     else:
                         # 날짜만 있고 시간이 같은 줄에 없는 경우 - "거래일
                         # 2026.11.08 18:02"처럼 라벨/값이 표 형태인 상세내역
