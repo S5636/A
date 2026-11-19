@@ -2018,10 +2018,35 @@ def _serialize_cards(conn):
                    )""",
                 (year_month, card["id"], card["id"], card["id"]),
             ).fetchall()
-            return sum(
+            total = sum(
                 r["amount"] for r in rows
                 if not is_performance_excluded(r["merchant"], card["perf_excluded_keywords"])
             )
+            # 고정지출/보험을 등록할 때 카드를 드롭다운으로 고르지 않고
+            # "씨티(0104)"처럼 결제수단을 텍스트로 직접 입력해둔 경우(card_id
+            # FK가 비어서 위 쿼리로는 못 잡음)도 있다. 그런 건 뒷자리로
+            # 보조 매칭한다(card_id가 있는 건 위에서 이미 셌으니 card_id IS
+            # NULL인 것만 봐서 중복 집계 안 되게 한다).
+            if card["last4"]:
+                text_rows = conn.execute(
+                    """SELECT inbox_items.amount, inbox_items.merchant,
+                              COALESCE(recurring_payments.payment_method, insurances.payment_method) AS payment_method
+                       FROM inbox_items
+                       LEFT JOIN recurring_payments ON recurring_payments.id = inbox_items.recurring_id
+                       LEFT JOIN insurances ON insurances.id = inbox_items.insurance_id
+                       WHERE substr(inbox_items.occurred_at, 1, 7) = ?
+                       AND (
+                           (inbox_items.recurring_id IS NOT NULL AND recurring_payments.card_id IS NULL)
+                           OR (inbox_items.insurance_id IS NOT NULL AND insurances.card_id IS NULL)
+                       )""",
+                    (year_month,),
+                ).fetchall()
+                total += sum(
+                    r["amount"] for r in text_rows
+                    if card_codes_match(_extract_method_last4(r["payment_method"]), card["last4"])
+                    and not is_performance_excluded(r["merchant"], card["perf_excluded_keywords"])
+                )
+            return total
 
         auto_prev_spend = _auto_spend(prev_month)
         auto_this_month_spend = _auto_spend(this_month)
