@@ -405,8 +405,6 @@ body { padding-bottom: 40px; }
 /* ---------- 받은 결제 알림 ---------- */
 .inbox-section { margin-bottom: 5px; }
 .inbox-section h2 { font-size: 13.5px; margin: 0 0 5px; display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-weight: 700; }
-.inbox-tabs-row { flex-wrap: wrap; row-gap: 4px; column-gap: 12px; }
-.inbox-tabs-row .memo-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; margin-top: 0; }
 .inbox-count { background: var(--accent-pink); color: #fff; border-radius: 999px; font-size: 11px; padding: 1px 8px; }
 .inbox-list { display: flex; flex-direction: column; gap: 5px; }
 .bulk-bar {
