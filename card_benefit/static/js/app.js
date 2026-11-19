@@ -513,6 +513,7 @@
     inboxToggleBtn.style.display = items.length ? "" : "none";
     inboxCount.textContent = items.length ? `${items.length}` : "";
     inboxList.style.display = inboxOpen ? "flex" : "none";
+    inboxToggleBtn.classList.toggle("active", inboxOpen);
     updateAlertsButton();
     const inboxActions = [
       {
@@ -591,6 +592,7 @@
     noBenefitToggleBtn.style.display = items.length ? "" : "none";
     noBenefitCount.textContent = items.length ? `${items.length}` : "";
     noBenefitList.style.display = noBenefitOpen ? "flex" : "none";
+    noBenefitToggleBtn.classList.toggle("active", noBenefitOpen);
     updateAlertsButton();
     const noBenefitActions = [
       {
@@ -644,6 +646,7 @@
     trashToggleBtn.style.display = items.length ? "" : "none";
     trashCount.textContent = items.length ? `${items.length}` : "";
     trashList.style.display = trashOpen ? "flex" : "none";
+    trashToggleBtn.classList.toggle("active", trashOpen);
     updateAlertsButton();
     const trashActions = [
       {
@@ -2142,6 +2145,7 @@
     dupToggleBtn.style.display = groups.length ? "" : "none";
     document.getElementById("dup-count").textContent = groups.length ? `${groups.length}` : "";
     dupList.style.display = dupOpen ? "flex" : "none";
+    dupToggleBtn.classList.toggle("active", dupOpen);
     updateAlertsButton();
 
     dupList.innerHTML = groups.map((g) => `
