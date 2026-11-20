@@ -445,13 +445,29 @@ def _dismiss_sync_toast(win, log=None, descendants=None):
     return False
 
 
+_COMPLETION_MARKERS = ('완료하였습니다', '실패하였습니다')
+
+
+def _find_any_completion_marker(win, descendants=None):
+    for phrase in _COMPLETION_MARKERS:
+        marker = _find_smallest_text_match(win, phrase, None, descendants=descendants)
+        if marker is not None:
+            return marker, phrase
+    return None, None
+
+
 def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
     """'OOO을 완료하였습니다' 팝업(메인 창 안에 겹쳐 뜨는 내부 모달)을 기다렸다가
     '확인'을 누른다 - 기존 '주문수집' 완료 팝업 처리(_collect_and_upload_impl
     안)와 똑같은, 이미 검증된 패턴을 운송장수집/운송장등록에도 재사용한다.
-    정확한 문구(예: '운송장 수집을 완료하였습니다')는 실제로 본 적이 없어서
-    '완료하였습니다' 공통 꼬리말로만 찾는다 - '배송완료'/'구매확정' 같은 상태
-    배지는 이 문구 전체를 포함하지 않아서 잘못 걸릴 위험은 없다."""
+
+    사용자 스크린샷으로 실제 운송장등록 실패 팝업을 확인했다: "운송장
+    등록에 실패하였습니다. (성공 0건 / 실패 1건 ...)" - '완료하였습니다'만
+    찾고 있었어서 이 실패 팝업은 전혀 못 잡고 '확인'도 못 눌러서 다음
+    단계로 영영 못 넘어갔다(사용자 지적: "이 다음에 안 넘어가네"). 성공/
+    실패 둘 다 '확인' 버튼을 누르는 건 똑같이 필요하니, '완료하였습니다'와
+    '실패하였습니다' 둘 다 완료 신호로 인정한다 - '배송완료'/'구매확정'
+    같은 상태 배지는 이 문구 전체를 포함하지 않아서 잘못 걸릴 위험은 없다."""
     elapsed = 0
     check_interval = 2
     while elapsed < wait_seconds:
@@ -463,10 +479,10 @@ def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
             descendants = None
         if _dismiss_sync_toast(win, L, descendants=descendants):
             time.sleep(1)
-        done_marker = _find_smallest_text_match(win, '완료하였습니다', None, descendants=descendants)
+        done_marker, matched_phrase = _find_any_completion_marker(win, descendants=descendants)
         if done_marker is None:
             continue
-        L("'완료하였습니다' 메시지 확인됨 - '확인' 버튼 찾는 중...")
+        L(f"'{matched_phrase}' 메시지 확인됨 - '확인' 버튼 찾는 중...")
         ok_ctrl = _find_near(done_marker, '확인', L)
         if ok_ctrl is None:
             ok_ctrl = _find_smallest_text_match(win, '확인', L, descendants=descendants)
@@ -491,12 +507,13 @@ def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
         try:
             win.type_keys('{ENTER}')
             time.sleep(1)
-            if _find_smallest_text_match(win, '완료하였습니다', None) is None:
+            still_there, _ = _find_any_completion_marker(win)
+            if still_there is None:
                 L('Enter 키로 완료 팝업이 닫힌 것으로 보입니다.')
                 return True
         except Exception as e:
             L(f'Enter 키 전송 실패: {type(e).__name__}: {e}')
-    L(f"{wait_seconds}초 안에 '완료하였습니다' 확인 팝업을 못 찾았습니다.")
+    L(f"{wait_seconds}초 안에 완료/실패 확인 팝업을 못 찾았습니다.")
     return False
 
 
