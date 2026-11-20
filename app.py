@@ -696,7 +696,170 @@ def _note_dpj_outcome(failed):
     return '', False
 
 
+def _run_dpj_cycle_once():
+    """DPJ 자동수집 1주기를 실제로 실행한다(야간 여부 확인은 호출부에서
+    이미 끝냈다고 가정). _dpj_auto_loop의 매 30분 주기와, 서버가 막 켜졌을
+    때의 즉시 1회 실행(사용자 지시: "스타트 실행하면 보드창 열어서 DPJ
+    버튼 실행하는 것부터 해") 양쪽에서 공유한다."""
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+
+    # 별도 스레드에서 돌리고 join(timeout=...)으로 기다린다 - 자동화가
+    # 안에서 멈춰있어도(응답 없는 창을 계속 기다리는 등) 이 루프
+    # 자체는 포기하고 다음 30분 주기를 정상적으로 다시 시작할 수 있다.
+    run_box = {}
+
+    def _run():
+        try:
+            run_box['result'] = _dpj_collect_once()
+        except Exception as e:
+            run_box['exception'] = e
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=DPJ_AUTO_RUN_TIMEOUT_SECONDS)
+    if t.is_alive():
+        msg = f'{DPJ_AUTO_RUN_TIMEOUT_SECONDS // 60}분이 지나도 끝나지 않아 멈춘 것으로 보입니다 - 이번 주기는 포기하고 다음 주기로 넘어갑니다.'
+        with _dpj_auto_lock:
+            _dpj_auto_state['last_run_at'] = now
+            _dpj_auto_state['last_error'] = msg
+        print(f"[DPJ 자동수집 {now}] {msg}")
+        _append_dpj_history(now, '시간초과', [msg])
+        hint, should_restart = _note_dpj_outcome(True)
+        _send_ntfy(f'{now} DPJ 자동 수집이 멈춘 것 같습니다(시간 초과) - 다음 주기에 다시 시도합니다.{hint}', title='마진보드 DPJ 자동수집 지연')
+        if should_restart:
+            _self_restart()
+        return
+
+    if 'exception' in run_box:
+        e = run_box['exception']
+        with _dpj_auto_lock:
+            _dpj_auto_state['last_run_at'] = now
+            _dpj_auto_state['last_error'] = _friendly_error(e)
+        print(f"[DPJ 자동수집 {now}] 실패(예외): {type(e).__name__}: {e}")
+        _append_dpj_history(now, '실패(예외)', [f'{type(e).__name__}: {e}'])
+        # '다팔자가 아직 바쁜 상태' 오류는 다팔자 자체(자체 자동동기화 등)가
+        # 바쁜 거라 마진보드를 재시작해도 전혀 안 풀린다 - 실제로 몇
+        # 시간씩 이 오류만 반복되면서 재시작만 계속 돌고 아무것도 안
+        # 고쳐지는 걸 확인했다(사용자 지적). 이 경우는 연속실패 카운터에
+        # 아예 반영하지 않고(재시작 후보에서 제외) 그냥 다음 30분 주기에
+        # 다시 시도한다 - 다팔자가 자기 할 일을 끝내면 그때 알아서 된다.
+        if isinstance(e, RuntimeError) and '바쁜 상태' in str(e):
+            _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)} (다팔자 자체가 바쁜 상태라 재시작은 소용없어 생략합니다 - 다음 주기에 다시 시도)',
+                        title='마진보드 DPJ 자동수집 지연')
+            return
+        hint, should_restart = _note_dpj_outcome(True)
+        _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)}{hint}', title='마진보드 DPJ 자동수집 실패')
+        if should_restart:
+            _self_restart()
+        return
+
+    result = run_box.get('result') or {}
+    notify_new_orders = False
+    send_morning_ok = False
+    with _dpj_auto_lock:
+        _dpj_auto_state['last_run_at'] = now
+        if not result.get('ok'):
+            _dpj_auto_state['last_error'] = (result.get('log') or ['알 수 없는 오류'])[-1]
+            # 폰 알림엔 마지막 한 줄만 보내는데(길면 안 보여서), 실패
+            # 원인을 제대로 찾으려면 보통 그 직전의 상세 진단(화면에
+            # 보이는 글자 목록 등)까지 다 봐야 한다 - 콘솔(이 창)에는
+            # 전체 로그를 그대로 남겨서, 창을 계속 켜두는 한 스크롤해서
+            # 볼 수 있게 한다.
+            print(f"[DPJ 자동수집 {now}] 실패 - 전체 로그:")
+            for line in (result.get('log') or []):
+                print(f"  {line}")
+        else:
+            upload_err = (result.get('upload') or {}).get('error')
+            if upload_err:
+                _dpj_auto_state['last_error'] = upload_err
+            else:
+                _dpj_auto_state['last_error'] = ''
+                new_count = result.get('new_order_count', 0)
+                if new_count > 0:
+                    _dpj_auto_state['pending'] = True
+                    _dpj_auto_state['message'] = f'{now} 자동 수집 - 신규주문 {new_count}건.'
+                    _dpj_auto_state['at'] = now
+                    notify_new_orders = True
+                # 사용자 지적: "돌면 돌았다고 알림을 주든지" - 실패/신규
+                # 주문 알림만 있으면 "아무 알림도 안 온다"가 "정상"인지
+                # "루프가 완전히 죽어서 아무것도 안 뜨는 것"인지 구분이
+                # 안 된다. 오늘 처음 정상 작동한 시점에 딱 한 번만(30분
+                # 마다 매번 보내면 시끄러우니) 안심 알림을 보낸다.
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                if _dpj_auto_state.get('morning_ok_notified_date') != today_str:
+                    _dpj_auto_state['morning_ok_notified_date'] = today_str
+                    send_morning_ok = True
+    _append_dpj_history(now, '성공' if result.get('ok') else '실패', result.get('log'))
+    hint, should_restart = _note_dpj_outcome(bool(_dpj_auto_state['last_error']))
+    # 폰 알림(ntfy)은 네트워크 호출이라 잠금을 잡은 채로 하지 않는다.
+    if _dpj_auto_state['last_error']:
+        _send_ntfy(f"{now} DPJ 자동 수집 실패 - {_dpj_auto_state['last_error']}{hint}", title='마진보드 DPJ 자동수집 실패')
+    elif notify_new_orders:
+        _send_ntfy(f"{now} 신규주문 {result.get('new_order_count', 0)}건이 있습니다 - 마진보드에서 확인해주세요.",
+                    title='이유상점 Margin Board - 신규주문')
+    elif send_morning_ok:
+        _send_ntfy(f"{now} DPJ 자동수집이 오늘 처음으로 정상 작동했습니다 - 이후 30분마다 계속 돕니다(문제 생기면 따로 알려드려요).",
+                    title='마진보드 DPJ 자동수집 정상')
+    if should_restart:
+        _self_restart()
+
+    # DPJ 자동수집이 성공했고 신규주문 때문에 재고상태 칸이 비어있는
+    # 건이 생겼으면, 수동으로 DPJ 버튼을 눌렀을 때와 똑같이 STOCK(재고확인)을
+    # 자동으로 이어서 실행한다(사용자 지적: "원래 dpj돌리고 신규있으면
+    # 스톡가는건데 안갔다고" - 기존엔 이 체이닝이 프론트 JS에만 있어서
+    # 사람이 직접 DPJ 버튼을 눌렀을 때만 동작했고, 서버가 30분마다 혼자
+    # 돌리는 자동수집 뒤에는 아무도 STOCK을 호출해주지 않았다).
+    if not _dpj_auto_state['last_error'] and result.get('has_new_orders'):
+        stock_box = {}
+
+        def _run_stock():
+            try:
+                stock_box['result'] = _stock_check_once()
+            except Exception as e:
+                stock_box['exception'] = e
+
+        st = threading.Thread(target=_run_stock, daemon=True)
+        st.start()
+        st.join(timeout=DPJ_AUTO_RUN_TIMEOUT_SECONDS)
+        if st.is_alive():
+            smsg = f'자동 STOCK(재고확인)이 {DPJ_AUTO_RUN_TIMEOUT_SECONDS // 60}분이 지나도 끝나지 않아 멈춘 것으로 보입니다.'
+            print(f"[STOCK 자동확인 {now}] {smsg}")
+            _append_dpj_history(now, 'STOCK 시간초과', [smsg])
+            shint, sshould_restart = _note_dpj_outcome(True)
+            _send_ntfy(f'{now} {smsg}{shint}', title='마진보드 STOCK 자동확인 지연')
+            if sshould_restart:
+                _self_restart()
+        elif 'exception' in stock_box:
+            e = stock_box['exception']
+            print(f"[STOCK 자동확인 {now}] 실패(예외): {type(e).__name__}: {e}")
+            _append_dpj_history(now, 'STOCK 실패(예외)', [f'{type(e).__name__}: {e}'])
+            shint, sshould_restart = _note_dpj_outcome(True)
+            _send_ntfy(f'{now} STOCK 자동확인 실패 - {_friendly_error(e)}{shint}', title='마진보드 STOCK 자동확인 실패')
+            if sshould_restart:
+                _self_restart()
+        else:
+            sresult = stock_box.get('result') or {}
+            _append_dpj_history(now, 'STOCK 성공' if sresult.get('ok') else 'STOCK 실패', sresult.get('log'))
+            if not sresult.get('ok'):
+                serr = (sresult.get('log') or ['알 수 없는 오류'])[-1]
+                print(f"[STOCK 자동확인 {now}] 실패 - {serr}")
+                shint, sshould_restart = _note_dpj_outcome(True)
+                _send_ntfy(f'{now} STOCK 자동확인 실패 - {serr}{shint}', title='마진보드 STOCK 자동확인 실패')
+                if sshould_restart:
+                    _self_restart()
+            else:
+                _note_dpj_outcome(False)
+                print(f"[STOCK 자동확인 {now}] 완료 - {sresult.get('checked', 0)}건 확인.")
+
+
 def _dpj_auto_loop():
+    # 사용자 지시: "스타트 실행하면 보드창 열어서 DPJ 버튼 실행하는 것부터
+    # 해" - 예전엔 서버를 막 켜도 첫 주기가 30분 뒤에야 돌았다. 서버를
+    # 켰다는 건 지금 쓰려는 거니, 첫 실행은 야간 여부와 무관하게 곧바로
+    # 돌리고(브라우저가 자동으로 뜨는 시점과 거의 맞물림), 그 이후 자동
+    # 주기부터 평소처럼 야간 제외 + 30분 간격을 적용한다.
+    print("[안내] 서버가 시작됐으니 DPJ 자동수집을 즉시 1회 실행합니다...")
+    _run_dpj_cycle_once()
     with _dpj_auto_lock:
         _dpj_auto_state['next_run_at'] = (datetime.now() + timedelta(seconds=DPJ_AUTO_INTERVAL_SECONDS)).strftime('%Y-%m-%d %H:%M:%S')
     while True:
@@ -708,155 +871,7 @@ def _dpj_auto_loop():
             # 잔다 - last_run_at/last_error를 안 건드려서 "실행은 했는데
             # 아무 일도 안 생겼다"로 혼동되지 않게 한다.
             continue
-        now = time.strftime('%Y-%m-%d %H:%M:%S')
-
-        # 별도 스레드에서 돌리고 join(timeout=...)으로 기다린다 - 자동화가
-        # 안에서 멈춰있어도(응답 없는 창을 계속 기다리는 등) 이 루프
-        # 자체는 포기하고 다음 30분 주기를 정상적으로 다시 시작할 수 있다.
-        run_box = {}
-
-        def _run():
-            try:
-                run_box['result'] = _dpj_collect_once()
-            except Exception as e:
-                run_box['exception'] = e
-
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
-        t.join(timeout=DPJ_AUTO_RUN_TIMEOUT_SECONDS)
-        if t.is_alive():
-            msg = f'{DPJ_AUTO_RUN_TIMEOUT_SECONDS // 60}분이 지나도 끝나지 않아 멈춘 것으로 보입니다 - 이번 주기는 포기하고 다음 주기로 넘어갑니다.'
-            with _dpj_auto_lock:
-                _dpj_auto_state['last_run_at'] = now
-                _dpj_auto_state['last_error'] = msg
-            print(f"[DPJ 자동수집 {now}] {msg}")
-            _append_dpj_history(now, '시간초과', [msg])
-            hint, should_restart = _note_dpj_outcome(True)
-            _send_ntfy(f'{now} DPJ 자동 수집이 멈춘 것 같습니다(시간 초과) - 다음 주기에 다시 시도합니다.{hint}', title='마진보드 DPJ 자동수집 지연')
-            if should_restart:
-                _self_restart()
-            continue
-
-        if 'exception' in run_box:
-            e = run_box['exception']
-            with _dpj_auto_lock:
-                _dpj_auto_state['last_run_at'] = now
-                _dpj_auto_state['last_error'] = _friendly_error(e)
-            print(f"[DPJ 자동수집 {now}] 실패(예외): {type(e).__name__}: {e}")
-            _append_dpj_history(now, '실패(예외)', [f'{type(e).__name__}: {e}'])
-            # '다팔자가 아직 바쁜 상태' 오류는 다팔자 자체(자체 자동동기화 등)가
-            # 바쁜 거라 마진보드를 재시작해도 전혀 안 풀린다 - 실제로 몇
-            # 시간씩 이 오류만 반복되면서 재시작만 계속 돌고 아무것도 안
-            # 고쳐지는 걸 확인했다(사용자 지적). 이 경우는 연속실패 카운터에
-            # 아예 반영하지 않고(재시작 후보에서 제외) 그냥 다음 30분 주기에
-            # 다시 시도한다 - 다팔자가 자기 할 일을 끝내면 그때 알아서 된다.
-            if isinstance(e, RuntimeError) and '바쁜 상태' in str(e):
-                _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)} (다팔자 자체가 바쁜 상태라 재시작은 소용없어 생략합니다 - 다음 주기에 다시 시도)',
-                            title='마진보드 DPJ 자동수집 지연')
-                continue
-            hint, should_restart = _note_dpj_outcome(True)
-            _send_ntfy(f'{now} DPJ 자동 수집 실패 - {_friendly_error(e)}{hint}', title='마진보드 DPJ 자동수집 실패')
-            if should_restart:
-                _self_restart()
-            continue
-
-        result = run_box.get('result') or {}
-        notify_new_orders = False
-        send_morning_ok = False
-        with _dpj_auto_lock:
-            _dpj_auto_state['last_run_at'] = now
-            if not result.get('ok'):
-                _dpj_auto_state['last_error'] = (result.get('log') or ['알 수 없는 오류'])[-1]
-                # 폰 알림엔 마지막 한 줄만 보내는데(길면 안 보여서), 실패
-                # 원인을 제대로 찾으려면 보통 그 직전의 상세 진단(화면에
-                # 보이는 글자 목록 등)까지 다 봐야 한다 - 콘솔(이 창)에는
-                # 전체 로그를 그대로 남겨서, 창을 계속 켜두는 한 스크롤해서
-                # 볼 수 있게 한다.
-                print(f"[DPJ 자동수집 {now}] 실패 - 전체 로그:")
-                for line in (result.get('log') or []):
-                    print(f"  {line}")
-            else:
-                upload_err = (result.get('upload') or {}).get('error')
-                if upload_err:
-                    _dpj_auto_state['last_error'] = upload_err
-                else:
-                    _dpj_auto_state['last_error'] = ''
-                    new_count = result.get('new_order_count', 0)
-                    if new_count > 0:
-                        _dpj_auto_state['pending'] = True
-                        _dpj_auto_state['message'] = f'{now} 자동 수집 - 신규주문 {new_count}건.'
-                        _dpj_auto_state['at'] = now
-                        notify_new_orders = True
-                    # 사용자 지적: "돌면 돌았다고 알림을 주든지" - 실패/신규
-                    # 주문 알림만 있으면 "아무 알림도 안 온다"가 "정상"인지
-                    # "루프가 완전히 죽어서 아무것도 안 뜨는 것"인지 구분이
-                    # 안 된다. 오늘 처음 정상 작동한 시점에 딱 한 번만(30분
-                    # 마다 매번 보내면 시끄러우니) 안심 알림을 보낸다.
-                    today_str = datetime.now().strftime('%Y-%m-%d')
-                    if _dpj_auto_state.get('morning_ok_notified_date') != today_str:
-                        _dpj_auto_state['morning_ok_notified_date'] = today_str
-                        send_morning_ok = True
-        _append_dpj_history(now, '성공' if result.get('ok') else '실패', result.get('log'))
-        hint, should_restart = _note_dpj_outcome(bool(_dpj_auto_state['last_error']))
-        # 폰 알림(ntfy)은 네트워크 호출이라 잠금을 잡은 채로 하지 않는다.
-        if _dpj_auto_state['last_error']:
-            _send_ntfy(f"{now} DPJ 자동 수집 실패 - {_dpj_auto_state['last_error']}{hint}", title='마진보드 DPJ 자동수집 실패')
-        elif notify_new_orders:
-            _send_ntfy(f"{now} 신규주문 {result.get('new_order_count', 0)}건이 있습니다 - 마진보드에서 확인해주세요.",
-                        title='이유상점 Margin Board - 신규주문')
-        elif send_morning_ok:
-            _send_ntfy(f"{now} DPJ 자동수집이 오늘 처음으로 정상 작동했습니다 - 이후 30분마다 계속 돕니다(문제 생기면 따로 알려드려요).",
-                        title='마진보드 DPJ 자동수집 정상')
-        if should_restart:
-            _self_restart()
-
-        # DPJ 자동수집이 성공했고 신규주문 때문에 재고상태 칸이 비어있는
-        # 건이 생겼으면, 수동으로 DPJ 버튼을 눌렀을 때와 똑같이 STOCK(재고확인)을
-        # 자동으로 이어서 실행한다(사용자 지적: "원래 dpj돌리고 신규있으면
-        # 스톡가는건데 안갔다고" - 기존엔 이 체이닝이 프론트 JS에만 있어서
-        # 사람이 직접 DPJ 버튼을 눌렀을 때만 동작했고, 서버가 30분마다 혼자
-        # 돌리는 자동수집 뒤에는 아무도 STOCK을 호출해주지 않았다).
-        if not _dpj_auto_state['last_error'] and result.get('has_new_orders'):
-            stock_box = {}
-
-            def _run_stock():
-                try:
-                    stock_box['result'] = _stock_check_once()
-                except Exception as e:
-                    stock_box['exception'] = e
-
-            st = threading.Thread(target=_run_stock, daemon=True)
-            st.start()
-            st.join(timeout=DPJ_AUTO_RUN_TIMEOUT_SECONDS)
-            if st.is_alive():
-                smsg = f'자동 STOCK(재고확인)이 {DPJ_AUTO_RUN_TIMEOUT_SECONDS // 60}분이 지나도 끝나지 않아 멈춘 것으로 보입니다.'
-                print(f"[STOCK 자동확인 {now}] {smsg}")
-                _append_dpj_history(now, 'STOCK 시간초과', [smsg])
-                shint, sshould_restart = _note_dpj_outcome(True)
-                _send_ntfy(f'{now} {smsg}{shint}', title='마진보드 STOCK 자동확인 지연')
-                if sshould_restart:
-                    _self_restart()
-            elif 'exception' in stock_box:
-                e = stock_box['exception']
-                print(f"[STOCK 자동확인 {now}] 실패(예외): {type(e).__name__}: {e}")
-                _append_dpj_history(now, 'STOCK 실패(예외)', [f'{type(e).__name__}: {e}'])
-                shint, sshould_restart = _note_dpj_outcome(True)
-                _send_ntfy(f'{now} STOCK 자동확인 실패 - {_friendly_error(e)}{shint}', title='마진보드 STOCK 자동확인 실패')
-                if sshould_restart:
-                    _self_restart()
-            else:
-                sresult = stock_box.get('result') or {}
-                _append_dpj_history(now, 'STOCK 성공' if sresult.get('ok') else 'STOCK 실패', sresult.get('log'))
-                if not sresult.get('ok'):
-                    serr = (sresult.get('log') or ['알 수 없는 오류'])[-1]
-                    print(f"[STOCK 자동확인 {now}] 실패 - {serr}")
-                    shint, sshould_restart = _note_dpj_outcome(True)
-                    _send_ntfy(f'{now} STOCK 자동확인 실패 - {serr}{shint}', title='마진보드 STOCK 자동확인 실패')
-                    if sshould_restart:
-                        _self_restart()
-                else:
-                    _note_dpj_outcome(False)
-                    print(f"[STOCK 자동확인 {now}] 완료 - {sresult.get('checked', 0)}건 확인.")
+        _run_dpj_cycle_once()
 
 
 # 사용자 지적: "자동이 도는 건지 안 도는 건지 내가 이걸 보지도 않는데...
