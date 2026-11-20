@@ -1325,7 +1325,11 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         # 에도 우연히 들어있어서, 2자 기준이면 오히려 둘 다 걸려서 안 좁혀짐).
         # 그렇게 해서 정확히 하나로 좁혀지면 그걸 쓰고, 안 좁혀지면(둘 다 걸리거나
         # 하나도 안 걸리면) 그대로 애매한 걸로 둔다.
-        merchant_lower = re.sub(r"[()]", "", item["merchant"].lower())
+        # "LG  U+통신요금  자동"처럼 OCR/알림 문구에 공백이 여러 개 끼는
+        # 경우가 있어서, 토큰 비교에서 공백 차이로 안 걸리는 걸 막으려고
+        # 괄호뿐 아니라 공백도 전부 지운다(토큰 자체는 원래 공백 기준으로
+        # 쪼개서 만들어지므로 토큰 안엔 공백이 없음 - 안전).
+        merchant_lower = re.sub(r"[()\s]", "", item["merchant"].lower())
         narrowed = [
             rp for rp in amount_matches
             if any(
@@ -1347,7 +1351,7 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
 
     if not item["merchant"]:
         return False
-    merchant_lower = re.sub(r"[()]", "", item["merchant"].lower())
+    merchant_lower = re.sub(r"[()\s]", "", item["merchant"].lower())
     name_matches = [
         rp for rp in active_rows
         if last4_ok(rp) and not merchant_excluded(rp) and any(
@@ -1365,7 +1369,7 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
         # 정확히 집어낼 수 있다.
         narrowed = [
             rp for rp in name_matches
-            if rp["billing_alias"] and rp["billing_alias"].lower() in merchant_lower
+            if rp["billing_alias"] and re.sub(r"\s", "", rp["billing_alias"].lower()) in merchant_lower
         ]
         if len(narrowed) == 1:
             name_matches = narrowed
@@ -2873,7 +2877,7 @@ def _match_candidates(conn, table, item_id, name_column):
         tokens = [t.lower() for t in (_safe_name_tokens(rp[name_column]) + _safe_name_tokens(rp["billing_alias"]))]
 
     def is_name_match(merchant):
-        merchant_lower = (merchant or "").lower()
+        merchant_lower = re.sub(r"\s", "", (merchant or "").lower())
         return bool(tokens) and any(tok in merchant_lower for tok in tokens)
 
     rows = conn.execute(
