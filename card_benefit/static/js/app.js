@@ -2829,35 +2829,54 @@
   const importImageLog = document.getElementById("import-image-log");
 
   importImageFile.addEventListener("change", async () => {
-    const file = importImageFile.files[0];
-    if (!file) return;
+    const files = Array.from(importImageFile.files || []);
+    if (!files.length) return;
 
-    const formData = new FormData();
-    formData.append("file", file);
+    // 한 번에 여러 장 고르면 한 장씩 순서대로 처리한다(서버의 OCR 리더가
+    // 한 번에 하나씩만 처리하도록 짜여 있어서 동시에 여러 요청을 던지면
+    // 꼬일 수 있음) - 한 장 끝날 때마다 로그 줄을 쌓아서 전체 진행상황을
+    // 계속 보여준다. 중간에 하나가 실패해도 나머지는 계속 진행한다.
+    const lines = [];
+    const renderLog = () => { importImageLog.innerHTML = lines.join(""); };
 
-    importImageLog.innerHTML = `<div class="upload-log-item">글자 읽는 중... (처음 한 번은 오래 걸릴 수 있음)</div>`;
-    let data;
-    try {
-      const res = await fetch("/api/inbox/from-image", { method: "POST", body: formData });
-      data = await res.json();
-      if (!res.ok) throw new Error(data.error || "등록 실패");
-    } catch (e) {
-      importImageLog.innerHTML = `<div class="upload-log-item err">${escapeHtml(e.message)}</div>`;
-      importImageFile.value = "";
-      return;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const prefix = files.length > 1 ? `[${i + 1}/${files.length}] ` : "";
+      lines.push(`<div class="upload-log-item">${prefix}글자 읽는 중... (처음 한 번은 오래 걸릴 수 있음)</div>`);
+      renderLog();
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      let data;
+      try {
+        const res = await fetch("/api/inbox/from-image", { method: "POST", body: formData });
+        data = await res.json();
+        if (!res.ok) throw new Error(data.error || "등록 실패");
+      } catch (e) {
+        lines[lines.length - 1] = `<div class="upload-log-item err">${prefix}${escapeHtml(e.message)}</div>`;
+        renderLog();
+        continue;
+      }
+
+      state = data;
+      render();
+
+      const p = data.ocr_preview || {};
+      // 레이아웃이 카드사/은행 앱마다 달라서 완벽하게는 못 읽을 수 있어서,
+      // 뭘로 읽었는지 바로 보여줘서 틀렸으면 바로 알아챌 수 있게 한다.
+      lines[lines.length - 1] = `<div class="upload-log-item">${prefix}` +
+        `읽은 내용: ${p.amount != null ? fmt(p.amount) + "원" : "(금액 못 읽음)"}` +
+        `${p.merchant ? " · " + escapeHtml(p.merchant) : ""}${p.occurred_at ? " · " + escapeHtml(shortDate(p.occurred_at)) : ""}` +
+        `${p.last4 ? " · 카드뒷자리 " + escapeHtml(p.last4) : " · (카드뒷자리 못 읽음)"} ` +
+        `- 큐에 등록됨</div>`;
+      renderLog();
     }
 
-    state = data;
-    render();
-
-    const p = data.ocr_preview || {};
-    // 레이아웃이 카드사/은행 앱마다 달라서 완벽하게는 못 읽을 수 있어서,
-    // 뭘로 읽었는지 바로 보여줘서 틀렸으면 바로 알아챌 수 있게 한다.
-    importImageLog.innerHTML = `<div class="upload-log-item">` +
-      `읽은 내용: ${p.amount != null ? fmt(p.amount) + "원" : "(금액 못 읽음)"}` +
-      `${p.merchant ? " · " + escapeHtml(p.merchant) : ""}${p.occurred_at ? " · " + escapeHtml(shortDate(p.occurred_at)) : ""}` +
-      `${p.last4 ? " · 카드뒷자리 " + escapeHtml(p.last4) : " · (카드뒷자리 못 읽음)"} ` +
-      `- 큐에 등록됨, 아래 "받은 결제 알림"에서 확인하세요.</div>`;
+    if (files.length > 1) {
+      lines.push(`<div class="upload-log-item">총 ${files.length}장 처리 완료 - 아래 "받은 결제 알림"에서 확인하세요.</div>`);
+      renderLog();
+    }
     importImageFile.value = "";
   });
 
