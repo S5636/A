@@ -1228,7 +1228,10 @@
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateTab('summary'); }
   });
 
-  activateTab('summary');
+  // 사용자 지시: "보드탭을 열라고 했잖니" - 페이지를 처음 열었을 때(특히
+  // 서버 시작과 함께 자동으로 뜨는 브라우저 탭) REPORT가 아니라 BOARD가
+  // 바로 보이게 한다. 로고 클릭으로 돌아가는 곳은 REPORT로 그대로 둔다.
+  activateTab('dashboard');
 
   // ================= DPJ 30분 자동 수집 알림 =================
   // 사용자 요청: "30분에한번씩 dpj버튼 자동으로눌러주고 신규주문있으면
