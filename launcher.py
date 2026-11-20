@@ -136,18 +136,29 @@ def _close_previous_instances():
     남아있었음). taskkill의 포트 기준 탐색은 "지금 포트 5000을 쥔
     딱 하나"만 찾는데, 그보다 먼저 떠 있다가 이미 포트를 다른 고아
     프로세스에게 넘겨준 더 오래된 고아들은 전혀 못 찾는다. 여기서는
-    포트가 아니라 "python.exe이면서 명령줄에 이 launcher.py 경로가
-    들어있는" 모든 프로세스를 psutil로 직접 찾아서, 그 프로세스
-    자신과 그 부모(콘솔을 쥔 cmd 등)를 kill한다 - 자식(오너클랜
-    브라우저 등)은 건드리지 않는다(kill()은 그 프로세스 자신만
-    종료하고 자식까지 내려가지 않는다 - /T처럼 트리 전체를 죽이는
-    게 아니다)."""
+    포트가 아니라 "python.exe이면서 이 launcher.py 폴더에서 돌고 있는"
+    모든 프로세스를 psutil로 직접 찾아서, 그 프로세스 자신과 그
+    부모(콘솔을 쥔 cmd 등)를 kill한다 - 자식(오너클랜 브라우저 등)은
+    건드리지 않는다(kill()은 그 프로세스 자신만 종료하고 자식까지
+    내려가지 않는다 - /T처럼 트리 전체를 죽이는 게 아니다).
+
+    처음 버전은 명령줄의 'launcher.py' 인자를 os.path.abspath()로
+    풀어서 비교했는데, 그 함수는 "이 프로세스(마진보드)의" 현재
+    폴더를 기준으로 상대경로를 풀어낸다 - 상대경로 'launcher.py'를
+    쓰는 다른 프로그램(카드 남은혜택 체크도 똑같이 python launcher.py
+    로 실행됨)의 명령줄을 마진보드 자신의 폴더 기준으로 잘못 풀어서
+    마진보드 자신의 launcher.py 경로와 우연히 똑같아져버렸다 - 그래서
+    전혀 다른 프로그램인 카드 남은혜택 체크까지 같이 꺼버렸다(사용자
+    지적: "코어싱크 로그 킬해버리네"). 상대경로는 "그 프로세스 자신의"
+    현재 폴더를 기준으로 풀어야 하므로, 대상 프로세스의 실제 cwd()를
+    직접 물어봐서(psutil이 OS에서 그 프로세스의 진짜 현재 폴더를
+    가져옴) 이 마진보드 폴더(BASE_DIR)와 같은지로 비교한다."""
     try:
         import psutil
     except ImportError:
         return
     my_pid = os.getpid()
-    this_script = os.path.abspath(__file__)
+    this_dir = os.path.normcase(os.path.normpath(BASE_DIR))
     for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
         try:
             if proc.pid == my_pid:
@@ -156,7 +167,13 @@ def _close_previous_instances():
             if name != 'python.exe':
                 continue
             cmdline = proc.info.get('cmdline') or []
-            if not any(os.path.abspath(arg) == this_script for arg in cmdline if arg):
+            if not any(os.path.basename(arg) == 'launcher.py' for arg in cmdline if arg):
+                continue
+            try:
+                proc_cwd = os.path.normcase(os.path.normpath(proc.cwd()))
+            except Exception:
+                continue
+            if proc_cwd != this_dir:
                 continue
         except Exception:
             continue
