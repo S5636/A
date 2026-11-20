@@ -5027,6 +5027,27 @@ def _get_ocr_reader():
     return _OCR_READER
 
 
+def _find_ampm_fallback_time(lines):
+    """카카오톡 "알림톡 도착" 캡쳐는 알림 본문의 거래시각(위쪽)이랑 별개로,
+    카톡 자체가 그 메시지를 받은 시각("오후 4:14")도 맨 아래 따로 찍혀서
+    같이 읽힌다. 둘은 같은 시각을 가리키는 별개의 글자라서, 거래시각 쪽
+    숫자가 OCR로 깨져서(예: "16:14"가 "16:74"로, 분이 59를 넘어 무효한
+    값이 됨) 못 쓰게 됐을 때 이 카톡 수신시각으로 대신 보충할 수 있다
+    (완전히 다른 글자를 두 번 읽은 거라 같은 자리에서 같은 식으로 깨질
+    가능성은 낮음). 못 찾으면 None(지어내지 않음)."""
+    for line in lines:
+        m = re.match(r"^(오전|오후)\s*(\d{1,2})[:.](\d{2})$", (line or "").strip())
+        if m:
+            hour, minute = int(m.group(2)), int(m.group(3))
+            if m.group(1) == "오후" and hour != 12:
+                hour += 12
+            elif m.group(1) == "오전" and hour == 12:
+                hour = 0
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                return hour, minute
+    return None
+
+
 def _parse_receipt_ocr(lines):
     amount = None
     merchant = ""
@@ -5110,6 +5131,14 @@ def _parse_receipt_ocr(lines):
                     hour, minute, second = int(dm2.group(3)), int(dm2.group(4)), int(dm2.group(5) or 0)
                     if 1 <= month <= 12 and 1 <= day <= 31 and 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59:
                         occurred_at = f"{datetime.now().year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+                    elif 1 <= month <= 12 and 1 <= day <= 31:
+                        # 시간 쪽 숫자가 OCR로 깨져서(예: 분이 59 넘음) 못 쓰게
+                        # 됐어도 날짜는 멀쩡하면, 카톡 수신시각("오후 4:14")
+                        # 으로 시간만 보충한다.
+                        fallback = _find_ampm_fallback_time(lines)
+                        if fallback:
+                            hour, minute = fallback
+                            occurred_at = f"{datetime.now().year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:00"
                 else:
                     # "11/20"과 "16:14"가 아예 서로 다른 줄로 따로 읽히는
                     # 경우도 있다(위 YY.MM.DD 형식의 날짜/시간 분리 줄 보완과
