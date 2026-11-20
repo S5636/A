@@ -5107,6 +5107,25 @@ def _parse_receipt_ocr(lines):
                     hour, minute, second = int(dm2.group(3)), int(dm2.group(4)), int(dm2.group(5) or 0)
                     if 1 <= month <= 12 and 1 <= day <= 31 and 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59:
                         occurred_at = f"{datetime.now().year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+                else:
+                    # "11/20"과 "16:14"가 아예 서로 다른 줄로 따로 읽히는
+                    # 경우도 있다(위 YY.MM.DD 형식의 날짜/시간 분리 줄 보완과
+                    # 똑같은 이유) - 날짜만 있는 줄이면 바로 다음 줄들에서
+                    # 시간만 있는 모양을 찾는다.
+                    dm3 = re.match(r"^(\d{1,2})/(\d{1,2})$", text)
+                    if dm3:
+                        month, day = int(dm3.group(1)), int(dm3.group(2))
+                        if 1 <= month <= 12 and 1 <= day <= 31:
+                            for next_line in lines[line_idx + 1:line_idx + 3]:
+                                tm = re.match(r"^(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?$", (next_line or "").strip())
+                                if tm:
+                                    hour, minute, second = int(tm.group(1)), int(tm.group(2)), int(tm.group(3) or 0)
+                                    if 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59:
+                                        occurred_at = (
+                                            f"{datetime.now().year}-{month:02d}-{day:02d} "
+                                            f"{hour:02d}:{minute:02d}:{second:02d}"
+                                        )
+                                    break
 
         if not last4 and not _DATE_LIKE_RE.search(text):
             # 카드번호가 두 줄로 쪼개져 읽히면("5188-37.\n~0741"처럼) 뒷자리
