@@ -616,6 +616,14 @@ _dpj_auto_state = {
     # 시각을 저장해두고 화면에 항상 띄워서, 그 시각이 계속 앞으로 움직이는지
     # 보면 루프가 살아있는지 조용히 확인할 수 있게 한다.
     'next_run_at': '',
+    # 사용자 지적: "자동이 도는 건지 안 도는 건지 내가 이걸 보지도 않는데
+    # 돌면 돌았다고 알림을 주든지" - 실패 알림만으론 "루프 자체가 완전히
+    # 멈춰서 실패조차 안 뜨는" 최악의 경우를 못 잡는다. 아래 두 값으로
+    # (1) 오늘 처음 정상 작동했을 때 한 번 안심 알림을 보내고,
+    # (2) last_run_at이 너무 오래 안 움직이면(=루프 자체가 죽었을 가능성)
+    # 별도 감시 스레드가 경고를 보낸다.
+    'morning_ok_notified_date': '',
+    'watchdog_last_alert_at': '',
 }
 _dpj_auto_lock = threading.Lock()
 
@@ -754,6 +762,7 @@ def _dpj_auto_loop():
 
         result = run_box.get('result') or {}
         notify_new_orders = False
+        send_morning_ok = False
         with _dpj_auto_lock:
             _dpj_auto_state['last_run_at'] = now
             if not result.get('ok'):
@@ -778,6 +787,15 @@ def _dpj_auto_loop():
                         _dpj_auto_state['message'] = f'{now} 자동 수집 - 신규주문 {new_count}건.'
                         _dpj_auto_state['at'] = now
                         notify_new_orders = True
+                    # 사용자 지적: "돌면 돌았다고 알림을 주든지" - 실패/신규
+                    # 주문 알림만 있으면 "아무 알림도 안 온다"가 "정상"인지
+                    # "루프가 완전히 죽어서 아무것도 안 뜨는 것"인지 구분이
+                    # 안 된다. 오늘 처음 정상 작동한 시점에 딱 한 번만(30분
+                    # 마다 매번 보내면 시끄러우니) 안심 알림을 보낸다.
+                    today_str = datetime.now().strftime('%Y-%m-%d')
+                    if _dpj_auto_state.get('morning_ok_notified_date') != today_str:
+                        _dpj_auto_state['morning_ok_notified_date'] = today_str
+                        send_morning_ok = True
         _append_dpj_history(now, '성공' if result.get('ok') else '실패', result.get('log'))
         hint, should_restart = _note_dpj_outcome(bool(_dpj_auto_state['last_error']))
         # 폰 알림(ntfy)은 네트워크 호출이라 잠금을 잡은 채로 하지 않는다.
@@ -786,6 +804,9 @@ def _dpj_auto_loop():
         elif notify_new_orders:
             _send_ntfy(f"{now} 신규주문 {result.get('new_order_count', 0)}건이 있습니다 - 마진보드에서 확인해주세요.",
                         title='이유상점 Margin Board - 신규주문')
+        elif send_morning_ok:
+            _send_ntfy(f"{now} DPJ 자동수집이 오늘 처음으로 정상 작동했습니다 - 이후 30분마다 계속 돕니다(문제 생기면 따로 알려드려요).",
+                        title='마진보드 DPJ 자동수집 정상')
         if should_restart:
             _self_restart()
 
@@ -838,6 +859,57 @@ def _dpj_auto_loop():
                     print(f"[STOCK 자동확인 {now}] 완료 - {sresult.get('checked', 0)}건 확인.")
 
 
+# 사용자 지적: "자동이 도는 건지 안 도는 건지 내가 이걸 보지도 않는데...
+# 알림이 안 오니까 돌았는 줄 알고 가만히 있잖아?" - _dpj_auto_loop 자신이
+# 멈춰버리면(진짜로 루프 전체가 죽는 경우) 그 루프 안에서 실패 알림을
+# 보내는 코드 자체가 다시는 안 돌아서 아무 신호도 안 온다. 별도의 독립된
+# 스레드에서 "마지막 실행이 너무 오래 전인지"만 주기적으로 확인해서,
+# 너무 오래 조용하면(=루프 자체가 죽었을 가능성) 그제서야 경고를 보낸다 -
+# _dpj_auto_loop와 완전히 분리된 스레드라 그쪽이 죽어도 이건 계속 돈다.
+DPJ_WATCHDOG_CHECK_INTERVAL_SECONDS = 10 * 60
+DPJ_WATCHDOG_STALE_THRESHOLD_SECONDS = DPJ_AUTO_INTERVAL_SECONDS * 3
+
+
+def _dpj_watchdog_loop():
+    while True:
+        time.sleep(DPJ_WATCHDOG_CHECK_INTERVAL_SECONDS)
+        if _is_dpj_auto_night_now():
+            continue
+        now_dt = datetime.now()
+        # 야간 종료 직후(09:00)엔 last_run_at이 아직 어젯밤 마지막 실행
+        # 그대로라 몇 시간씩 벌어져 보이는 게 당연하다 - 본 루프가 09시
+        # 이후 첫 주기를 돌 시간을 주지 않고 그 격차만으로 판단하면 매일
+        # 아침 반드시 오탐이 난다. 09시 지나고 40분까지는 검사를 건너뛴다.
+        if now_dt.hour == DPJ_AUTO_NIGHT_END_HOUR and now_dt.minute < 40:
+            continue
+        with _dpj_auto_lock:
+            last_run_at = _dpj_auto_state.get('last_run_at') or ''
+            last_alert_at = _dpj_auto_state.get('watchdog_last_alert_at') or ''
+        if not last_run_at:
+            continue  # 아직 한 번도 안 돈 상태(막 켠 직후) - 정상
+        try:
+            last_dt = datetime.strptime(last_run_at, '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            continue
+        gap_seconds = (datetime.now() - last_dt).total_seconds()
+        if gap_seconds < DPJ_WATCHDOG_STALE_THRESHOLD_SECONDS:
+            continue
+        if last_alert_at:
+            try:
+                last_alert_dt = datetime.strptime(last_alert_at, '%Y-%m-%d %H:%M:%S')
+                if (datetime.now() - last_alert_dt).total_seconds() < DPJ_WATCHDOG_STALE_THRESHOLD_SECONDS:
+                    continue  # 이미 최근에 경고를 보냈으면 매 10분마다 또 보내지 않는다
+            except Exception:
+                pass
+        now_str = time.strftime('%Y-%m-%d %H:%M:%S')
+        with _dpj_auto_lock:
+            _dpj_auto_state['watchdog_last_alert_at'] = now_str
+        gap_min = int(gap_seconds // 60)
+        _send_ntfy(f'{now_str} DPJ 자동수집이 {gap_min}분째 아무 소식이 없습니다(마지막 실행: {last_run_at}) - '
+                    f'마진보드 자체가 멈췄을 수 있으니 직접 확인해주세요.',
+                    title='마진보드 DPJ 자동수집 응답없음')
+
+
 _dpj_auto_thread_started = False
 
 
@@ -847,6 +919,7 @@ def _start_dpj_auto_scheduler():
         return
     _dpj_auto_thread_started = True
     threading.Thread(target=_dpj_auto_loop, daemon=True).start()
+    threading.Thread(target=_dpj_watchdog_loop, daemon=True).start()
 
 
 @app.route('/api/dapalza/auto_alert')
