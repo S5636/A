@@ -1564,7 +1564,7 @@ def _nearest_payment_day_gap(payment_day, occurred_date):
     """occurred_date가 속한 달(과 전/다음달)의 payment_day 후보들 중
     occurred_date와 가장 가까운 날짜까지 며칠 차이나는지 구한다. 상환일이
     주말/공휴일이면 은행이 앞뒤로 날짜를 당기거나 미루는 걸 감안하기 위함."""
-    day = min(max(int(payment_day or 1), 1), 28)
+    day = min(max(int(payment_day or 1), 1), 31)
     best = None
     for delta in (-1, 0, 1):
         y, m = occurred_date.year, occurred_date.month + delta
@@ -1785,16 +1785,20 @@ def _auto_match_all_pending(conn):
 
 def _next_payment_date(payment_day):
     """payment_day(1~31)를 기준으로 오늘 이후 가장 가까운 상환일을 구한다.
-    31일처럼 없는 달도 있으니 28일로 안전하게 자른다."""
-    day = min(max(int(payment_day or 1), 1), 28)
+    31일처럼 그 달에 없는 날이면(예: 4월 31일) calendar.monthrange로 그 달의
+    실제 말일로 자른다 - 무조건 28일로 자르면 29~31일로 등록한 대출은 실제
+    상환일보다 최대 3일 이르게 계산된다."""
+    day = min(max(int(payment_day or 1), 1), 31)
     today = date.today()
-    candidate = date(today.year, today.month, day)
+    last_day = calendar.monthrange(today.year, today.month)[1]
+    candidate = date(today.year, today.month, min(day, last_day))
     if candidate <= today:
         y, m = today.year, today.month + 1
         if m > 12:
             y += 1
             m = 1
-        candidate = date(y, m, day)
+        last_day = calendar.monthrange(y, m)[1]
+        candidate = date(y, m, min(day, last_day))
     return candidate
 
 
@@ -1803,7 +1807,8 @@ def _add_month(d, day):
     if m > 12:
         y += 1
         m = 1
-    return date(y, m, min(max(int(day or 1), 1), 28))
+    last_day = calendar.monthrange(y, m)[1]
+    return date(y, m, min(max(int(day or 1), 1), last_day))
 
 
 def _installments_paid_before(start_date_str, payment_day, before_date):
@@ -1815,7 +1820,7 @@ def _installments_paid_before(start_date_str, payment_day, before_date):
         start = date.fromisoformat(start_date_str)
     except (ValueError, TypeError):
         return None
-    day = min(max(int(payment_day or 1), 1), 28)
+    day = min(max(int(payment_day or 1), 1), 31)
     cur = _add_month(start, day)
     count = 0
     while cur < before_date:
