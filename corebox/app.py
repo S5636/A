@@ -625,5 +625,48 @@ def download_document(doc_id):
         conn.close()
 
 
+def _reclassify_blank_documents():
+    """분류 로직이 바뀔 때마다 예전에 올려서 doc_type이 빈 채로 저장된
+    서류들(인식 실패했던 것들)을 사용자가 지우고 다시 올릴 필요 없이,
+    서버가 켜질 때 저장된 원본 파일로 자동으로 다시 분류해본다. 이미
+    doc_type이 있는(제대로 분류됐거나 직접 입력한) 서류는 손대지 않고,
+    다시 해봐도 못 알아내면 그대로 둔다."""
+    conn = models.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, file_name, original_name FROM documents "
+            "WHERE (doc_type IS NULL OR doc_type = '') AND file_name != ''"
+        ).fetchall()
+        for row in rows:
+            path = os.path.join(models.UPLOAD_DIR, row["file_name"])
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception:
+                continue
+            fname = row["original_name"] or row["file_name"]
+            text = _extract_text_from_file(fname, file_bytes)
+            if not text:
+                continue
+            detected_list = _classify_document(fname, text)
+            if not detected_list or not detected_list[0]["doc_type"]:
+                continue
+            d = detected_list[0]
+            conn.execute(
+                "UPDATE documents SET name=?, category=?, year=?, doc_type=?, income_amount=?, "
+                "taxable_income_amount=?, amount=?, tax_amount=?, issue_date=?, period=?, "
+                "period_label=? WHERE id=?",
+                (d["name"], d["category"], d["year"], d["doc_type"], d["income_amount"],
+                 d["taxable_income_amount"], d["amount"], d["tax_amount"], d["issue_date"],
+                 d["period"], d["period_label"], row["id"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+_reclassify_blank_documents()
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5051, debug=False)
