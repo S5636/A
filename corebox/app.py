@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """COREBOX - 자주 쓰는 서류를 한 곳에 모아두는 보관함. 연도/문서종류별로
 숫자가 있는 서류(소득금액증명 등)는 자동으로 연도별 집계표를 보여준다."""
+import hashlib
 import os
 import re
 import uuid
@@ -386,16 +387,28 @@ def create_document_auto():
         return jsonify({"error": "파일을 선택하세요."}), 400
 
     file_bytes = uploaded.read()
-    text = _extract_text_from_file(uploaded.filename, file_bytes)
-    detected_list = _classify_document(uploaded.filename, text)
-
-    ext = os.path.splitext(secure_filename(uploaded.filename))[1]
-    file_name = f"{uuid.uuid4().hex}{ext}"
-    with open(os.path.join(models.UPLOAD_DIR, file_name), "wb") as f:
-        f.write(file_bytes)
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
 
     conn = models.get_conn()
     try:
+        # 내용이 완전히 똑같은 파일이 이미 등록돼 있으면(같은 파일 실수로
+        # 두 번 올림) 또 등록해서 집계가 중복으로 합산되는 걸 막는다.
+        dup = conn.execute(
+            "SELECT name FROM documents WHERE file_hash = ? LIMIT 1", (file_hash,)
+        ).fetchone()
+        if dup:
+            return jsonify({
+                "error": f"이미 등록된 파일입니다 (\"{dup['name']}\"). 다른 파일이면 다시 확인해주세요."
+            }), 409
+
+        text = _extract_text_from_file(uploaded.filename, file_bytes)
+        detected_list = _classify_document(uploaded.filename, text)
+
+        ext = os.path.splitext(secure_filename(uploaded.filename))[1]
+        file_name = f"{uuid.uuid4().hex}{ext}"
+        with open(os.path.join(models.UPLOAD_DIR, file_name), "wb") as f:
+            f.write(file_bytes)
+
         max_order = conn.execute(
             "SELECT COALESCE(MAX(sort_order), -1) AS m FROM documents"
         ).fetchone()["m"]
@@ -405,8 +418,8 @@ def create_document_auto():
             cur = conn.execute(
                 """INSERT INTO documents (name, category, year, doc_type, income_amount,
                    taxable_income_amount, amount, tax_amount, issue_date, period, period_label,
-                   file_name, original_name, sort_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   file_name, original_name, file_hash, sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     detected["name"],
                     detected["category"],
@@ -421,6 +434,7 @@ def create_document_auto():
                     detected["period_label"] or "",
                     file_name,
                     uploaded.filename,
+                    file_hash,
                     max_order,
                 ),
             )

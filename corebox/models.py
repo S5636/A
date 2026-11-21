@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS documents (
     period_label TEXT DEFAULT '',    -- 목록 버튼에 보여줄 짧은 이름(예: "2025년 1기", "2020년")
     file_name TEXT DEFAULT '',       -- 실제 저장 파일명(uploads/ 안의 이름, 랜덤)
     original_name TEXT DEFAULT '',   -- 업로드할 때 원래 파일명(다운로드 시 이 이름으로 줌)
+    file_hash TEXT DEFAULT '',       -- 업로드 파일 내용의 sha256 - 같은 파일 중복 업로드 감지용
     memo TEXT DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -57,6 +58,7 @@ def init_db():
         _ensure_column(conn, "documents", "period", "period TEXT DEFAULT ''")
         _ensure_column(conn, "documents", "period_label", "period_label TEXT DEFAULT ''")
         _ensure_column(conn, "documents", "tax_amount", "tax_amount REAL")
+        _ensure_column(conn, "documents", "file_hash", "file_hash TEXT DEFAULT ''")
 
         # 2026-11: 자동분류 로직이 아직 "발급일자"보다 "과세기간"을 우선
         # 보게 고쳐지기 전에 올린 "22년1기" 부가세 과세표준증명이 발급일자
