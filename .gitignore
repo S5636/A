@@ -6,3 +6,5 @@ venv/
 ownerclan_profile/
 .setup_done
 card_benefit/card_benefit.db
+corebox/corebox.db
+corebox/uploads/

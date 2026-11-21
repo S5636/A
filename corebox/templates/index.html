@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>COREBOX</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <div class="app-header">
+      <div><span class="app-wordmark">CORE<span class="accent">BOX</span></span><span class="app-subtitle">서류 보관함</span></div>
+      <button class="btn primary" id="btn-add-doc">+ 서류 추가</button>
+    </div>
+
+    <div class="section-title">연도별 집계</div>
+    <div id="aggregate-area"></div>
+
+    <div class="section-title">서류 목록</div>
+    <div id="documents-area"></div>
+  </div>
+
+  <div class="modal-backdrop" id="doc-modal">
+    <div class="modal">
+      <h3 id="doc-modal-title">서류 추가</h3>
+      <label>서류명
+        <input type="text" id="doc-name" placeholder="예: 2020 소득금액증명">
+      </label>
+      <label>분류 (선택, 자유 입력)
+        <input type="text" id="doc-category" placeholder="예: 세금, 사업자 서류, 통장">
+      </label>
+      <label>연도 (선택)
+        <input type="number" id="doc-year" min="2000" max="2100" step="1" placeholder="예: 2020">
+      </label>
+      <label>집계용 문서 종류 (선택 - 적으면 연도별 집계표에 합산됨)
+        <input type="text" id="doc-type" placeholder="예: 소득금액증명">
+      </label>
+      <label>수입금액 (선택)
+        <input type="number" id="doc-income" min="0" step="1" placeholder="예: 48956333">
+      </label>
+      <label>소득금액 (선택)
+        <input type="number" id="doc-taxable" step="1" placeholder="예: 33323540">
+      </label>
+      <label>파일 (선택 - 비워두면 기존 파일 유지)
+        <input type="file" id="doc-file">
+      </label>
+      <label>메모 (선택)
+        <input type="text" id="doc-memo" placeholder="특이사항 등">
+      </label>
+      <div class="modal-actions">
+        <button class="btn secondary" id="doc-cancel">취소</button>
+        <button class="btn primary" id="doc-save">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
