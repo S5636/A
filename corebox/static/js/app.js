@@ -47,21 +47,33 @@
       area.innerHTML = `<div class="empty-hint">집계용 문서 종류를 적은 서류가 아직 없습니다.</div>`;
       return;
     }
-    const rows = state.aggregate.map((r) => `
-      <tr>
-        <td>${r.year}</td>
-        <td>${escapeHtml(r.doc_type)}</td>
-        <td>${r.income_total !== null ? fmt(r.income_total) : "-"}</td>
-        <td>${r.taxable_total !== null ? fmt(r.taxable_total) : "-"}</td>
-        <td>${r.amount_total !== null ? fmt(r.amount_total) : "-"}</td>
-      </tr>
-    `).join("");
-    area.innerHTML = `
-      <table class="agg-table">
-        <thead><tr><th>연도</th><th>문서 종류</th><th>수입금액</th><th>소득금액</th><th>금액</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    `;
+    // 같은 문서 종류끼리(부가세는 부가세끼리, 소득금액증명은 소득금액증명끼리)
+    // 표를 따로 만든다 - 연도가 섞인 한 표에 문서종류별로 끼어있으면 비교하기
+    // 불편하다는 지적 반영. 집계 결과는 이미 doc_type, year DESC 순으로 온다.
+    const byType = new Map();
+    for (const r of state.aggregate) {
+      if (!byType.has(r.doc_type)) byType.set(r.doc_type, []);
+      byType.get(r.doc_type).push(r);
+    }
+    let html = "";
+    for (const [docType, rows] of byType) {
+      const trs = rows.map((r) => `
+        <tr>
+          <td>${r.year}</td>
+          <td>${r.income_total !== null ? fmt(r.income_total) : "-"}</td>
+          <td>${r.taxable_total !== null ? fmt(r.taxable_total) : "-"}</td>
+          <td>${r.amount_total !== null ? fmt(r.amount_total) : "-"}</td>
+        </tr>
+      `).join("");
+      html += `
+        <div class="year-group-title">${escapeHtml(docType)}</div>
+        <table class="agg-table">
+          <thead><tr><th>연도</th><th>수입금액</th><th>소득금액</th><th>금액</th></tr></thead>
+          <tbody>${trs}</tbody>
+        </table>
+      `;
+    }
+    area.innerHTML = html;
   }
 
   function renderDocuments() {
@@ -70,17 +82,19 @@
       area.innerHTML = `<div class="empty-hint">아직 등록된 서류가 없습니다.</div>`;
       return;
     }
+    // 서류 목록도 집계표랑 같은 기준(문서 종류)으로 먼저 묶고, 그 안에서
+    // 연도순으로 보여준다 - 부가세끼리, 소득금액증명끼리 모여있게.
     const groups = new Map();
     for (const d of state.documents) {
-      const key = d.year ? String(d.year) : "연도 없음";
+      const key = d.doc_type || "기타";
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(d);
     }
     let html = "";
-    for (const [year, docs] of groups) {
-      html += `<div class="year-group-title">${escapeHtml(year)}</div>`;
+    for (const [docType, docs] of groups) {
+      html += `<div class="year-group-title">${escapeHtml(docType)}</div>`;
       for (const d of docs) {
-        const meta = [d.category, d.doc_type, d.period].filter(Boolean).join(" · ");
+        const meta = [d.year ? `${d.year}년` : "", d.period].filter(Boolean).join(" · ");
         const amounts = [
           d.income_amount !== null && d.income_amount !== undefined ? `수입 ${fmt(d.income_amount)}원` : "",
           d.taxable_income_amount !== null && d.taxable_income_amount !== undefined ? `소득 ${fmt(d.taxable_income_amount)}원` : "",

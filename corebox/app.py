@@ -249,7 +249,7 @@ def serialize_aggregate(conn):
            FROM documents
            WHERE doc_type != '' AND year IS NOT NULL
            GROUP BY year, doc_type
-           ORDER BY year DESC, doc_type"""
+           ORDER BY doc_type, year DESC"""
     ).fetchall()
     return [dict(r) for r in rows]
 
