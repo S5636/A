@@ -515,6 +515,38 @@ def init_db():
                 if not still_paid:
                     conn.execute("UPDATE loans SET paid_check_month = '' WHERE id = ?", (kb_loan["id"],))
 
+            # 사용자가 실제 계좌 거래내역 캡처("TAX" 항목)로 보내준 진짜
+            # 상환 내역을 복원한다. 이 대출도
+            # 등록된 monthly_payment(16만원)는 "매달 조금씩 달라져서 정확히
+            # 못 쓰니 대충 적어둔 값"이라고 사용자가 확인해준 플레이스홀더라
+            # 실제 상환액과 정확히 같을 필요가 없다 - 그래서 아까는 "16만원과
+            # 다르다"는 이유로 이 거래들을 무관하다고 잘못 판단했었다. 이자만
+            # 내는 방식으로 보고 원금 변동 없이 기록만 남긴다. (loan_id,
+            # paid_at, amount) 조합으로 이미 있는지 확인해서 여러 번 실행해도
+            # 안전함(멱등).
+            kb_loan_balance = conn.execute(
+                "SELECT current_balance FROM loans WHERE id = ?", (kb_loan["id"],)
+            ).fetchone()["current_balance"]
+            real_kb_payments = [
+                ("2026-08-31", 154236),
+                ("2026-09-30", 159378),
+                ("2026-10-30", 157194),
+            ]
+            for paid_at, amount in real_kb_payments:
+                exists = conn.execute(
+                    "SELECT 1 FROM loan_payments WHERE loan_id = ? AND paid_at = ? AND amount = ?",
+                    (kb_loan["id"], paid_at, amount),
+                ).fetchone()
+                if not exists:
+                    conn.execute(
+                        """INSERT INTO loan_payments (loan_id, paid_at, amount, balance_after, memo)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (
+                            kb_loan["id"], paid_at, amount, kb_loan_balance,
+                            "계좌 거래내역 캡처로 확인된 실제 상환 내역 복원(계좌문구 매칭 버그로 안 잡혀있던 내역)",
+                        ),
+                    )
+
         kakao_biz_loan = conn.execute(
             "SELECT id, principal, current_balance FROM loans WHERE name LIKE '%카카오%개인사업자%신용대출%'"
         ).fetchone()
