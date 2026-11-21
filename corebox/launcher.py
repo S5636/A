@@ -76,7 +76,7 @@ def open_browser_later():
         pass
 
 
-def self_update():
+def self_update(quiet=False):
     """매번 업데이트 스크립트를 따로 받는 대신, 꺼졌다 켜지기만 하면
     깃허브에 올라온 최신 코드를 자동으로 받아온다. corebox.db(실제 데이터)랑
     uploads/(올려둔 서류 파일)는 절대 건드리지 않고, 코드 파일만 내용이
@@ -111,9 +111,27 @@ def self_update():
                 updated.append(rel)
             except Exception:
                 pass
-    if updated:
+    if updated and not quiet:
         print(f"최신 버전으로 자동 업데이트됨: {', '.join(updated)}")
         print()
+    return updated
+
+
+def _update_watcher():
+    """아무도 START.bat을 다시 누르지 않아도 되게, 켜져 있는 동안 몇 분마다
+    깃허브에 새 코드가 올라왔는지 조용히 확인한다. 바뀐 게 있으면 지금 켜진
+    서버를 그 자리에서 자동으로 재시작한다(db/uploads는 안 건드림)."""
+    while True:
+        time.sleep(120)
+        try:
+            updated = self_update(quiet=True)
+        except Exception:
+            updated = []
+        if updated:
+            print()
+            print(f"[자동 업데이트] 새 코드 발견: {', '.join(updated)} - 서버 재시작합니다.")
+            os.environ["CBX_WAS_RUNNING"] = "1"
+            os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 def _requirements_hash():
@@ -172,6 +190,7 @@ def main():
 
     if os.environ.get("CBX_WAS_RUNNING") != "1":
         threading.Thread(target=open_browser_later, daemon=True).start()
+    threading.Thread(target=_update_watcher, daemon=True).start()
 
     import app  # requirements 설치가 끝난 뒤에 import
     app.app.run(host="0.0.0.0", port=PORT, debug=False)

@@ -80,7 +80,7 @@ def open_browser_later():
         pass
 
 
-def self_update():
+def self_update(quiet=False):
     """매번 update.py를 받아서 직접 실행하는 대신, 꺼졌다 켜지기만 하면
     깃허브에 올라온 최신 코드를 자동으로 받아오게 한다(옆방 마진 대시보드
     처럼). card_benefit.db(실제 데이터)는 절대 건드리지 않고, 코드
@@ -115,9 +115,27 @@ def self_update():
                 updated.append(rel)
             except Exception:
                 pass
-    if updated:
+    if updated and not quiet:
         print(f"최신 버전으로 자동 업데이트됨: {', '.join(updated)}")
         print()
+    return updated
+
+
+def _update_watcher():
+    """아무도 START.bat을 다시 누르지 않아도 되게, 켜져 있는 동안 몇 분마다
+    깃허브에 새 코드가 올라왔는지 조용히 확인한다. 바뀐 게 있으면 지금 켜진
+    서버를 그 자리에서 자동으로 재시작한다(db는 안 건드림)."""
+    while True:
+        time.sleep(120)
+        try:
+            updated = self_update(quiet=True)
+        except Exception:
+            updated = []
+        if updated:
+            print()
+            print(f"[자동 업데이트] 새 코드 발견: {', '.join(updated)} - 서버 재시작합니다.")
+            os.environ["CBC_WAS_RUNNING"] = "1"
+            os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 def _requirements_hash():
@@ -179,6 +197,7 @@ def main():
     # open, so skip piling on yet another new tab every single restart.
     if os.environ.get("CBC_WAS_RUNNING") != "1":
         threading.Thread(target=open_browser_later, daemon=True).start()
+    threading.Thread(target=_update_watcher, daemon=True).start()
 
     import app  # requirements 설치가 끝난 뒤에 import
     app.start_stock_monitor()
