@@ -2,6 +2,7 @@
 """COREBOX - 자주 쓰는 서류를 한 곳에 모아두는 보관함. 연도/문서종류별로
 숫자가 있는 서류(소득금액증명 등)는 자동으로 연도별 집계표를 보여준다."""
 import hashlib
+import json
 import os
 import re
 import uuid
@@ -275,6 +276,41 @@ def _extract_jongso_amounts(text):
     return income, tax_due
 
 
+def _extract_wage_payers(text):
+    """종합소득세 신고서의 "❽ 근로소득ㆍ연금소득ㆍ기타소득명세서" 표에서
+    급여를 준 회사 이름과 금액을 회사별로 뽑는다. 표가 "회사명" 줄 다음에
+    "51 <일련번호> <총수입금액> <필요경비> <소득금액> ..." 줄이 오고
+    그 다음 줄에 사업자등록번호가 오는 구조로 반복돼서(51은 근로소득
+    코드), 그 숫자 줄을 기준으로 바로 위의 회사명 줄을 찾는다. 연금/
+    기타소득(다른 코드)은 아직 안 보여달라고 한 적이 없어서 근로소득만."""
+    start = text.find("근로소득")
+    if start < 0:
+        return []
+    end = text.find("종합소득금액 및 결손금", start)
+    section = text[start:end] if end > start else text[start:start + 3000]
+    lines = section.split("\n")
+    payers = []
+    for i, line in enumerate(lines):
+        m = re.match(r"\s*51\s+\d+\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)", line)
+        if not m:
+            continue
+        name = ""
+        for j in range(i - 1, max(i - 4, -1), -1):
+            candidate = lines[j].strip()
+            if candidate and not re.match(r"^[\d\-() ]+$", candidate):
+                name = candidate
+                break
+        if not name:
+            continue
+        try:
+            total = float(m.group(1).replace(",", ""))
+            taxable = float(m.group(3).replace(",", ""))
+        except ValueError:
+            continue
+        payers.append({"name": name, "income": total, "taxable": taxable})
+    return payers
+
+
 def _period_label_from_date(start_date):
     """날짜 하나(기간 시작일)로 짧은 표시용 이름을 만든다 - "25년 1기"처럼
     연도는 뒷 2자리만, 반기(1~6월=1기, 7~12월=2기)로 끊는다."""
@@ -362,6 +398,7 @@ def _classify_document(filename, text):
                     "taxable_business": None,
                     "taxable_wage": None,
                     "taxable_other": None,
+                    "income_sources": "",
                 }
                 for row in vat_rows
             ]
@@ -381,6 +418,7 @@ def _classify_document(filename, text):
     taxable_business = taxable_wage = taxable_other = None
     amount = None
     tax_amount = None
+    income_sources = ""
     if doc_type == "소득금액증명":
         income_row = _extract_income_row(text, "수입금액")
         if income_row:
@@ -396,6 +434,9 @@ def _classify_document(filename, text):
             )
     elif doc_type == "종합소득세 신고서":
         amount, tax_amount = _extract_jongso_amounts(text)
+        payers = _extract_wage_payers(text)
+        if payers:
+            income_sources = json.dumps(payers, ensure_ascii=False)
     else:
         amount = _extract_generic_amount(doc_type, text)
     period_label = _period_label_from_date(period.split("~")[0]) if period else (f"{str(year)[2:]}년" if year else "")
@@ -423,6 +464,7 @@ def _classify_document(filename, text):
         "taxable_business": taxable_business,
         "taxable_wage": taxable_wage,
         "taxable_other": taxable_other,
+        "income_sources": income_sources,
     }]
 
 
@@ -552,10 +594,10 @@ def create_document_auto():
             cur = conn.execute(
                 """INSERT INTO documents (name, category, year, doc_type, income_amount,
                    taxable_income_amount, income_business, income_wage, income_other,
-                   taxable_business, taxable_wage, taxable_other, amount, tax_amount,
-                   issue_date, period, period_label, file_name, original_name, file_hash,
-                   sort_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   taxable_business, taxable_wage, taxable_other, income_sources, amount,
+                   tax_amount, issue_date, period, period_label, file_name, original_name,
+                   file_hash, sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     detected["name"],
                     detected["category"],
@@ -569,6 +611,7 @@ def create_document_auto():
                     detected["taxable_business"],
                     detected["taxable_wage"],
                     detected["taxable_other"],
+                    detected.get("income_sources") or "",
                     detected["amount"],
                     detected.get("tax_amount"),
                     detected["issue_date"] or "",
@@ -779,13 +822,13 @@ def _reclassify_blank_documents():
             conn.execute(
                 "UPDATE documents SET name=?, category=?, year=?, doc_type=?, income_amount=?, "
                 "taxable_income_amount=?, income_business=?, income_wage=?, income_other=?, "
-                "taxable_business=?, taxable_wage=?, taxable_other=?, amount=?, tax_amount=?, "
-                "issue_date=?, period=?, period_label=? WHERE id=?",
+                "taxable_business=?, taxable_wage=?, taxable_other=?, income_sources=?, amount=?, "
+                "tax_amount=?, issue_date=?, period=?, period_label=? WHERE id=?",
                 (d["name"], d["category"], d["year"], d["doc_type"], d["income_amount"],
                  d["taxable_income_amount"], d["income_business"], d["income_wage"],
                  d["income_other"], d["taxable_business"], d["taxable_wage"], d["taxable_other"],
-                 d["amount"], d["tax_amount"], d["issue_date"], d["period"], d["period_label"],
-                 row["id"]),
+                 d.get("income_sources") or "", d["amount"], d["tax_amount"], d["issue_date"],
+                 d["period"], d["period_label"], row["id"]),
             )
         conn.commit()
     finally:
@@ -829,6 +872,41 @@ def _backfill_income_breakdown():
         conn.close()
 
 
+def _backfill_wage_payers():
+    """근로소득 지급자(회사)별 내역을 나중에 추가해서, 그 전에 이미
+    등록된 종합소득세 신고서는 안 채워져 있다. 그런 서류만 찾아서
+    income_sources만 채운다(회사가 없으면 빈 채로 둠 - 매번 다시 OCR
+    돌리는 게 낭비라 재시도는 안 함)."""
+    conn = models.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, file_name, original_name FROM documents "
+            "WHERE doc_type = '종합소득세 신고서' AND file_name != '' "
+            "AND (income_sources IS NULL OR income_sources = '')"
+        ).fetchall()
+        for row in rows:
+            path = os.path.join(models.UPLOAD_DIR, row["file_name"])
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception:
+                continue
+            fname = row["original_name"] or row["file_name"]
+            text = _extract_text_from_file(fname, file_bytes)
+            if not text:
+                continue
+            payers = _extract_wage_payers(text)
+            if not payers:
+                continue
+            conn.execute(
+                "UPDATE documents SET income_sources=? WHERE id=?",
+                (json.dumps(payers, ensure_ascii=False), row["id"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _strip_year_from_single_page_docs():
     """사업자등록증처럼 한 장짜리 보관용 서류(_NO_YEAR_DOC_TYPES)에
     실수로 연도가 붙어서 등록된 게 있으면 지운다 - 발급일자의 해였을
@@ -856,6 +934,7 @@ def _strip_year_from_single_page_docs():
 
 _reclassify_blank_documents()
 _backfill_income_breakdown()
+_backfill_wage_payers()
 _strip_year_from_single_page_docs()
 
 

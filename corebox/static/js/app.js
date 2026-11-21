@@ -57,6 +57,21 @@
     return `<span class="issue-date-tag" style="${stale ? "color:var(--critical);font-weight:700;" : ""}">${escapeHtml(issueDate)}${stale ? ` (${days}일 지남)` : ""}</span>`;
   }
 
+  // 종합소득세 신고서는 급여를 준 회사가 여러 곳일 수 있어서(근로소득
+  // 지급자별 명세), "어떤 회사에서 얼마"를 바로 볼 수 있게 짧게 보여준다.
+  function incomeSourcesLine(incomeSourcesJson) {
+    if (!incomeSourcesJson) return "";
+    let payers;
+    try {
+      payers = JSON.parse(incomeSourcesJson);
+    } catch {
+      return "";
+    }
+    if (!Array.isArray(payers) || !payers.length) return "";
+    const parts = payers.map((p) => `${escapeHtml(p.name)} ${fmt(p.income)}`);
+    return `<div class="income-sources">${parts.join(" · ")}</div>`;
+  }
+
   async function api(url, options) {
     const resp = await fetch(url, options);
     if (!resp.ok) {
@@ -145,6 +160,7 @@
             <button class="icon-btn edit-doc" data-id="${d.id}" title="수정">✏️</button>
             <button class="icon-btn delete-doc" data-id="${d.id}" title="삭제">🗑️</button>
           </div>
+          ${incomeSourcesLine(d.income_sources)}
         `;
       }).join("");
       html += `

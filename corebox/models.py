@@ -67,6 +67,9 @@ def init_db():
         _ensure_column(conn, "documents", "taxable_business", "taxable_business REAL")
         _ensure_column(conn, "documents", "taxable_wage", "taxable_wage REAL")
         _ensure_column(conn, "documents", "taxable_other", "taxable_other REAL")
+        # 종합소득세 신고서의 근로소득 지급자(회사)별 내역 - 회사 수가
+        # 사람마다 다르니 JSON 배열(문자열)로 저장: [{"name":..,"income":..,"taxable":..}, ...]
+        _ensure_column(conn, "documents", "income_sources", "income_sources TEXT DEFAULT ''")
 
         # 2026-11: 자동분류 로직이 아직 "발급일자"보다 "과세기간"을 우선
         # 보게 고쳐지기 전에 올린 "22년1기" 부가세 과세표준증명이 발급일자

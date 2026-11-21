@@ -165,6 +165,13 @@ body { padding-bottom: 40px; }
 }
 .period-btn:hover { background: var(--surface-3); }
 .issue-date-tag { color: var(--text-muted); font-size: 11px; margin: 0 2px; }
+.income-sources {
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 0 2px 4px;
+  white-space: nowrap;
+  overflow-x: auto;
+}
 
 /* 칸 수가 많아지면(소득금액증명 세부 항목 등) 줄바꿈으로 찌그러뜨리지
    말고 가로 스크롤로 보여준다 - 숫자가 줄바꿈되면 표가 알아보기 힘들다. */
