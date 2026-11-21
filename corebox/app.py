@@ -127,17 +127,33 @@ def _extract_year(text, filename):
     return None
 
 
-_DATE_RE = r"(20\d{2})[.\-년]\s*(\d{1,2})[.\-월]\s*(\d{1,2})"
+_DATE_RE = r"(20\d{2})\s*[.\-년]\s*(\d{1,2})\s*[.\-월]\s*(\d{1,2})\s*일?"
 
 
 def _extract_date_near_label(text, labels):
-    """라벨(예: "발급일자") 뒤 20자 이내에 나오는 "2023.01.02"/"2023년
-    1월 2일" 모양 날짜를 찾아 YYYY-MM-DD로 돌려준다. 못 찾으면 None."""
+    """라벨(예: "발급일자") 뒤 20자 이내에 나오는 "2023.01.02"/"2023 년
+    1 월 2 일"(국세청 서류는 숫자랑 년/월/일 사이에 띄어쓰기가 들어가는
+    경우가 많음) 모양 날짜를 찾아 YYYY-MM-DD로 돌려준다. 못 찾으면 None."""
     for label in labels:
         m = re.search(re.escape(label) + r"\D{0,20}?" + _DATE_RE, text)
         if m:
             return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
     return None
+
+
+def _extract_issue_date_fallback(text, exclude_dates=()):
+    """"발급일자" 같은 라벨 없이 그냥 세무서장 직인 옆에 날짜만 단독으로
+    찍히는 서류가 있다(부가가치세과세표준증명 등). 그런 경우 문서 안의
+    모든 날짜 중 과세기간 표에 이미 쓰인 날짜(exclude_dates)가 아니면서
+    가장 마지막에 나오는 날짜를 발급일로 본다 - 보통 서류 맨 끝에
+    "증명합니다" 뒤에 발급일, 발급기관 순서로 나오기 때문."""
+    last = None
+    for m in re.finditer(_DATE_RE, text):
+        date_str = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+        if date_str in exclude_dates:
+            continue
+        last = date_str
+    return last
 
 
 def _extract_period(text):
@@ -227,6 +243,11 @@ def _classify_document(filename, text):
     if doc_type == "부가가치세 과세표준증명":
         vat_rows = _extract_vat_period_rows(text)
         if vat_rows:
+            if not issue_date:
+                used_dates = set()
+                for row in vat_rows:
+                    used_dates.update(row["period"].split("~"))
+                issue_date = _extract_issue_date_fallback(text, used_dates)
             return [
                 {
                     "name": f"{row['period_label']} {doc_type}",
@@ -245,6 +266,9 @@ def _classify_document(filename, text):
 
     year = _extract_year(text, filename)
     period = _extract_period(text)
+    if not issue_date:
+        used_dates = set(period.split("~")) if period else set()
+        issue_date = _extract_issue_date_fallback(text, used_dates)
     income_amount = None
     taxable_income_amount = None
     amount = None

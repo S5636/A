@@ -12,6 +12,25 @@
     }[c]));
   }
 
+  // 문서 종류마다 실제로 있는 항목만 표/목록에 보여준다 - 부가세에는
+  // 수입금액/소득금액 자체가 없고, 소득금액증명에는 "과세표준액" 같은
+  // 게 없다. 목록에 없는 종류는 기본값(금액 하나)으로 처리.
+  const DOC_TYPE_COLUMNS = {
+    "소득금액증명": [
+      { key: "income_total", itemKey: "income_amount", label: "수입금액" },
+      { key: "taxable_total", itemKey: "taxable_income_amount", label: "소득금액" },
+    ],
+    "부가가치세 과세표준증명": [
+      { key: "amount_total", itemKey: "amount", label: "과세표준액" },
+    ],
+    "부가가치세 신고서": [
+      { key: "amount_total", itemKey: "amount", label: "과세표준액" },
+    ],
+  };
+  function columnsForType(docType) {
+    return DOC_TYPE_COLUMNS[docType] || [{ key: "amount_total", itemKey: "amount", label: "금액" }];
+  }
+
   function issueDateBadge(issueDate) {
     // 발급일 기준 서류, 보통 한 달 지나면 제출처에서 안 받아주므로
     // 30일 넘으면 눈에 띄게 경고 표시(평소엔 조용히 발급일만 작게 표시).
@@ -57,18 +76,17 @@
     }
     let html = "";
     for (const [docType, rows] of byType) {
+      const cols = columnsForType(docType);
       const trs = rows.map((r) => `
         <tr>
           <td>${r.year}</td>
-          <td>${r.income_total !== null ? fmt(r.income_total) : "-"}</td>
-          <td>${r.taxable_total !== null ? fmt(r.taxable_total) : "-"}</td>
-          <td>${r.amount_total !== null ? fmt(r.amount_total) : "-"}</td>
+          ${cols.map((c) => `<td>${r[c.key] !== null ? fmt(r[c.key]) : "-"}</td>`).join("")}
         </tr>
       `).join("");
       html += `
         <div class="year-group-title">${escapeHtml(docType)}</div>
         <table class="agg-table">
-          <thead><tr><th>연도</th><th>수입금액</th><th>소득금액</th><th>금액</th></tr></thead>
+          <thead><tr><th>연도</th>${cols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}</tr></thead>
           <tbody>${trs}</tbody>
         </table>
       `;
@@ -96,14 +114,19 @@
     let html = "";
     for (const [docType, docs] of groups) {
       const isOpen = openDocTypeGroups.has(docType);
+      const cols = columnsForType(docType);
       const btns = docs.map((d) => {
         const label = d.period_label || (d.year ? `${d.year}년` : d.name);
         const issueBadge = issueDateBadge(d.issue_date);
+        const amountText = cols
+          .map((c) => (d[c.itemKey] !== null && d[c.itemKey] !== undefined ? `${c.label} ${fmt(d[c.itemKey])}원` : ""))
+          .filter(Boolean).join(" / ");
         return `
           <div class="period-btn-wrap">
             ${d.file_name
               ? `<a class="period-btn" href="/api/documents/${d.id}/download" title="${escapeHtml(d.name)}">${escapeHtml(label)}</a>`
               : `<span class="period-btn" style="opacity:.6;" title="파일 없음">${escapeHtml(label)}</span>`}
+            ${amountText ? `<span class="issue-date-tag">${escapeHtml(amountText)}</span>` : ""}
             ${issueBadge}
             <button class="icon-btn edit-doc" data-id="${d.id}" title="수정">✏️</button>
             <button class="icon-btn delete-doc" data-id="${d.id}" title="삭제">🗑️</button>
