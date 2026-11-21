@@ -226,10 +226,9 @@
     render();
   });
 
-  const autoUploadFile = document.getElementById("auto-upload-file");
   const autoUploadLog = document.getElementById("auto-upload-log");
-  autoUploadFile.addEventListener("change", async () => {
-    const files = Array.from(autoUploadFile.files || []);
+  async function handleAutoUpload(inputEl) {
+    const files = Array.from(inputEl.files || []);
     if (!files.length) return;
 
     // 여러 장 골라도 서버 OCR이 한 번에 하나씩 처리하도록 짜여있어서
@@ -267,8 +266,10 @@
       lines[lines.length - 1] = `<div class="upload-log-item">${prefix}${escapeHtml(file.name)} - ${summary}</div>`;
       renderLog();
     }
-    autoUploadFile.value = "";
-  });
+    inputEl.value = "";
+  }
+  document.getElementById("auto-upload-image").addEventListener("change", (e) => handleAutoUpload(e.target));
+  document.getElementById("auto-upload-pdf").addEventListener("change", (e) => handleAutoUpload(e.target));
 
   loadFull();
 })();
