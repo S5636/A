@@ -1219,12 +1219,22 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
             if elapsed - last_wait_log >= 6:
                 L(f'  - {elapsed}초 경과, 하위 요소 {cnt}개 확인됨')
                 last_wait_log = elapsed
-            if cnt > 20:
+            # 요소 개수(cnt)만으로 "준비됐는지"를 판단하면 안 된다는 게
+            # 나중에(운송장수집 기능 조사 중) 드러났다 - 다팔자 화면이 멀쩡히
+            # 동작 중일 때도 전체 글자가 블롭 문자열 하나로 뭉쳐 노출돼서
+            # 요소 수가 5개 안팎으로 잡히는 경우가 실제로 있었다. 그 결과
+            # "다팔자가 아직 바쁜 상태"라는 오판이 하루 종일 반복되는 사고로
+            # 이어졌다(사용자 확인: 같은 날 09:49~12:39까지 거의 매 주기
+            # 이 오류만 반복됨 - 다팔자가 몇 시간째 계속 바쁠 리는 없다).
+            # 요소 수와 무관하게, 블롭 안에든 뭐든 '주문관리' 글자를 실제로
+            # 찾을 수 있으면(화면이 뭔가 뜬 것) 준비된 것으로 본다.
+            ready_by_content = _find_smallest_text_match(win, '주문관리', None, descendants=initial_descendants) is not None
+            if cnt > 20 or ready_by_content:
                 # 요소가 늘어나서 화면이 그려지긴 했어도, 그게 자동동기화
                 # 토스트 자체일 수 있다 - 있으면 바로 닫아서 뒤 단계가
                 # 막히지 않게 한다.
                 _dismiss_sync_toast(win, L, descendants=initial_descendants)
-                L(f'  - {elapsed}초 경과, 하위 요소 {cnt}개로 늘어남 - 준비 완료.')
+                L(f'  - {elapsed}초 경과, 하위 요소 {cnt}개(준비됨 신호: 개수={cnt > 20}, 내용={ready_by_content}) - 준비 완료.')
                 break
         visible_now = _dump_controls(win, descendants=initial_descendants)
         L(f'창을 찾은 직후 화면에 보이는 글자들 (참고용): {visible_now}')
@@ -1232,9 +1242,11 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
         L(f'창 클래스명: {cls} / 하위 요소 총 {desc_count}개')
         L(f'하위 요소 구조(클래스/타입/텍스트, 최대 80개): {structure}')
 
-        if desc_count <= 20:
-            # 300초(5분)를 다 기다려도 창 내용이 안 늘어났다 - 다팔자 자체가
-            # 아직 자동동기화 등으로 바쁜 상태로 보인다. 이 상태로 계속
+        ready_by_content = _find_smallest_text_match(win, '주문관리', None, descendants=initial_descendants) is not None
+        if desc_count <= 20 and not ready_by_content:
+            # 300초(5분)를 다 기다려도 창 내용이 안 늘어났고, '주문관리'
+            # 글자도 블롭 안 어디에도 없다 - 그제서야 다팔자 자체가 아직
+            # 자동동기화 등으로 바쁜 상태로 본다. 이 상태로 계속
             # 진행하면 '주문관리'/'1개월' 버튼을 못 찾는 실패로 이어질 게
             # 뻔하니, 여기서 명확한 이유를 남기고 바로 멈춘다 - 다팔자가
             # 자체 작업을 끝낼 때까지 잠깐 기다렸다가 다시 시도해달라고
