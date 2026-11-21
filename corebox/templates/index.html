@@ -2,14 +2,22 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>COREBOX</title>
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="icon" href="{{ url_for('static', filename='img/icon-192.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
+  <meta name="theme-color" content="#0a0f1c">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
   <div class="app-shell">
     <div class="app-header">
-      <div><span class="app-wordmark">CORE<span class="accent">BOX</span></span><span class="app-subtitle">서류 보관함</span></div>
+      <div class="app-title">
+        <img src="{{ url_for('static', filename='img/logo.png') }}" class="app-logo" alt="">
+        <img src="{{ url_for('static', filename='img/wordmark.png') }}" class="app-wordmark" alt="COREBOX">
+        <span class="app-subtitle">서류 보관함</span>
+      </div>
       <div style="display:flex; gap:6px;">
         <label class="btn primary" for="auto-upload-file" style="margin:0;">📄 파일 올리기(자동 분류)</label>
         <input type="file" id="auto-upload-file" accept=".pdf,.jpg,.jpeg,.png,.webp,.bmp" multiple style="display:none;">
@@ -40,11 +48,20 @@
       <label>집계용 문서 종류 (선택 - 적으면 연도별 집계표에 합산됨)
         <input type="text" id="doc-type" placeholder="예: 소득금액증명">
       </label>
-      <label>수입금액 (선택)
+      <label>발급일 (선택 - 제출 유효기간 확인용, 보통 한 달)
+        <input type="date" id="doc-issue-date">
+      </label>
+      <label>기간 (선택, 자유 입력 - 과세기간 등)
+        <input type="text" id="doc-period" placeholder="예: 2022-01-01~2022-06-30">
+      </label>
+      <label>수입금액 (선택, 소득금액증명용)
         <input type="number" id="doc-income" min="0" step="1" placeholder="예: 48956333">
       </label>
-      <label>소득금액 (선택)
+      <label>소득금액 (선택, 소득금액증명용)
         <input type="number" id="doc-taxable" step="1" placeholder="예: 33323540">
+      </label>
+      <label>금액 (선택, 그 외 서류용)
+        <input type="number" id="doc-amount" step="1" placeholder="예: 150000000">
       </label>
       <label>파일 (선택 - 비워두면 기존 파일 유지)
         <input type="file" id="doc-file">

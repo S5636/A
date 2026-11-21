@@ -29,6 +29,12 @@ _UPDATE_FILES = [
     "START.bat",
     "static/css/style.css",
     "static/js/app.js",
+    "static/img/logo.png",
+    "static/img/wordmark.png",
+    "static/img/icon-192.png",
+    "static/img/icon-512.png",
+    "static/img/apple-touch-icon.png",
+    "static/manifest.json",
     "templates/index.html",
     "requirements.txt",
 ]

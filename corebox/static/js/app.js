@@ -12,6 +12,15 @@
     }[c]));
   }
 
+  function issueDateBadge(issueDate) {
+    // 발급일 기준 서류, 보통 한 달 지나면 제출처에서 안 받아주므로
+    // 30일 넘으면 눈에 띄게 경고 표시.
+    if (!issueDate) return "";
+    const days = Math.floor((Date.now() - new Date(issueDate).getTime()) / 86400000);
+    const stale = days > 30;
+    return `<div class="doc-meta" style="${stale ? "color:var(--critical);font-weight:700;" : ""}">발급일 ${escapeHtml(issueDate)}${stale ? ` (발급 ${days}일 지남 - 재발급 필요할 수 있음)` : ""}</div>`;
+  }
+
   async function api(url, options) {
     const resp = await fetch(url, options);
     if (!resp.ok) {
@@ -44,11 +53,12 @@
         <td>${escapeHtml(r.doc_type)}</td>
         <td>${r.income_total !== null ? fmt(r.income_total) : "-"}</td>
         <td>${r.taxable_total !== null ? fmt(r.taxable_total) : "-"}</td>
+        <td>${r.amount_total !== null ? fmt(r.amount_total) : "-"}</td>
       </tr>
     `).join("");
     area.innerHTML = `
       <table class="agg-table">
-        <thead><tr><th>연도</th><th>문서 종류</th><th>수입금액 합계</th><th>소득금액 합계</th></tr></thead>
+        <thead><tr><th>연도</th><th>문서 종류</th><th>수입금액</th><th>소득금액</th><th>금액</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     `;
@@ -70,17 +80,20 @@
     for (const [year, docs] of groups) {
       html += `<div class="year-group-title">${escapeHtml(year)}</div>`;
       for (const d of docs) {
-        const meta = [d.category, d.doc_type].filter(Boolean).join(" · ");
+        const meta = [d.category, d.doc_type, d.period].filter(Boolean).join(" · ");
         const amounts = [
           d.income_amount !== null && d.income_amount !== undefined ? `수입 ${fmt(d.income_amount)}원` : "",
           d.taxable_income_amount !== null && d.taxable_income_amount !== undefined ? `소득 ${fmt(d.taxable_income_amount)}원` : "",
+          d.amount !== null && d.amount !== undefined ? `금액 ${fmt(d.amount)}원` : "",
         ].filter(Boolean).join(" / ");
+        const issueBadge = issueDateBadge(d.issue_date);
         html += `
           <div class="card">
             <div class="doc-row">
               <div class="doc-main">
                 <div class="doc-name">${escapeHtml(d.name)}</div>
                 ${meta ? `<div class="doc-meta">${escapeHtml(meta)}</div>` : ""}
+                ${issueBadge ? issueBadge : ""}
                 ${amounts ? `<div class="doc-amounts">${amounts}</div>` : ""}
               </div>
               <div class="doc-actions">
@@ -114,8 +127,11 @@
     document.getElementById("doc-category").value = item ? (item.category || "") : "";
     document.getElementById("doc-year").value = item && item.year ? item.year : "";
     document.getElementById("doc-type").value = item ? (item.doc_type || "") : "";
+    document.getElementById("doc-issue-date").value = item ? (item.issue_date || "") : "";
+    document.getElementById("doc-period").value = item ? (item.period || "") : "";
     document.getElementById("doc-income").value = item && item.income_amount !== null && item.income_amount !== undefined ? item.income_amount : "";
     document.getElementById("doc-taxable").value = item && item.taxable_income_amount !== null && item.taxable_income_amount !== undefined ? item.taxable_income_amount : "";
+    document.getElementById("doc-amount").value = item && item.amount !== null && item.amount !== undefined ? item.amount : "";
     document.getElementById("doc-file").value = "";
     document.getElementById("doc-memo").value = item ? (item.memo || "") : "";
     modal.classList.add("open");
@@ -130,8 +146,11 @@
     formData.append("category", document.getElementById("doc-category").value.trim());
     formData.append("year", document.getElementById("doc-year").value);
     formData.append("doc_type", document.getElementById("doc-type").value.trim());
+    formData.append("issue_date", document.getElementById("doc-issue-date").value);
+    formData.append("period", document.getElementById("doc-period").value.trim());
     formData.append("income_amount", document.getElementById("doc-income").value);
     formData.append("taxable_income_amount", document.getElementById("doc-taxable").value);
+    formData.append("amount", document.getElementById("doc-amount").value);
     formData.append("memo", document.getElementById("doc-memo").value.trim());
     const file = document.getElementById("doc-file").files[0];
     if (file) formData.append("file", file);
@@ -178,7 +197,7 @@
 
       const d = data.detected || {};
       const summary = d.doc_type
-        ? `${escapeHtml(d.name)}(으)로 분류됨${d.year ? ` · ${d.year}년` : ""}`
+        ? `${escapeHtml(d.name)}(으)로 분류됨${d.year ? ` · ${d.year}년` : ""}${d.issue_date ? ` · 발급 ${d.issue_date}` : ""}`
         : (data.text_found ? "글자는 읽었지만 어떤 서류인지 분류 못함 - 직접 수정 필요" : "글자를 못 읽음(스캔 PDF 등) - 직접 수정 필요");
       lines[lines.length - 1] = `<div class="upload-log-item">${prefix}${escapeHtml(file.name)} - ${summary}</div>`;
       renderLog();

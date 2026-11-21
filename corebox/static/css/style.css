@@ -60,9 +60,10 @@ body { padding-bottom: 40px; }
   border-bottom: 1px solid var(--border);
 }
 
-.app-wordmark { font-size: 20px; font-weight: 800; letter-spacing: 0.5px; }
-.app-wordmark .accent { color: var(--series-1); }
-.app-subtitle { color: var(--text-muted); font-size: 12px; margin-left: 6px; }
+.app-title { display: flex; align-items: center; gap: 8px; }
+.app-logo { height: 26px; width: auto; flex-shrink: 0; }
+.app-wordmark { height: 26px; width: auto; flex-shrink: 0; }
+.app-subtitle { color: var(--text-muted); font-size: 11px; margin-left: 2px; }
 
 .btn {
   display: inline-flex;

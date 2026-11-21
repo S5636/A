@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS documents (
     doc_type TEXT DEFAULT '',        -- 집계용 문서 종류(예: "소득금액증명") - 비어있으면 집계표에 안 잡힘
     income_amount REAL,              -- 수입금액(해당 없으면 NULL)
     taxable_income_amount REAL,      -- 소득금액(해당 없으면 NULL)
+    amount REAL,                     -- 소득금액증명 외 서류의 금액(과세표준액 등, 해당 없으면 NULL)
+    issue_date TEXT DEFAULT '',      -- 발급일(YYYY-MM-DD) - 제출 유효기간(보통 한 달) 확인용
+    period TEXT DEFAULT '',          -- 서류가 다루는 기간(과세기간 등, "YYYY-MM-DD~YYYY-MM-DD") - 발급일과 별개
     file_name TEXT DEFAULT '',       -- 실제 저장 파일명(uploads/ 안의 이름, 랜덤)
     original_name TEXT DEFAULT '',   -- 업로드할 때 원래 파일명(다운로드 시 이 이름으로 줌)
     memo TEXT DEFAULT '',
@@ -47,6 +50,25 @@ def init_db():
     conn = get_conn()
     try:
         conn.executescript(SCHEMA)
+        _ensure_column(conn, "documents", "amount", "amount REAL")
+        _ensure_column(conn, "documents", "issue_date", "issue_date TEXT DEFAULT ''")
+        _ensure_column(conn, "documents", "period", "period TEXT DEFAULT ''")
+
+        # 2026-11: 자동분류 로직이 아직 "발급일자"보다 "과세기간"을 우선
+        # 보게 고쳐지기 전에 올린 "22년1기" 부가세 과세표준증명이 발급일자
+        # (2023.01.02)의 연도를 잘못 집어서 2023년으로 등록됐다. 파일명으로
+        # 특정해서 바로잡는다 - 이미 고쳐진 뒤에는 조건에 안 걸려서 다시
+        # 실행해도 안전함(멱등).
+        bad_vat_doc = conn.execute(
+            "SELECT id FROM documents WHERE original_name LIKE '%22년1기%' AND year = 2023"
+        ).fetchone()
+        if bad_vat_doc:
+            conn.execute(
+                "UPDATE documents SET year = 2022, name = '2022 부가가치세 과세표준증명', "
+                "period = '2022-01-01~2022-06-30', issue_date = '2023-01-02' WHERE id = ?",
+                (bad_vat_doc["id"],),
+            )
+
         conn.commit()
     finally:
         conn.close()

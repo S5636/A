@@ -79,6 +79,13 @@ _DOC_TYPE_RULES = [
     ("사업자 통장 사본", ["통장사본", "통장 사본"]),
 ]
 
+# doc_type별로 "금액" 칸에 뽑을 라벨(소득금액증명은 수입/소득 2개를 따로
+# 보여주니 여기선 제외) - 서류에 없는 라벨이면 그냥 못 찾고 넘어간다.
+_GENERIC_AMOUNT_LABELS = {
+    "부가가치세 과세표준증명": ["과세표준액", "공급가액"],
+    "부가가치세 신고서": ["과세표준", "공급가액"],
+}
+
 
 def _classify_text(text):
     for label, keywords in _DOC_TYPE_RULES:
@@ -87,16 +94,64 @@ def _classify_text(text):
     return ""
 
 
-def _extract_year(text):
-    """"귀속연도 2020"처럼 귀속연도가 적혀있으면 그걸 우선으로 보고,
-    없으면 글자 어디든 처음 나오는 "20XX년"을 쓴다. 둘 다 없으면 None
-    (지어내지 않음 - 사용자가 직접 채워야 함)."""
-    m = re.search(r"귀속\D{0,10}?(20\d{2})", text)
+def _extract_year_from_filename(filename):
+    """"부가세과세표준증명원_22년1기_230102.pdf"처럼 홈택스에서 받은
+    파일은 파일명 자체에 귀속연도가 2자리로 박혀있는 경우가 많다(발급일
+    "230102"는 YYMMDD라 "20XX년"으로는 안 걸림). "22년"(2자리)이나
+    "2022년"(4자리) 둘 다 본다."""
+    m = re.search(r"(20\d{2})년", filename)
     if m:
         return int(m.group(1))
+    m = re.search(r"(?<!\d)(\d{2})년", filename)
+    if m:
+        return 2000 + int(m.group(1))
+    return None
+
+
+def _extract_year(text, filename):
+    """연도 판단 우선순위: 본문의 "귀속"/"과세기간" 라벨 > 파일명 > 본문에
+    처음 나오는 "20XX년". 마지막 순위를 제일 느슨하게 둔 이유는 "발급일자
+    2023년..."처럼 귀속연도가 아닌 다른 날짜가 먼저 걸릴 위험이 있어서다
+    (실제로 22년1기 서류가 발급일자 때문에 2023년으로 잘못 분류된 사고가
+    있었음) - 그래서 그 경우를 막아줄 파일명 쪽을 본문 느슨한 매칭보다
+    먼저 본다."""
+    m = re.search(r"(?:귀속|과세기간)\D{0,10}?(20\d{2})", text)
+    if m:
+        return int(m.group(1))
+    from_filename = _extract_year_from_filename(filename)
+    if from_filename:
+        return from_filename
     m = re.search(r"(20\d{2})\s*년", text)
     if m:
         return int(m.group(1))
+    return None
+
+
+_DATE_RE = r"(20\d{2})[.\-년]\s*(\d{1,2})[.\-월]\s*(\d{1,2})"
+
+
+def _extract_date_near_label(text, labels):
+    """라벨(예: "발급일자") 뒤 20자 이내에 나오는 "2023.01.02"/"2023년
+    1월 2일" 모양 날짜를 찾아 YYYY-MM-DD로 돌려준다. 못 찾으면 None."""
+    for label in labels:
+        m = re.search(re.escape(label) + r"\D{0,20}?" + _DATE_RE, text)
+        if m:
+            return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return None
+
+
+def _extract_period(text):
+    """"과세기간 2022.01.01 ~ 2022.06.30"처럼 기간 전체(시작~끝)가 있으면
+    그대로 "YYYY-MM-DD~YYYY-MM-DD"로 돌려준다. 날짜가 하나만 걸리면(기간이
+    아니라 단일 시점) 기간으로 보지 않고 None - 발급일자랑 헷갈리면 안 됨."""
+    m = re.search(
+        r"(?:과세기간|귀속기간)\D{0,10}?" + _DATE_RE + r"\D{0,5}?~\D{0,5}?" + _DATE_RE,
+        text,
+    )
+    if m:
+        start = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+        end = f"{m.group(4)}-{int(m.group(5)):02d}-{int(m.group(6)):02d}"
+        return f"{start}~{end}"
     return None
 
 
@@ -116,14 +171,27 @@ def _extract_amount_near_label(text, label):
         return None
 
 
+def _extract_generic_amount(doc_type, text):
+    for label in _GENERIC_AMOUNT_LABELS.get(doc_type, []):
+        amount = _extract_amount_near_label(text, label)
+        if amount is not None:
+            return amount
+    return None
+
+
 def _classify_document(filename, text):
     doc_type = _classify_text(text)
-    year = _extract_year(text)
+    year = _extract_year(text, filename)
+    issue_date = _extract_date_near_label(text, ["발급일자", "발급일"])
+    period = _extract_period(text)
     income_amount = None
     taxable_income_amount = None
+    amount = None
     if doc_type == "소득금액증명":
         income_amount = _extract_amount_near_label(text, "수입금액")
         taxable_income_amount = _extract_amount_near_label(text, "소득금액")
+    else:
+        amount = _extract_generic_amount(doc_type, text)
     if doc_type and year:
         name = f"{year} {doc_type}"
     elif doc_type:
@@ -133,6 +201,9 @@ def _classify_document(filename, text):
     return {
         "name": name,
         "category": doc_type,
+        "issue_date": issue_date,
+        "period": period,
+        "amount": amount,
         "year": year,
         "doc_type": doc_type,
         "income_amount": income_amount,
@@ -167,12 +238,13 @@ def serialize_documents(conn):
 
 def serialize_aggregate(conn):
     """doc_type이 등록된(비어있지 않은) 서류만 연도+문서종류로 묶어서
-    수입금액/소득금액 합계를 보여준다. doc_type이 없는 서류(사업자등록증
-    등 집계 의미가 없는 서류)는 여기 안 잡힌다."""
+    금액 합계를 보여준다. doc_type이 없는 서류(사업자등록증 등 집계
+    의미가 없는 서류)는 여기 안 잡힌다."""
     rows = conn.execute(
         """SELECT year, doc_type,
                   SUM(income_amount) AS income_total,
                   SUM(taxable_income_amount) AS taxable_total,
+                  SUM(amount) AS amount_total,
                   COUNT(*) AS doc_count
            FROM documents
            WHERE doc_type != '' AND year IS NOT NULL
@@ -224,8 +296,8 @@ def create_document_auto():
         ).fetchone()["m"]
         cur = conn.execute(
             """INSERT INTO documents (name, category, year, doc_type, income_amount,
-               taxable_income_amount, file_name, original_name, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               taxable_income_amount, amount, issue_date, period, file_name, original_name, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 detected["name"],
                 detected["category"],
@@ -233,6 +305,9 @@ def create_document_auto():
                 detected["doc_type"],
                 detected["income_amount"],
                 detected["taxable_income_amount"],
+                detected["amount"],
+                detected["issue_date"] or "",
+                detected["period"] or "",
                 file_name,
                 uploaded.filename,
                 max_order + 1,
@@ -272,8 +347,9 @@ def create_document():
         ).fetchone()["m"]
         conn.execute(
             """INSERT INTO documents (name, category, year, doc_type, income_amount,
-               taxable_income_amount, file_name, original_name, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               taxable_income_amount, amount, issue_date, period, file_name, original_name,
+               memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (request.form.get("category") or "").strip(),
@@ -281,6 +357,9 @@ def create_document():
                 (request.form.get("doc_type") or "").strip(),
                 _parse_float(request.form.get("income_amount")),
                 _parse_float(request.form.get("taxable_income_amount")),
+                _parse_float(request.form.get("amount")),
+                (request.form.get("issue_date") or "").strip(),
+                (request.form.get("period") or "").strip(),
                 file_name,
                 original_name,
                 (request.form.get("memo") or "").strip(),
@@ -320,7 +399,8 @@ def update_document(doc_id):
 
         conn.execute(
             """UPDATE documents SET name=?, category=?, year=?, doc_type=?, income_amount=?,
-               taxable_income_amount=?, file_name=?, original_name=?, memo=? WHERE id=?""",
+               taxable_income_amount=?, amount=?, issue_date=?, period=?, file_name=?,
+               original_name=?, memo=? WHERE id=?""",
             (
                 name,
                 (request.form.get("category", item["category"]) or "").strip(),
@@ -328,6 +408,9 @@ def update_document(doc_id):
                 (request.form.get("doc_type", item["doc_type"]) or "").strip(),
                 _parse_float(request.form.get("income_amount", item["income_amount"])),
                 _parse_float(request.form.get("taxable_income_amount", item["taxable_income_amount"])),
+                _parse_float(request.form.get("amount", item["amount"])),
+                (request.form.get("issue_date", item["issue_date"]) or "").strip(),
+                (request.form.get("period", item["period"]) or "").strip(),
                 file_name,
                 original_name,
                 (request.form.get("memo", item["memo"]) or "").strip(),
