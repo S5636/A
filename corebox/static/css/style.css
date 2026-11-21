@@ -150,6 +150,9 @@ table.agg-table tr:last-child td { border-bottom: none; }
 
 .empty-hint { color: var(--text-muted); font-size: 13px; padding: 16px; text-align: center; }
 
+.upload-log-item { padding: 8px 10px; border-radius: 8px; background: var(--surface-2); margin-bottom: 5px; font-size: 13px; }
+.upload-log-item.err { background: rgba(230,103,103,0.14); color: var(--critical); }
+
 .modal-backdrop {
   display: none;
   position: fixed;

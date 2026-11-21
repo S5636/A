@@ -10,8 +10,13 @@
   <div class="app-shell">
     <div class="app-header">
       <div><span class="app-wordmark">CORE<span class="accent">BOX</span></span><span class="app-subtitle">서류 보관함</span></div>
-      <button class="btn primary" id="btn-add-doc">+ 서류 추가</button>
+      <div style="display:flex; gap:6px;">
+        <label class="btn primary" for="auto-upload-file" style="margin:0;">📄 파일 올리기(자동 분류)</label>
+        <input type="file" id="auto-upload-file" accept=".pdf,.jpg,.jpeg,.png,.webp,.bmp" multiple style="display:none;">
+        <button class="btn secondary" id="btn-add-doc">+ 직접 입력</button>
+      </div>
     </div>
+    <div id="auto-upload-log"></div>
 
     <div class="section-title">연도별 집계</div>
     <div id="aggregate-area"></div>

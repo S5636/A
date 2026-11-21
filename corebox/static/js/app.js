@@ -143,5 +143,48 @@
     render();
   });
 
+  const autoUploadFile = document.getElementById("auto-upload-file");
+  const autoUploadLog = document.getElementById("auto-upload-log");
+  autoUploadFile.addEventListener("change", async () => {
+    const files = Array.from(autoUploadFile.files || []);
+    if (!files.length) return;
+
+    // 여러 장 골라도 서버 OCR이 한 번에 하나씩 처리하도록 짜여있어서
+    // 순서대로 처리한다 - 한 장 끝날 때마다 로그 줄을 쌓아서 보여준다.
+    const lines = [];
+    const renderLog = () => { autoUploadLog.innerHTML = lines.join(""); };
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const prefix = files.length > 1 ? `[${i + 1}/${files.length}] ` : "";
+      lines.push(`<div class="upload-log-item">${prefix}${escapeHtml(file.name)} - 읽는 중... (처음 한 번은 오래 걸릴 수 있음)</div>`);
+      renderLog();
+
+      const formData = new FormData();
+      formData.append("file", file);
+      let data;
+      try {
+        const res = await fetch("/api/documents/auto", { method: "POST", body: formData });
+        data = await res.json();
+        if (!res.ok) throw new Error(data.error || "등록 실패");
+      } catch (e) {
+        lines[lines.length - 1] = `<div class="upload-log-item err">${prefix}${escapeHtml(file.name)} - ${escapeHtml(e.message)}</div>`;
+        renderLog();
+        continue;
+      }
+
+      state = { documents: data.documents, aggregate: data.aggregate };
+      render();
+
+      const d = data.detected || {};
+      const summary = d.doc_type
+        ? `${escapeHtml(d.name)}(으)로 분류됨${d.year ? ` · ${d.year}년` : ""}`
+        : (data.text_found ? "글자는 읽었지만 어떤 서류인지 분류 못함 - 직접 수정 필요" : "글자를 못 읽음(스캔 PDF 등) - 직접 수정 필요");
+      lines[lines.length - 1] = `<div class="upload-log-item">${prefix}${escapeHtml(file.name)} - ${summary}</div>`;
+      renderLog();
+    }
+    autoUploadFile.value = "";
+  });
+
   loadFull();
 })();
