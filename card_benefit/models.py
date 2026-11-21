@@ -466,6 +466,128 @@ def init_db():
                             ),
                         )
 
+        # 2026-11: 대출 계좌문구 자동매칭 버그(출금계좌에 계좌번호 없이
+        # 은행명만 등록돼 있으면 그 은행명을 언급하는 아무 알림이나 금액/
+        # 날짜 상관없이 다 매칭해버리던 문제 - app.py의
+        # _try_auto_match_loan_account_text에서 이미 고침) 때문에
+        # "KB국민은행 제휴 대환 신용대출"에 16만원 1건, "카카오뱅크
+        # 개인사업자 신용대출"에 1만원 3건이 실제로는 이 대출들과 무관한
+        # 알림인데 상환 기록으로 잘못 들어갔다. 지우고 잔액/이번달체크를
+        # 그 전 상태로 되돌리고, 원본 알림도 "받은 알림" 큐로 복귀시킨다
+        # (그래야 그 알림이 실제로 뭐였는지 보고 사용자가 직접 배정할 수
+        # 있음). 이미 지워진 뒤에는 bad_payments가 비어서 다시 실행해도
+        # 안전함(멱등).
+        kb_loan = conn.execute(
+            "SELECT id, principal FROM loans WHERE name LIKE '%KB%대환%신용대출%'"
+        ).fetchone()
+        if kb_loan:
+            bad_payments = conn.execute(
+                "SELECT id, paid_at, amount FROM loan_payments WHERE loan_id = ? "
+                "AND memo = '알림 자동확인' AND amount = 160000 "
+                "AND paid_at BETWEEN '2026-11-15' AND '2026-11-25' ORDER BY id ASC",
+                (kb_loan["id"],),
+            ).fetchall()
+            if bad_payments:
+                earliest_id = bad_payments[0]["id"]
+                prior = conn.execute(
+                    "SELECT balance_after FROM loan_payments WHERE loan_id = ? AND id < ? "
+                    "ORDER BY id DESC LIMIT 1",
+                    (kb_loan["id"], earliest_id),
+                ).fetchone()
+                restore_balance = prior["balance_after"] if prior else kb_loan["principal"]
+                for bp in bad_payments:
+                    released = conn.execute(
+                        "SELECT id FROM inbox_items WHERE status = 'no_benefit' AND recurring_id IS NULL "
+                        "AND insurance_id IS NULL AND amount = ? AND substr(occurred_at, 1, 10) = ?",
+                        (bp["amount"], bp["paid_at"]),
+                    ).fetchone()
+                    if released:
+                        conn.execute(
+                            "UPDATE inbox_items SET status = 'pending', card_id = NULL WHERE id = ?",
+                            (released["id"],),
+                        )
+                    conn.execute("DELETE FROM loan_payments WHERE id = ?", (bp["id"],))
+                still_paid = conn.execute(
+                    "SELECT 1 FROM loan_payments WHERE loan_id = ? AND substr(paid_at, 1, 7) = ?",
+                    (kb_loan["id"], current_year_month()),
+                ).fetchone()
+                conn.execute("UPDATE loans SET current_balance = ? WHERE id = ?", (restore_balance, kb_loan["id"]))
+                if not still_paid:
+                    conn.execute("UPDATE loans SET paid_check_month = '' WHERE id = ?", (kb_loan["id"],))
+
+        kakao_biz_loan = conn.execute(
+            "SELECT id, principal, current_balance FROM loans WHERE name LIKE '%카카오%개인사업자%신용대출%'"
+        ).fetchone()
+        if kakao_biz_loan:
+            bad_payments = conn.execute(
+                "SELECT id, paid_at, amount FROM loan_payments WHERE loan_id = ? "
+                "AND memo = '알림 자동확인' AND amount = 10000 "
+                "AND paid_at BETWEEN '2026-11-15' AND '2026-11-25' ORDER BY id ASC",
+                (kakao_biz_loan["id"],),
+            ).fetchall()
+            if bad_payments:
+                earliest_id = bad_payments[0]["id"]
+                prior = conn.execute(
+                    "SELECT balance_after FROM loan_payments WHERE loan_id = ? AND id < ? "
+                    "ORDER BY id DESC LIMIT 1",
+                    (kakao_biz_loan["id"], earliest_id),
+                ).fetchone()
+                restore_balance = prior["balance_after"] if prior else kakao_biz_loan["principal"]
+                for bp in bad_payments:
+                    released = conn.execute(
+                        "SELECT id FROM inbox_items WHERE status = 'no_benefit' AND recurring_id IS NULL "
+                        "AND insurance_id IS NULL AND amount = ? AND substr(occurred_at, 1, 10) = ?",
+                        (bp["amount"], bp["paid_at"]),
+                    ).fetchone()
+                    if released:
+                        conn.execute(
+                            "UPDATE inbox_items SET status = 'pending', card_id = NULL WHERE id = ?",
+                            (released["id"],),
+                        )
+                    conn.execute("DELETE FROM loan_payments WHERE id = ?", (bp["id"],))
+                still_paid = conn.execute(
+                    "SELECT 1 FROM loan_payments WHERE loan_id = ? AND substr(paid_at, 1, 7) = ?",
+                    (kakao_biz_loan["id"], current_year_month()),
+                ).fetchone()
+                conn.execute(
+                    "UPDATE loans SET current_balance = ? WHERE id = ?",
+                    (restore_balance, kakao_biz_loan["id"]),
+                )
+                if not still_paid:
+                    conn.execute("UPDATE loans SET paid_check_month = '' WHERE id = ?", (kakao_biz_loan["id"],))
+
+            # 사용자가 실제 은행 앱 화면(이자상환 내역)을 캡처로 보내준 진짜
+            # 상환 내역을 그대로 복원한다. 이 대출은 이자만 내는 방식이라
+            # (매번 금액이 들쭉날쭉하고 원금은 안 줄어듦) 원금 변동 없이
+            # 잔액은 현재 등록값 그대로 두고 기록만 남긴다. (loan_id, paid_at,
+            # amount) 조합으로 이미 있는지 먼저 확인해서 여러 번 실행해도
+            # 중복 안 생기게 한다(멱등).
+            real_kakao_biz_payments = [
+                ("2026-11-02", 891),
+                ("2026-11-02", 26741),
+                ("2026-09-30", 26741),
+                ("2026-08-31", 27633),
+                ("2026-08-01", 27633),
+                ("2026-06-30", 2674),
+                ("2026-06-30", 24067),
+                ("2026-06-01", 3565),
+                ("2026-06-01", 24067),
+            ]
+            for paid_at, amount in real_kakao_biz_payments:
+                exists = conn.execute(
+                    "SELECT 1 FROM loan_payments WHERE loan_id = ? AND paid_at = ? AND amount = ?",
+                    (kakao_biz_loan["id"], paid_at, amount),
+                ).fetchone()
+                if not exists:
+                    conn.execute(
+                        """INSERT INTO loan_payments (loan_id, paid_at, amount, balance_after, memo)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (
+                            kakao_biz_loan["id"], paid_at, amount, kakao_biz_loan["current_balance"],
+                            "은행 앱 캡처로 확인된 실제 이자상환 내역 복원(계좌문구 매칭 버그로 안 잡혀있던 내역)",
+                        ),
+                    )
+
         conn.commit()
     finally:
         conn.close()
