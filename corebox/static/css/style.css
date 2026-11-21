@@ -166,8 +166,16 @@ body { padding-bottom: 40px; }
 .period-btn:hover { background: var(--surface-3); }
 .issue-date-tag { color: var(--text-muted); font-size: 11px; margin: 0 2px; }
 
+/* 칸 수가 많아지면(소득금액증명 세부 항목 등) 줄바꿈으로 찌그러뜨리지
+   말고 가로 스크롤로 보여준다 - 숫자가 줄바꿈되면 표가 알아보기 힘들다. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius-lg);
+}
 table.agg-table {
   width: 100%;
+  min-width: max-content;
   border-collapse: collapse;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -178,6 +186,7 @@ table.agg-table {
 table.agg-table th, table.agg-table td {
   padding: 8px 10px;
   text-align: right;
+  white-space: nowrap;
   border-bottom: 1px solid var(--border);
 }
 table.agg-table th:first-child, table.agg-table td:first-child {

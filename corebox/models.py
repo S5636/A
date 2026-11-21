@@ -59,6 +59,14 @@ def init_db():
         _ensure_column(conn, "documents", "period_label", "period_label TEXT DEFAULT ''")
         _ensure_column(conn, "documents", "tax_amount", "tax_amount REAL")
         _ensure_column(conn, "documents", "file_hash", "file_hash TEXT DEFAULT ''")
+        # 소득금액증명의 수입금액/소득금액 행에는 사업/근로/기타 소득별
+        # 세부 금액도 같이 찍혀 나온다 - 합계만 보여주지 말고 그것도 같이.
+        _ensure_column(conn, "documents", "income_business", "income_business REAL")
+        _ensure_column(conn, "documents", "income_wage", "income_wage REAL")
+        _ensure_column(conn, "documents", "income_other", "income_other REAL")
+        _ensure_column(conn, "documents", "taxable_business", "taxable_business REAL")
+        _ensure_column(conn, "documents", "taxable_wage", "taxable_wage REAL")
+        _ensure_column(conn, "documents", "taxable_other", "taxable_other REAL")
 
         # 2026-11: 자동분류 로직이 아직 "발급일자"보다 "과세기간"을 우선
         # 보게 고쳐지기 전에 올린 "22년1기" 부가세 과세표준증명이 발급일자

@@ -19,9 +19,17 @@
   // 수입금액/소득금액 자체가 없고, 소득금액증명에는 "과세표준액" 같은
   // 게 없다. 목록에 없는 종류는 기본값(금액 하나)으로 처리.
   const DOC_TYPE_COLUMNS = {
+    // 제일 중요한 합계(수입금액/소득금액)를 맨 앞에 두고, 사업/근로/기타
+    // 소득별 세부 내역은 뒤에 붙인다.
     "소득금액증명": [
       { key: "income_total", itemKey: "income_amount", label: "수입금액" },
       { key: "taxable_total", itemKey: "taxable_income_amount", label: "소득금액" },
+      { key: "income_business_total", itemKey: "income_business", label: "사업수입" },
+      { key: "income_wage_total", itemKey: "income_wage", label: "근로수입" },
+      { key: "income_other_total", itemKey: "income_other", label: "기타수입" },
+      { key: "taxable_business_total", itemKey: "taxable_business", label: "사업소득" },
+      { key: "taxable_wage_total", itemKey: "taxable_wage", label: "근로소득" },
+      { key: "taxable_other_total", itemKey: "taxable_other", label: "기타소득" },
     ],
     "부가가치세 과세표준증명": [
       { key: "amount_total", itemKey: "amount", label: "과세표준액" },
@@ -90,10 +98,12 @@
       `).join("");
       html += `
         <div class="year-group-title">${escapeHtml(docType)}</div>
-        <table class="agg-table">
-          <thead><tr><th>연도</th>${cols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}</tr></thead>
-          <tbody>${trs}</tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="agg-table">
+            <thead><tr><th>연도</th>${cols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}</tr></thead>
+            <tbody>${trs}</tbody>
+          </table>
+        </div>
       `;
     }
     area.innerHTML = html;
@@ -166,14 +176,21 @@
   // 세액 칸 같은 게 비어있는 채로 안 뜨게). 모르는 종류거나 비어있으면
   // 전부 보여줘서(뭘로 쓸지 모르니) 자유롭게 입력 가능.
   const FIELD_VISIBILITY = {
-    "소득금액증명": { income: true, taxable: true, amount: false, taxAmount: false },
-    "부가가치세 과세표준증명": { income: false, taxable: false, amount: true, taxAmount: true },
-    "부가가치세 신고서": { income: false, taxable: false, amount: true, taxAmount: true },
+    "소득금액증명": { income: true, taxable: true, breakdown: true, amount: false, taxAmount: false },
+    "부가가치세 과세표준증명": { income: false, taxable: false, breakdown: false, amount: true, taxAmount: true },
+    "부가가치세 신고서": { income: false, taxable: false, breakdown: false, amount: true, taxAmount: true },
   };
+  const BREAKDOWN_ROW_IDS = [
+    "doc-income-business-row", "doc-income-wage-row", "doc-income-other-row",
+    "doc-taxable-business-row", "doc-taxable-wage-row", "doc-taxable-other-row",
+  ];
   function applyFieldVisibility(docType) {
-    const v = FIELD_VISIBILITY[docType] || { income: true, taxable: true, amount: true, taxAmount: true };
+    const v = FIELD_VISIBILITY[docType] || { income: true, taxable: true, breakdown: true, amount: true, taxAmount: true };
     document.getElementById("doc-income-row").style.display = v.income ? "" : "none";
     document.getElementById("doc-taxable-row").style.display = v.taxable ? "" : "none";
+    for (const rowId of BREAKDOWN_ROW_IDS) {
+      document.getElementById(rowId).style.display = v.breakdown ? "" : "none";
+    }
     document.getElementById("doc-amount-row").style.display = v.amount ? "" : "none";
     document.getElementById("doc-tax-amount-row").style.display = v.taxAmount ? "" : "none";
   }
@@ -191,6 +208,10 @@
     document.getElementById("doc-period-label").value = item ? (item.period_label || "") : "";
     document.getElementById("doc-income").value = item && item.income_amount !== null && item.income_amount !== undefined ? item.income_amount : "";
     document.getElementById("doc-taxable").value = item && item.taxable_income_amount !== null && item.taxable_income_amount !== undefined ? item.taxable_income_amount : "";
+    for (const key of ["income_business", "income_wage", "income_other", "taxable_business", "taxable_wage", "taxable_other"]) {
+      const fieldId = `doc-${key.replace(/_/g, "-")}`;
+      document.getElementById(fieldId).value = item && item[key] !== null && item[key] !== undefined ? item[key] : "";
+    }
     document.getElementById("doc-amount").value = item && item.amount !== null && item.amount !== undefined ? item.amount : "";
     document.getElementById("doc-tax-amount").value = item && item.tax_amount !== null && item.tax_amount !== undefined ? item.tax_amount : "";
     document.getElementById("doc-file").value = "";
@@ -213,6 +234,10 @@
     formData.append("period_label", document.getElementById("doc-period-label").value.trim());
     formData.append("income_amount", document.getElementById("doc-income").value);
     formData.append("taxable_income_amount", document.getElementById("doc-taxable").value);
+    for (const key of ["income_business", "income_wage", "income_other", "taxable_business", "taxable_wage", "taxable_other"]) {
+      const fieldId = `doc-${key.replace(/_/g, "-")}`;
+      formData.append(key, document.getElementById(fieldId).value);
+    }
     formData.append("amount", document.getElementById("doc-amount").value);
     formData.append("tax_amount", document.getElementById("doc-tax-amount").value);
     formData.append("memo", document.getElementById("doc-memo").value.trim());

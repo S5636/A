@@ -192,21 +192,34 @@ def _extract_amount_near_label(text, label):
         return None
 
 
-def _extract_amount_from_row(text, label):
-    """소득금액증명의 "수입금액 0 0 72,934,754 ... 100,125,472"처럼 라벨과
-    숫자 사이가 표 칸 정렬용 공백으로 멀리 떨어져 있고, 숫자도 여러 개가
-    나오는 행이 있다. 그 행(같은 줄)에서 라벨을 찾아 그 줄의 마지막 숫자
-    (합계 칸)를 쓴다. 숫자가 없는 줄(용어설명 등)은 건너뛰고 다음 줄을
-    본다."""
+def _extract_income_row(text, label):
+    """소득금액증명의 "수입금액 0 0 72,934,754 27,190,718 0 0 100,125,472"
+    행은 칸이 "이자 배당 사업 근로 연금 기타 합계" 순서로 고정돼 있다.
+    합계(제일 중요한 숫자, 맨 뒤 칸)만 보여주다가 사업/근로/기타소득별
+    세부 금액도 따로 보여달라는 요청으로 7칸을 다 파싱한다. 칸 수가
+    7개가 아니면(서류 서식이 다르거나 OCR이 깨졌을 때) 세부는 포기하고
+    합계(마지막 숫자)만이라도 건진다. 라벨과 숫자 사이가 표 칸 정렬용
+    공백으로 멀리 떨어져 있어 라벨 바로 뒤가 아니라 같은 줄 전체에서
+    숫자를 찾는다. 숫자가 없는 줄(용어설명 등)은 건너뛰고 다음 줄을 본다."""
     for line in text.split("\n"):
         if label not in line:
             continue
-        numbers = re.findall(r"-?[\d,]{4,}", line)
-        if numbers:
-            try:
-                return float(numbers[-1].replace(",", ""))
-            except ValueError:
-                continue
+        # 사업/근로 등 칸이 0원이면 그냥 "0" 한 글자로만 찍혀서, 자릿수가
+        # 많은 숫자만 잡던 기존 패턴({4,})으로는 그 칸 자체가 안 잡혀
+        # 7칸이 안 맞는다 - 이 줄 안에서는 이미 라벨로 맞는 행인 게
+        # 확실하니 짧은 숫자도 다 잡는다.
+        numbers = re.findall(r"-?[\d,]+", line)
+        numbers = [n for n in numbers if n.strip(",")]
+        if not numbers:
+            continue
+        try:
+            values = [float(n.replace(",", "")) for n in numbers]
+        except ValueError:
+            continue
+        if len(values) == 7:
+            interest, dividend, business, wage, pension, other, total = values
+            return {"total": total, "business": business, "wage": wage, "other": other}
+        return {"total": values[-1], "business": None, "wage": None, "other": None}
     return None
 
 
@@ -299,6 +312,12 @@ def _classify_document(filename, text):
                     "doc_type": doc_type,
                     "income_amount": None,
                     "taxable_income_amount": None,
+                    "income_business": None,
+                    "income_wage": None,
+                    "income_other": None,
+                    "taxable_business": None,
+                    "taxable_wage": None,
+                    "taxable_other": None,
                 }
                 for row in vat_rows
             ]
@@ -310,10 +329,22 @@ def _classify_document(filename, text):
         issue_date = _extract_issue_date_fallback(text, used_dates)
     income_amount = None
     taxable_income_amount = None
+    income_business = income_wage = income_other = None
+    taxable_business = taxable_wage = taxable_other = None
     amount = None
     if doc_type == "소득금액증명":
-        income_amount = _extract_amount_from_row(text, "수입금액")
-        taxable_income_amount = _extract_amount_from_row(text, "소득금액")
+        income_row = _extract_income_row(text, "수입금액")
+        if income_row:
+            income_amount = income_row["total"]
+            income_business, income_wage, income_other = (
+                income_row["business"], income_row["wage"], income_row["other"],
+            )
+        taxable_row = _extract_income_row(text, "소득금액")
+        if taxable_row:
+            taxable_income_amount = taxable_row["total"]
+            taxable_business, taxable_wage, taxable_other = (
+                taxable_row["business"], taxable_row["wage"], taxable_row["other"],
+            )
     else:
         amount = _extract_generic_amount(doc_type, text)
     period_label = _period_label_from_date(period.split("~")[0]) if period else (f"{str(year)[2:]}년" if year else "")
@@ -335,6 +366,12 @@ def _classify_document(filename, text):
         "doc_type": doc_type,
         "income_amount": income_amount,
         "taxable_income_amount": taxable_income_amount,
+        "income_business": income_business,
+        "income_wage": income_wage,
+        "income_other": income_other,
+        "taxable_business": taxable_business,
+        "taxable_wage": taxable_wage,
+        "taxable_other": taxable_other,
     }]
 
 
@@ -371,6 +408,12 @@ def serialize_aggregate(conn):
         """SELECT year, doc_type,
                   SUM(income_amount) AS income_total,
                   SUM(taxable_income_amount) AS taxable_total,
+                  SUM(income_business) AS income_business_total,
+                  SUM(income_wage) AS income_wage_total,
+                  SUM(income_other) AS income_other_total,
+                  SUM(taxable_business) AS taxable_business_total,
+                  SUM(taxable_wage) AS taxable_wage_total,
+                  SUM(taxable_other) AS taxable_other_total,
                   SUM(amount) AS amount_total,
                   SUM(tax_amount) AS tax_total,
                   COUNT(*) AS doc_count
@@ -457,9 +500,11 @@ def create_document_auto():
             max_order += 1
             cur = conn.execute(
                 """INSERT INTO documents (name, category, year, doc_type, income_amount,
-                   taxable_income_amount, amount, tax_amount, issue_date, period, period_label,
-                   file_name, original_name, file_hash, sort_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   taxable_income_amount, income_business, income_wage, income_other,
+                   taxable_business, taxable_wage, taxable_other, amount, tax_amount,
+                   issue_date, period, period_label, file_name, original_name, file_hash,
+                   sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     detected["name"],
                     detected["category"],
@@ -467,6 +512,12 @@ def create_document_auto():
                     detected["doc_type"],
                     detected["income_amount"],
                     detected["taxable_income_amount"],
+                    detected["income_business"],
+                    detected["income_wage"],
+                    detected["income_other"],
+                    detected["taxable_business"],
+                    detected["taxable_wage"],
+                    detected["taxable_other"],
                     detected["amount"],
                     detected.get("tax_amount"),
                     detected["issue_date"] or "",
@@ -515,9 +566,10 @@ def create_document():
         ).fetchone()["m"]
         conn.execute(
             """INSERT INTO documents (name, category, year, doc_type, income_amount,
-               taxable_income_amount, amount, tax_amount, issue_date, period, period_label,
-               file_name, original_name, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               taxable_income_amount, income_business, income_wage, income_other,
+               taxable_business, taxable_wage, taxable_other, amount, tax_amount,
+               issue_date, period, period_label, file_name, original_name, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (request.form.get("category") or "").strip(),
@@ -525,6 +577,12 @@ def create_document():
                 (request.form.get("doc_type") or "").strip(),
                 _parse_float(request.form.get("income_amount")),
                 _parse_float(request.form.get("taxable_income_amount")),
+                _parse_float(request.form.get("income_business")),
+                _parse_float(request.form.get("income_wage")),
+                _parse_float(request.form.get("income_other")),
+                _parse_float(request.form.get("taxable_business")),
+                _parse_float(request.form.get("taxable_wage")),
+                _parse_float(request.form.get("taxable_other")),
                 _parse_float(request.form.get("amount")),
                 _parse_float(request.form.get("tax_amount")),
                 (request.form.get("issue_date") or "").strip(),
@@ -569,8 +627,10 @@ def update_document(doc_id):
 
         conn.execute(
             """UPDATE documents SET name=?, category=?, year=?, doc_type=?, income_amount=?,
-               taxable_income_amount=?, amount=?, tax_amount=?, issue_date=?, period=?,
-               period_label=?, file_name=?, original_name=?, memo=? WHERE id=?""",
+               taxable_income_amount=?, income_business=?, income_wage=?, income_other=?,
+               taxable_business=?, taxable_wage=?, taxable_other=?, amount=?, tax_amount=?,
+               issue_date=?, period=?, period_label=?, file_name=?, original_name=?, memo=?
+               WHERE id=?""",
             (
                 name,
                 (request.form.get("category", item["category"]) or "").strip(),
@@ -578,6 +638,12 @@ def update_document(doc_id):
                 (request.form.get("doc_type", item["doc_type"]) or "").strip(),
                 _parse_float(request.form.get("income_amount", item["income_amount"])),
                 _parse_float(request.form.get("taxable_income_amount", item["taxable_income_amount"])),
+                _parse_float(request.form.get("income_business", item["income_business"])),
+                _parse_float(request.form.get("income_wage", item["income_wage"])),
+                _parse_float(request.form.get("income_other", item["income_other"])),
+                _parse_float(request.form.get("taxable_business", item["taxable_business"])),
+                _parse_float(request.form.get("taxable_wage", item["taxable_wage"])),
+                _parse_float(request.form.get("taxable_other", item["taxable_other"])),
                 _parse_float(request.form.get("amount", item["amount"])),
                 _parse_float(request.form.get("tax_amount", item["tax_amount"])),
                 (request.form.get("issue_date", item["issue_date"]) or "").strip(),
@@ -661,11 +727,51 @@ def _reclassify_blank_documents():
             d = detected_list[0]
             conn.execute(
                 "UPDATE documents SET name=?, category=?, year=?, doc_type=?, income_amount=?, "
-                "taxable_income_amount=?, amount=?, tax_amount=?, issue_date=?, period=?, "
-                "period_label=? WHERE id=?",
+                "taxable_income_amount=?, income_business=?, income_wage=?, income_other=?, "
+                "taxable_business=?, taxable_wage=?, taxable_other=?, amount=?, tax_amount=?, "
+                "issue_date=?, period=?, period_label=? WHERE id=?",
                 (d["name"], d["category"], d["year"], d["doc_type"], d["income_amount"],
-                 d["taxable_income_amount"], d["amount"], d["tax_amount"], d["issue_date"],
-                 d["period"], d["period_label"], row["id"]),
+                 d["taxable_income_amount"], d["income_business"], d["income_wage"],
+                 d["income_other"], d["taxable_business"], d["taxable_wage"], d["taxable_other"],
+                 d["amount"], d["tax_amount"], d["issue_date"], d["period"], d["period_label"],
+                 row["id"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _backfill_income_breakdown():
+    """사업/근로/기타소득 세부 항목을 나중에 추가해서, 그 전에 이미
+    doc_type까지는 제대로 분류됐던 소득금액증명 서류는 _reclassify_
+    blank_documents(doc_type 빈 것만 다시 봄)로는 못 건드린다. 그런
+    서류만 따로 찾아서 세부 항목만 채워 넣는다."""
+    conn = models.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, file_name, original_name FROM documents "
+            "WHERE doc_type = '소득금액증명' AND file_name != '' AND taxable_business IS NULL"
+        ).fetchall()
+        for row in rows:
+            path = os.path.join(models.UPLOAD_DIR, row["file_name"])
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception:
+                continue
+            fname = row["original_name"] or row["file_name"]
+            text = _extract_text_from_file(fname, file_bytes)
+            if not text:
+                continue
+            detected_list = _classify_document(fname, text)
+            if not detected_list:
+                continue
+            d = detected_list[0]
+            conn.execute(
+                "UPDATE documents SET income_business=?, income_wage=?, income_other=?, "
+                "taxable_business=?, taxable_wage=?, taxable_other=? WHERE id=?",
+                (d["income_business"], d["income_wage"], d["income_other"],
+                 d["taxable_business"], d["taxable_wage"], d["taxable_other"], row["id"]),
             )
         conn.commit()
     finally:
@@ -673,6 +779,7 @@ def _reclassify_blank_documents():
 
 
 _reclassify_blank_documents()
+_backfill_income_breakdown()
 
 
 if __name__ == "__main__":
