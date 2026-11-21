@@ -157,6 +157,7 @@ def _ensure_tailscale_https():
     쓸 수 있으니 여기서 막히면 안 된다."""
     marker = os.path.join(BASE_DIR, ".tailscale_serve_done")
     if os.path.exists(marker):
+        print("Tailscale HTTPS는 이전에 이미 설정해뒀습니다. 'tailscale serve status'로 주소를 확인하세요.")
         return
     try:
         result = subprocess.run(
