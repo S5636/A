@@ -39,6 +39,10 @@
       { key: "amount_total", itemKey: "amount", label: "과세표준액" },
       { key: "tax_total", itemKey: "tax_amount", label: "세액" },
     ],
+    "종합소득세 신고서": [
+      { key: "amount_total", itemKey: "amount", label: "종합소득금액" },
+      { key: "tax_total", itemKey: "tax_amount", label: "납부(환급)세액" },
+    ],
   };
   function columnsForType(docType) {
     return DOC_TYPE_COLUMNS[docType] || [{ key: "amount_total", itemKey: "amount", label: "금액" }];
@@ -179,6 +183,7 @@
     "소득금액증명": { income: true, taxable: true, breakdown: true, amount: false, taxAmount: false },
     "부가가치세 과세표준증명": { income: false, taxable: false, breakdown: false, amount: true, taxAmount: true },
     "부가가치세 신고서": { income: false, taxable: false, breakdown: false, amount: true, taxAmount: true },
+    "종합소득세 신고서": { income: false, taxable: false, breakdown: false, amount: true, taxAmount: true },
   };
   const BREAKDOWN_ROW_IDS = [
     "doc-income-business-row", "doc-income-wage-row", "doc-income-other-row",

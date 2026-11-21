@@ -244,6 +244,37 @@ def _extract_generic_amount(doc_type, text):
     return None
 
 
+def _extract_jongso_amounts(text):
+    """종합소득세 신고서의 "❹ 세액의 계산" 표는 줄마다 상자번호(19, 21,
+    28, 37...)가 숫자 바로 앞에 붙어있다. 라벨 자체는 "종합소득" / "액
+    금"처럼 세로로 여러 줄에 걸쳐 쪼개져 나와서 라벨 문자열로 찾기
+    어렵고, 상자번호가 훨씬 안정적이다. 다만 그 번호가 "신고유형"
+    코드표(11~40 같은 숫자들) 등 표 바깥에도 우연히 나올 수 있어서,
+    "세액의 계산" 표 구간으로 범위를 좁혀서 찾는다. 종합소득금액(19)과
+    최종 납부/환급세액(37, 없으면 33)만 우선 뽑는다 - 과세표준/결정세액/
+    기납부세액까지 더 보여줄지는 실제 서류로 확인 후 결정."""
+    start = text.find("세액의 계산")
+    if start < 0:
+        return None, None
+    end = text.find("신고인은", start)
+    section = text[start:end] if end > start else text[start:start + 2000]
+
+    def box(num):
+        m = re.search(rf"(?<!\d){num}(?!\d)\s+(-?[\d,]+)", section)
+        if not m:
+            return None
+        try:
+            return float(m.group(1).replace(",", ""))
+        except ValueError:
+            return None
+
+    income = box(19)
+    tax_due = box(37)
+    if tax_due is None:
+        tax_due = box(33)
+    return income, tax_due
+
+
 def _period_label_from_date(start_date):
     """날짜 하나(기간 시작일)로 짧은 표시용 이름을 만든다 - "25년 1기"처럼
     연도는 뒷 2자리만, 반기(1~6월=1기, 7~12월=2기)로 끊는다."""
@@ -349,6 +380,7 @@ def _classify_document(filename, text):
     income_business = income_wage = income_other = None
     taxable_business = taxable_wage = taxable_other = None
     amount = None
+    tax_amount = None
     if doc_type == "소득금액증명":
         income_row = _extract_income_row(text, "수입금액")
         if income_row:
@@ -362,6 +394,8 @@ def _classify_document(filename, text):
             taxable_business, taxable_wage, taxable_other = (
                 taxable_row["business"], taxable_row["wage"], taxable_row["other"],
             )
+    elif doc_type == "종합소득세 신고서":
+        amount, tax_amount = _extract_jongso_amounts(text)
     else:
         amount = _extract_generic_amount(doc_type, text)
     period_label = _period_label_from_date(period.split("~")[0]) if period else (f"{str(year)[2:]}년" if year else "")
@@ -378,7 +412,7 @@ def _classify_document(filename, text):
         "period": period,
         "period_label": period_label,
         "amount": amount,
-        "tax_amount": None,
+        "tax_amount": tax_amount,
         "year": year,
         "doc_type": doc_type,
         "income_amount": income_amount,
