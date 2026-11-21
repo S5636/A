@@ -9,9 +9,9 @@
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
   <meta name="theme-color" content="#0a0f1c">
   <link href="https://webfontworld.github.io/nanum/NanumSquareRound.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ asset_version }}">
 </head>
-<body>
+<body data-asset-version="{{ asset_version }}">
   <div class="app-shell">
     <div class="app-header">
       <div class="app-title">
@@ -85,6 +85,6 @@
     </div>
   </div>
 
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}?v={{ asset_version }}"></script>
 </body>
 </html>

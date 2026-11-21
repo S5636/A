@@ -7,7 +7,7 @@ import re
 import uuid
 from io import BytesIO
 
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, make_response, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
 
 import models
@@ -362,7 +362,18 @@ def serialize_aggregate(conn):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    """css/js 파일 수정시각을 쿼리스트링(?v=)에 붙여서, 폰 브라우저가 코드
+    새로 받아놓고도 예전에 캐시해둔 css/js를 계속 쓰는 일이 없게 한다.
+    이 HTML 자체도 캐시되면 새 버전 번호가 붙은 링크조차 못 받아보게
+    되므로 페이지 본문은 절대 캐시하지 않게 막는다(코어싱크와 동일한
+    방식 - 이게 빠져있어서 서버 쪽은 다 고쳐도 폰 화면은 계속 예전
+    그대로 보였던 것으로 보임)."""
+    js_path = os.path.join(app.static_folder, "js", "app.js")
+    css_path = os.path.join(app.static_folder, "css", "style.css")
+    asset_version = str(int(max(os.path.getmtime(js_path), os.path.getmtime(css_path))))
+    resp = make_response(render_template("index.html", asset_version=asset_version))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return resp
 
 
 @app.route("/api/full")
