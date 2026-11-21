@@ -21,15 +21,17 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5051 ^| findstr LISTENING') 
 )
 if "%FOUND_OLD_PORT%"=="0" echo No old server was using port 5051.
 
-rem An auto-restart (see the bottom of this file) re-runs this whole file
-rem from the top, so by the time we get here the old server has already
-rem exited on its own and the netstat check above finds nothing - without
-rem this, CBX_AUTO_RESTART would get overwritten back to 0 and a browser
-rem tab would pop open every single auto-restart, not just the first run.
+rem Only skip auto-opening a browser tab when THIS SAME script restarted
+rem itself in the background (see the bottom of this file) - a person is
+rem presumably still looking at a tab from before in that case. Any time a
+rem person actually clicks this file themselves, always open a tab, even
+rem if an old server was found and closed first - guessing "they probably
+rem still have a tab open" there instead was wrong often enough that
+rem clicking START.bat could open nothing at all with no obvious sign why.
 if "%CBX_AUTO_RESTART%"=="1" (
     set CBX_WAS_RUNNING=1
 ) else (
-    set CBX_WAS_RUNNING=%FOUND_OLD_PORT%
+    set CBX_WAS_RUNNING=0
 )
 set CBX_AUTO_RESTART=0
 
