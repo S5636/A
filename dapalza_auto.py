@@ -1168,14 +1168,37 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
         # 안 통하니, 트리 조회 없이 무조건 Enter/Esc를 먼저 보내서 혹시
         # 남아있을 팝업을 미리 치운다 - 팝업이 없는 정상 상태에서 보내도
         # 이 시점엔 아직 아무것도 조작 안 한 상태라 위험하지 않다.
-        L('혹시 지난 실행에서 안 닫힌 팝업이 남아있을 수 있어 Enter/Esc를 미리 보내 정리합니다...')
-        try:
-            win.type_keys('{ENTER}')
-            time.sleep(0.5)
-            win.type_keys('{ESC}')
-            time.sleep(0.5)
-        except Exception as e:
-            L(f'사전 정리 키 입력 실패(무시하고 계속 진행): {type(e).__name__}: {e}')
+        L('혹시 지난 실행에서 안 닫힌 팝업이 남아있을 수 있어 정리합니다 (키 입력 + 확인 버튼 탐색)...')
+        # 키 입력(Enter/Esc)만으로는 안 닫히는 팝업도 있을 수 있다 - 마우스
+        # 클릭이 있어야 반응하는 버튼이면 키 입력이 아무 효과가 없다(사용자
+        # 지시: "창이 떠 있다고 아무것도 안 하면 어떡해 - 확인 버튼을
+        # 누르던가 해서 끄고 원래대로 돌린 다음에 DPJ를 실행해야지"). 키
+        # 입력에 더해 화면에 '확인' 버튼이 실제로 보이면 직접 찾아서도
+        # 눌러본다 - 팝업이 여러 개 겹쳐 있을 수도 있으니 몇 번 반복한다.
+        for _ in range(3):
+            try:
+                win.type_keys('{ENTER}')
+                time.sleep(0.5)
+                win.type_keys('{ESC}')
+                time.sleep(0.5)
+            except Exception as e:
+                L(f'사전 정리 키 입력 실패(무시하고 계속 진행): {type(e).__name__}: {e}')
+            try:
+                descendants_pre = win.descendants()
+            except Exception:
+                descendants_pre = None
+            ok_ctrl = _find_smallest_text_match(win, '확인', None, descendants=descendants_pre)
+            if ok_ctrl is None:
+                break
+            L("정리 중 '확인' 버튼을 발견해서 눌러서 닫습니다...")
+            try:
+                ok_ctrl.invoke()
+            except Exception:
+                try:
+                    ok_ctrl.click_input()
+                except Exception as e:
+                    L(f"'확인' 버튼 클릭 실패(무시하고 계속 진행): {type(e).__name__}: {e}")
+            time.sleep(1)
 
         # 다팔자는 클래스명이 Chrome_WidgetWin_1(Electron/Chromium 기반)이다.
         # Electron 앱은 접근성 트리를 처음부터 만들어두지 않고, 윈도우 접근성
