@@ -142,6 +142,11 @@ def _update_watcher():
             print()
             print(f"[자동 업데이트] 새 코드 발견: {', '.join(updated)} - 서버 재시작합니다.")
             os._exit(42)
+        else:
+            # 확인했는데 바뀐 게 없을 때도 매번 한 줄 찍는다 - 안 그러면
+            # 이 기능이 멈춰있는 건지 조용히 잘 돌고 있는 건지 콘솔만
+            # 보고는 구분할 방법이 없다.
+            print(f"[자동 업데이트] 확인함 - 변경 없음 ({time.strftime('%H:%M:%S')})")
 
 
 def _ensure_tailscale_https():
