@@ -6,6 +6,9 @@
     if (n === null || n === undefined || n === "") return "";
     return Number(n).toLocaleString("ko-KR");
   }
+  function shortYear(y) {
+    return y ? String(y).slice(2) : "";
+  }
   function escapeHtml(s) {
     return String(s ?? "").replace(/[&<>"']/g, (c) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -81,7 +84,7 @@
       const cols = columnsForType(docType);
       const trs = rows.map((r) => `
         <tr>
-          <td>${r.year}</td>
+          <td>${shortYear(r.year)}년</td>
           ${cols.map((c) => `<td>${r[c.key] !== null ? fmt(r[c.key]) : "-"}</td>`).join("")}
         </tr>
       `).join("");
@@ -117,7 +120,7 @@
     for (const [docType, docs] of groups) {
       const isOpen = openDocTypeGroups.has(docType);
       const btns = docs.map((d) => {
-        const label = d.period_label || (d.year ? `${d.year}년` : d.name);
+        const label = d.period_label || (d.year ? `${shortYear(d.year)}년` : d.name);
         const issueBadge = issueDateBadge(d.issue_date);
         return `
           <div class="period-btn-wrap">

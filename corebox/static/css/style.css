@@ -180,8 +180,7 @@ table.agg-table th, table.agg-table td {
   text-align: right;
   border-bottom: 1px solid var(--border);
 }
-table.agg-table th:first-child, table.agg-table td:first-child,
-table.agg-table th:nth-child(2), table.agg-table td:nth-child(2) {
+table.agg-table th:first-child, table.agg-table td:first-child {
   text-align: left;
 }
 table.agg-table th { color: var(--text-muted); font-weight: 600; background: var(--surface-2); }

@@ -293,7 +293,7 @@ def _classify_document(filename, text):
         taxable_income_amount = _extract_amount_near_label(text, "소득금액")
     else:
         amount = _extract_generic_amount(doc_type, text)
-    period_label = _period_label_from_date(period.split("~")[0]) if period else (f"{year}년" if year else "")
+    period_label = _period_label_from_date(period.split("~")[0]) if period else (f"{str(year)[2:]}년" if year else "")
     if doc_type and year:
         name = f"{year} {doc_type}"
     elif doc_type:
