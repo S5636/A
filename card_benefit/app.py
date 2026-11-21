@@ -4508,6 +4508,56 @@ def export_all_cards_diag():
     return resp
 
 
+@app.route("/api/export/loan-diag.txt")
+def export_loan_diag():
+    """"왜 이 금액이 이 대출로 잡혔냐"를 캡처 주고받으며 하나씩 확인하는
+    대신, 버튼 한 번으로 등록된 대출 전부의 매칭 조건(월상환액/결제일/
+    출금계좌)이랑 최근 상환 내역을 한 파일로 바로 받게 한다. loan_payments
+    엔 원본 알림을 직접 가리키는 FK가 없어서(상환 처리될 때 inbox_items는
+    그냥 status만 'no_benefit'으로 바뀌고 끝), 같은 날짜+금액인 inbox_items를
+    찾아 원본 알림 문구도 최대한 같이 보여준다(여러 건이면 전부 나열 -
+    어느 게 진짜인지 추측 안 함)."""
+    conn = get_conn()
+    try:
+        loans = conn.execute("SELECT * FROM loans ORDER BY sort_order ASC, id ASC").fetchall()
+        blocks = []
+        for loan in loans:
+            lines = []
+            lines.append(f"대출: {loan['name']} (id={loan['id']})")
+            lines.append(f"상환방식: {loan['repayment_type'] or '(미입력)'}")
+            lines.append(f"월상환액(등록값, 금액+날짜 느슨한 매칭에 쓰임): {loan['monthly_payment']:,.0f}원")
+            lines.append(f"결제일(등록값, 이 날짜 ±3일 안이어야 느슨한 매칭 대상): {loan['payment_day']}일")
+            lines.append(f"출금계좌(등록값, 알림 문구에 이 숫자가 그대로 있으면 금액 상관없이 매칭): {loan['withdrawal_account'] or '(미입력)'}")
+            lines.append("최근 상환 내역(최대 10건) 및 그 날짜+금액으로 찾은 원본 알림 후보:")
+            payments = conn.execute(
+                "SELECT * FROM loan_payments WHERE loan_id = ? ORDER BY paid_at DESC, id DESC LIMIT 10",
+                (loan["id"],),
+            ).fetchall()
+            if not payments:
+                lines.append("  (상환 내역 없음)")
+            for p in payments:
+                lines.append(f"  {p['paid_at']} · {p['amount']:,.0f}원 · {p['memo']} · 상환후잔액 {p['balance_after']:,.0f}원")
+                candidates = conn.execute(
+                    "SELECT raw_text, occurred_at FROM inbox_items "
+                    "WHERE amount = ? AND substr(occurred_at, 1, 10) = ? ORDER BY id DESC LIMIT 5",
+                    (p["amount"], p["paid_at"]),
+                ).fetchall()
+                if not candidates:
+                    lines.append("    (같은 날짜+금액의 원본 알림을 못 찾음 - 알림이 이미 지워졌을 수 있음)")
+                for c in candidates:
+                    raw_preview = (c["raw_text"] or "").replace("\n", " / ")[:200]
+                    lines.append(f"    후보 알림({c['occurred_at']}): {raw_preview}")
+            blocks.append("\n".join(lines))
+        text = ("\n" + "=" * 60 + "\n\n").join(blocks)
+    finally:
+        conn.close()
+
+    resp = make_response(text)
+    resp.headers["Content-Type"] = "text/plain; charset=utf-8"
+    resp.headers["Content-Disposition"] = 'attachment; filename="loan_diag.txt"'
+    return resp
+
+
 @app.route("/api/export/usage.xlsx")
 def export_usage():
     conn = get_conn()
