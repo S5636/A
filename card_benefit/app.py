@@ -2074,6 +2074,7 @@ def _serialize_cards(conn):
                    LEFT JOIN recurring_payments ON recurring_payments.id = inbox_items.recurring_id
                    LEFT JOIN insurances ON insurances.id = inbox_items.insurance_id
                    WHERE substr(inbox_items.occurred_at, 1, 7) = ?
+                   AND inbox_items.deleted_at IS NULL
                    AND (
                        (inbox_items.recurring_id IS NULL AND inbox_items.insurance_id IS NULL
                         AND inbox_items.card_id = ? AND inbox_items.status IN ('assigned', 'no_benefit'))
@@ -4422,7 +4423,8 @@ def _card_diag_lines(conn, card):
                LEFT JOIN recurring_payments ON recurring_payments.id = inbox_items.recurring_id
                LEFT JOIN insurances ON insurances.id = inbox_items.insurance_id
                LEFT JOIN benefits ON benefits.id = inbox_items.benefit_id
-               WHERE substr(inbox_items.occurred_at, 1, 7) = ?"""
+               WHERE substr(inbox_items.occurred_at, 1, 7) = ?
+               AND inbox_items.deleted_at IS NULL"""
         # 1) card_id/상태로 직접 잡히는 것 + recurring/insurance가 card_id FK로
         # 바로 연결된 것(_auto_spend의 1차 쿼리와 동일).
         direct = conn.execute(
