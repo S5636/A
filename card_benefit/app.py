@@ -1384,10 +1384,6 @@ def _try_auto_match(conn, inbox_id, fk_column, table, amount_column, name_column
     return True
 
 
-def _try_auto_match_recurring(conn, inbox_id):
-    return _try_auto_match(conn, inbox_id, "recurring_id", "recurring_payments", "amount", "name")
-
-
 def apply_startup_data_fixes():
     """매번 update.py를 따로 보내서 실행하던 "데이터 보정"(사용자 실제
     데이터를 한 번 바로잡는 것 - 예: 틀린 금액 고치기, 구분용 별칭
@@ -1520,6 +1516,33 @@ def apply_startup_data_fixes():
             )
             print("미래에셋증권 '노타' 등록 누락분 추가")
 
+        # 2026-11: "디딤씨앗 적립예금"(보험 탭)이랑 "고양시청 납부"(고정지출
+        # 탭)가 실제로는 같은 결제(디딤씨앗은 고양시청을 통해 납부)를
+        # 가리키는 중복 등록이었다. 사용자 요청으로 고정지출 쪽 하나로
+        # 합친다: 보험 쪽의 실제 결제수단/적립액을 고정지출로 옮기고
+        # (고정지출은 원래 결제수단이 "현금"이라 자동매칭 대상에서
+        # 빠져있었음), 이 보험에 연결돼있던 받은알림들도 고정지출로
+        # 다시 연결한 뒤, 보험 항목은 지운다. 이미 합쳐진 뒤에는 보험
+        # 항목이 없어서 다시 실행해도 안전함(멱등).
+        didimssi = conn.execute(
+            "SELECT * FROM insurances WHERE product_name = '디딤씨앗 적립예금'"
+        ).fetchone()
+        goyang = conn.execute(
+            "SELECT id FROM recurring_payments WHERE name = '고양시청 납부'"
+        ).fetchone()
+        if didimssi and goyang:
+            conn.execute(
+                "UPDATE recurring_payments SET payment_method = ?, card_id = ?, "
+                "current_balance = current_balance + ? WHERE id = ?",
+                (didimssi["payment_method"], didimssi["card_id"], didimssi["current_balance"], goyang["id"]),
+            )
+            conn.execute(
+                "UPDATE inbox_items SET recurring_id = ?, insurance_id = NULL WHERE insurance_id = ?",
+                (goyang["id"], didimssi["id"]),
+            )
+            conn.execute("DELETE FROM insurances WHERE id = ?", (didimssi["id"],))
+            print("'디딤씨앗 적립예금'(보험)을 '고양시청 납부'(고정지출)로 통합")
+
         conn.commit()
     except Exception:
         pass
@@ -1528,35 +1551,43 @@ def apply_startup_data_fixes():
 
 
 def _bump_didimssi_on_match(conn, inbox_id):
-    """"디딤씨앗 적립예금"(매달 내가 5만원 입금) 알림이 새로 매칭될 때마다
-    정부도 5만원 매칭해준다고 보고 현재 적립액에 10만원(내 5만원+정부
-    5만원)씩 자동으로 더한다. 기준점(current_balance)은 "내 적립액"을
-    2배(정부매칭 반영) 해서 잡아둔 값이라, 매칭될 때마다 같은 방식으로
-    10만원씩 늘려야 일관된다. "고양시청 납부" 고정지출은 결제수단이
-    "현금"이라 애초에 알림 자동매칭 대상에서 빠지기 때문에(is_cash_only),
-    실제 매칭은 이 보험 항목(결제수단 계좌이체)으로 들어온다. 이자/운용
-    수익까지 정확히 추적하는 건 포기하고(사용자가 "정확하지 않아도
-    된다"고 함) 매달 자동으로 커지게만 해둔다. _try_auto_match_insurance가
-    방금 실제로 새로 매칭했을 때만 호출되므로(이미 매칭된 건 다시 안
-    걸림) 한 건당 한 번만 더해진다."""
-    item = conn.execute("SELECT insurance_id FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
-    if not item or not item["insurance_id"]:
+    """"고양시청 납부"(디딤씨앗 적립예금, 매달 내가 5만원 입금) 알림이 새로
+    매칭될 때마다 정부도 5만원 매칭해준다고 보고 현재 적립액에 10만원(내
+    5만원+정부 5만원)씩 자동으로 더한다. 기준점(current_balance)은 "내
+    적립액"을 2배(정부매칭 반영) 해서 잡아둔 값이라, 매칭될 때마다 같은
+    방식으로 10만원씩 늘려야 일관된다. 원래는 보험 탭에 "디딤씨앗 적립예금"
+    이라는 별도 항목(결제수단 계좌이체)으로 등록돼 있었는데, "고양시청
+    납부" 고정지출이랑 같은 실제 결제를 가리키는 중복 등록이라 사용자
+    요청으로 고정지출 쪽 하나로 합치고 보험 쪽은 지웠다(그래서 "고양시청
+    납부"의 결제수단도 그때 "현금"에서 실제 결제수단인 계좌이체로 같이
+    바뀜 - 안 바꾸면 현금 항목은 is_cash_only에 걸려 애초에 자동매칭
+    대상에서 빠짐). 이자/운용 수익까지 정확히 추적하는 건 포기하고
+    (사용자가 "정확하지 않아도 된다"고 함) 매달 자동으로 커지게만 해둔다.
+    _try_auto_match_recurring이 방금 실제로 새로 매칭했을 때만 호출되므로
+    (이미 매칭된 건 다시 안 걸림) 한 건당 한 번만 더해진다."""
+    item = conn.execute("SELECT recurring_id FROM inbox_items WHERE id = ?", (inbox_id,)).fetchone()
+    if not item or not item["recurring_id"]:
         return
-    ins = conn.execute(
-        "SELECT product_name FROM insurances WHERE id = ?", (item["insurance_id"],)
+    rp = conn.execute(
+        "SELECT name FROM recurring_payments WHERE id = ?", (item["recurring_id"],)
     ).fetchone()
-    if not ins or ins["product_name"] != "디딤씨앗 적립예금":
+    if not rp or rp["name"] != "고양시청 납부":
         return
     conn.execute(
-        "UPDATE insurances SET current_balance = current_balance + 100000 WHERE id = ?",
-        (item["insurance_id"],),
+        "UPDATE recurring_payments SET current_balance = current_balance + 100000 WHERE id = ?",
+        (item["recurring_id"],),
     )
 
 
-def _try_auto_match_insurance(conn, inbox_id):
-    matched = _try_auto_match(conn, inbox_id, "insurance_id", "insurances", "monthly_premium", "product_name")
+def _try_auto_match_recurring(conn, inbox_id):
+    matched = _try_auto_match(conn, inbox_id, "recurring_id", "recurring_payments", "amount", "name")
     if matched:
         _bump_didimssi_on_match(conn, inbox_id)
+    return matched
+
+
+def _try_auto_match_insurance(conn, inbox_id):
+    return _try_auto_match(conn, inbox_id, "insurance_id", "insurances", "monthly_premium", "product_name")
     return matched
 
 
@@ -2808,14 +2839,19 @@ def create_recurring_payment():
     except (TypeError, ValueError):
         payment_day = 0
     card_id = _parse_card_id(data.get("card_id"))
+    try:
+        current_balance = float(data.get("current_balance") or 0)
+    except (TypeError, ValueError):
+        current_balance = 0
 
     conn = get_conn()
     try:
         max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM recurring_payments").fetchone()["m"]
         conn.execute(
             """INSERT INTO recurring_payments (name, category, amount, payment_method, card_id,
-               payment_day, billing_cycle, usage_period, active, memo, sort_order, billing_alias)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               payment_day, billing_cycle, usage_period, active, memo, sort_order, billing_alias,
+               current_balance)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (data.get("category") or "").strip(),
@@ -2829,6 +2865,7 @@ def create_recurring_payment():
                 (data.get("memo") or "").strip(),
                 max_order + 1,
                 (data.get("billing_alias") or "").strip(),
+                current_balance,
             ),
         )
         conn.commit()
@@ -2857,11 +2894,15 @@ def update_recurring_payment(item_id):
             payment_day = item["payment_day"]
         active = 1 if data.get("active", bool(item["active"])) else 0
         card_id = _parse_card_id(data["card_id"]) if "card_id" in data else item["card_id"]
+        try:
+            current_balance = float(data.get("current_balance", item["current_balance"]))
+        except (TypeError, ValueError):
+            current_balance = item["current_balance"]
 
         conn.execute(
             """UPDATE recurring_payments SET name=?, category=?, amount=?, payment_method=?,
                card_id=?, payment_day=?, billing_cycle=?, usage_period=?, active=?, memo=?,
-               billing_alias=? WHERE id=?""",
+               billing_alias=?, current_balance=? WHERE id=?""",
             (
                 name,
                 (data.get("category", item["category"]) or "").strip(),
@@ -2874,6 +2915,7 @@ def update_recurring_payment(item_id):
                 active,
                 (data.get("memo", item["memo"]) or "").strip(),
                 (data.get("billing_alias", item["billing_alias"]) or "").strip(),
+                current_balance,
                 item_id,
             ),
         )

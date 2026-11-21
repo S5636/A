@@ -267,6 +267,7 @@ def init_db():
         _ensure_column(conn, "insurances", "interest_rate", "interest_rate REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "stocks", "broker", "broker TEXT DEFAULT ''")
         _ensure_column(conn, "loan_payments", "source_inbox_id", "source_inbox_id INTEGER DEFAULT NULL")
+        _ensure_column(conn, "recurring_payments", "current_balance", "current_balance REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "stocks", "sell_price", "sell_price REAL NOT NULL DEFAULT 0")
         _ensure_column(conn, "recurring_payments", "billing_cycle", "billing_cycle TEXT DEFAULT '월간'")
         _ensure_column(conn, "recurring_payments", "usage_period", "usage_period TEXT DEFAULT ''")

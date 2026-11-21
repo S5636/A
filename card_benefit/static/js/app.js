@@ -1476,6 +1476,7 @@
         </div>
       </div>
       ${item.usage_period ? `<div class="perf-row-sub">사용기간 ${escapeHtml(shortDateRange(item.usage_period))}</div>` : ""}
+      ${item.current_balance ? `<div class="perf-row-sub" style="color:var(--neon-green);">현재 적립액 ${fmt(item.current_balance)}원</div>` : ""}
       ${memoToggleTemplate(`recurring-${item.id}`, item.memo)}
       ${matchHistoryTemplate(`recurring-${item.id}`, item.match_history, { showToggle: false })}
     `;
@@ -1674,6 +1675,7 @@
     usageStartInput.value = usageMatch ? usageMatch[1] : "";
     updateUsagePeriodPreview();
     document.getElementById("recurring-billing-alias").value = item ? (item.billing_alias || "") : "";
+    document.getElementById("recurring-current-balance").value = item && item.current_balance ? item.current_balance : "";
     document.getElementById("recurring-active").checked = item ? !!item.active : true;
     document.getElementById("recurring-memo").value = item ? item.memo : "";
     recurringModal.classList.add("open");
@@ -1699,6 +1701,7 @@
         return start ? `${start} ~ ${usagePeriodEndDate(start)}` : "";
       })(),
       billing_alias: document.getElementById("recurring-billing-alias").value.trim(),
+      current_balance: document.getElementById("recurring-current-balance").value || 0,
       active: document.getElementById("recurring-active").checked,
       memo: document.getElementById("recurring-memo").value.trim(),
     };
