@@ -1618,8 +1618,9 @@ def _mark_loan_paid_from_inbox(conn, loan_id, inbox_id, amount=None):
     else:
         balance_after = balance
     conn.execute(
-        "INSERT INTO loan_payments (loan_id, paid_at, amount, balance_after, memo) VALUES (?, ?, ?, ?, ?)",
-        (loan_id, paid_at, paid_amount, balance_after, "알림 자동확인"),
+        "INSERT INTO loan_payments (loan_id, paid_at, amount, balance_after, memo, source_inbox_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (loan_id, paid_at, paid_amount, balance_after, "알림 자동확인", inbox_id),
     )
     if balance_after != balance:
         conn.execute("UPDATE loans SET current_balance = ? WHERE id = ?", (balance_after, loan_id))
@@ -1684,10 +1685,17 @@ def _try_auto_match_loan_account_text(conn, inbox_id):
     # 떨어져 보여서 그냥 in text로는 안 걸리니, 원문 쪽도 숫자만 남겨서
     # 비교한다(마스킹 *은 어차피 숫자가 아니라 제거돼도 비교에 지장 없음).
     text_digits = _account_digits(text)
+    # 출금계좌에 숫자가 하나도 없으면(계좌번호 없이 은행명만 등록한 경우,
+    # 예: "KB국민은행") 아래 l["withdrawal_account"] in text가 그 은행명을
+    # 언급하는 모든 알림과 매칭돼버려 금액/날짜 무관 오매칭이 난다. 숫자가
+    # 있는 경우에만 매칭을 시도한다.
     matches = [
         l for l in loans
-        if l["withdrawal_account"] in text
-        or (_account_digits(l["withdrawal_account"]) and _account_digits(l["withdrawal_account"]) in text_digits)
+        if _account_digits(l["withdrawal_account"])
+        and (
+            l["withdrawal_account"] in text
+            or _account_digits(l["withdrawal_account"]) in text_digits
+        )
     ]
     if len(matches) > 1:
         if "이자상환" in text:
@@ -2738,7 +2746,9 @@ def delete_loan_payment(payment_id):
     최신 기록 기준으로 항상 맞게 유지하기 위해(삭제 순서와 무관하게 안전)."""
     conn = get_conn()
     try:
-        payment = conn.execute("SELECT loan_id FROM loan_payments WHERE id = ?", (payment_id,)).fetchone()
+        payment = conn.execute(
+            "SELECT loan_id, source_inbox_id FROM loan_payments WHERE id = ?", (payment_id,)
+        ).fetchone()
         if payment:
             loan_id = payment["loan_id"]
             conn.execute("DELETE FROM loan_payments WHERE id = ?", (payment_id,))
@@ -2751,6 +2761,22 @@ def delete_loan_payment(payment_id):
             else:
                 principal_row = conn.execute("SELECT principal FROM loans WHERE id = ?", (loan_id,)).fetchone()
                 new_balance = principal_row["principal"] if principal_row else 0
+            # 이 상환 기록이 받은 알림 자동매칭으로 만들어진 거면(source_inbox_id
+            # 있음), 그 알림도 같이 "받은 알림" 큐로 되돌린다 - 안 그러면 상환
+            # 기록은 지워졌는데 원본 알림은 no_benefit 상태로 계속 숨어있고,
+            # "당월 상환" 체크 표시도 틀린 채로 계속 켜져있는 반쪽만 풀린
+            # 상태가 된다(recurring/insurance의 해제 버그랑 같은 유형).
+            if payment["source_inbox_id"]:
+                conn.execute(
+                    "UPDATE inbox_items SET status = 'pending', card_id = NULL WHERE id = ?",
+                    (payment["source_inbox_id"],),
+                )
+            still_paid_this_month = conn.execute(
+                "SELECT 1 FROM loan_payments WHERE loan_id = ? AND substr(paid_at, 1, 7) = ?",
+                (loan_id, current_year_month()),
+            ).fetchone()
+            if not still_paid_this_month:
+                conn.execute("UPDATE loans SET paid_check_month = '' WHERE id = ?", (loan_id,))
             conn.execute("UPDATE loans SET current_balance = ? WHERE id = ?", (new_balance, loan_id))
         conn.commit()
     finally:
