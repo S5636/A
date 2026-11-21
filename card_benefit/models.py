@@ -339,6 +339,23 @@ def init_db():
             "WHERE withdrawal_account = 'IBK사업자' AND payment_day = 14"
         )
 
+        # 2026-11: 같은 문제가 "KB국민은행 제휴 대환 신용대출"/"카카오뱅크
+        # 개인사업자 신용대출"에도 있었다(출금계좌가 은행명만 등록돼 있어서
+        # 계좌문구 자동매칭이 안 됨 - 오히려 은행명만 있으면 아무 알림이나
+        # 다 걸리는 별개의 오매칭 버그까지 있었음, app.py에서 이미 고침).
+        # 카드/계좌 모두 뒷자리만 보관하는 기존 방식대로 전체 번호 대신
+        # 뒷 4자리만 채운다 - 매칭 쪽(_account_digits)은 어차피 숫자만
+        # 뽑아서 알림 원문 숫자열에 포함되는지만 보므로 뒷 4자리로도
+        # 매칭엔 지장 없다.
+        conn.execute(
+            "UPDATE loans SET withdrawal_account = 'KB국민은행 6193' "
+            "WHERE name LIKE '%KB%대환%신용대출%' AND withdrawal_account IN ('KB국민은행', '')"
+        )
+        conn.execute(
+            "UPDATE loans SET withdrawal_account = '카카오뱅크 4526' "
+            "WHERE name LIKE '%카카오%개인사업자%신용대출%' AND withdrawal_account IN ('카카오', '')"
+        )
+
         # 2026-11: 카카오뱅크 비상금대출이 아직 대출 탭에 등록이 안 돼 있어서
         # 추가한다. 마이너스통장형이라 "원금"/"현재 잔액" 의미가 다른 대출과
         # 달라서(한도성 - 하나은행 비상금대출과 같은 방식), principal을
