@@ -390,9 +390,16 @@ def index():
     되므로 페이지 본문은 절대 캐시하지 않게 막는다(코어싱크와 동일한
     방식 - 이게 빠져있어서 서버 쪽은 다 고쳐도 폰 화면은 계속 예전
     그대로 보였던 것으로 보임)."""
-    js_path = os.path.join(app.static_folder, "js", "app.js")
-    css_path = os.path.join(app.static_folder, "css", "style.css")
-    asset_version = str(int(max(os.path.getmtime(js_path), os.path.getmtime(css_path))))
+    versioned_paths = [
+        os.path.join(app.static_folder, "js", "app.js"),
+        os.path.join(app.static_folder, "css", "style.css"),
+        os.path.join(app.static_folder, "img", "logo.png"),
+        os.path.join(app.static_folder, "img", "wordmark.png"),
+        os.path.join(app.static_folder, "img", "icon-192.png"),
+        os.path.join(app.static_folder, "img", "icon-512.png"),
+        os.path.join(app.static_folder, "img", "apple-touch-icon.png"),
+    ]
+    asset_version = str(int(max(os.path.getmtime(p) for p in versioned_paths if os.path.exists(p))))
     resp = make_response(render_template("index.html", asset_version=asset_version))
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return resp

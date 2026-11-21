@@ -2297,6 +2297,10 @@ def index():
     js_path = os.path.join(app.static_folder, "js", "app.js")
     css_path = os.path.join(app.static_folder, "css", "style.css")
     mtimes = [os.path.getmtime(js_path), os.path.getmtime(css_path)]
+    for name in ("logo.png", "wordmark.png", "icon-192.png", "icon-512.png", "apple-touch-icon.png"):
+        path = os.path.join(app.static_folder, "img", name)
+        if os.path.exists(path):
+            mtimes.append(os.path.getmtime(path))
     logo_dir = os.path.join(app.static_folder, "img", "sub_logos")
     if os.path.isdir(logo_dir):
         for fname in os.listdir(logo_dir):
