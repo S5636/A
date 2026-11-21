@@ -140,6 +140,39 @@ def _update_watcher():
             os._exit(42)
 
 
+def _ensure_tailscale_https():
+    """크롬/웨일 계열 브라우저는 http://100.x.x.x처럼 암호화 안 된
+    주소에서는 "파일을 안전하게 다운로드할 수 없음"이라며 다운로드
+    자체를 막아버린다. 이미 쓰고 있는 Tailscale에는 공짜 HTTPS 주소
+    (https://기기명.OOO.ts.net)를 한 번만 설정해두면 계속 써지는
+    기능(tailscale serve)이 있어서 그걸로 이 문제를 없앤다. 매번
+    실행할 필요 없이 한 번 성공하면 표시만 남기고 다시 안 건드린다.
+    tailscale이 없거나(PATH에 없음) 계정 설정에서 HTTPS 인증서를 아직
+    안 켜서 실패해도 조용히 넘어간다 - 그래도 http 주소는 그대로 계속
+    쓸 수 있으니 여기서 막히면 안 된다."""
+    marker = os.path.join(BASE_DIR, ".tailscale_serve_done")
+    if os.path.exists(marker):
+        return
+    try:
+        result = subprocess.run(
+            ["tailscale", "serve", "--bg", "https", "/", f"http://127.0.0.1:{PORT}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write("ok")
+            print("Tailscale HTTPS 주소를 설정했습니다. 'tailscale serve status'로 주소를 확인할 수 있습니다.")
+            print("앞으로는 폰에서 그 https 주소로 접속하면 다운로드 차단 문제가 없어집니다.")
+        else:
+            print("Tailscale HTTPS 자동 설정을 시도했지만 실패했습니다(기존 http 주소는 그대로 쓸 수 있습니다):")
+            print((result.stderr or result.stdout).strip()[:300])
+            print("Tailscale 관리자 콘솔(login.tailscale.com/admin/dns)에서 HTTPS 인증서를 켰는지 확인해보세요.")
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+
 def _requirements_hash():
     try:
         with open(os.path.join(BASE_DIR, "requirements.txt"), "rb") as f:
@@ -183,6 +216,8 @@ def main():
 
     ip = local_ip()
     ts_ip = tailscale_ip()
+    if ts_ip:
+        _ensure_tailscale_https()
     print()
     print("설치 완료. 서버를 시작합니다.")
     print(f"이 PC에서 볼 때:   http://127.0.0.1:{PORT}")
