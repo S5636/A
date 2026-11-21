@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS documents (
     amount REAL,                     -- 소득금액증명 외 서류의 금액(과세표준액 등, 해당 없으면 NULL)
     issue_date TEXT DEFAULT '',      -- 발급일(YYYY-MM-DD) - 제출 유효기간(보통 한 달) 확인용
     period TEXT DEFAULT '',          -- 서류가 다루는 기간(과세기간 등, "YYYY-MM-DD~YYYY-MM-DD") - 발급일과 별개
+    period_label TEXT DEFAULT '',    -- 목록 버튼에 보여줄 짧은 이름(예: "2025년 1기", "2020년")
     file_name TEXT DEFAULT '',       -- 실제 저장 파일명(uploads/ 안의 이름, 랜덤)
     original_name TEXT DEFAULT '',   -- 업로드할 때 원래 파일명(다운로드 시 이 이름으로 줌)
     memo TEXT DEFAULT '',
@@ -53,6 +54,7 @@ def init_db():
         _ensure_column(conn, "documents", "amount", "amount REAL")
         _ensure_column(conn, "documents", "issue_date", "issue_date TEXT DEFAULT ''")
         _ensure_column(conn, "documents", "period", "period TEXT DEFAULT ''")
+        _ensure_column(conn, "documents", "period_label", "period_label TEXT DEFAULT ''")
 
         # 2026-11: 자동분류 로직이 아직 "발급일자"보다 "과세기간"을 우선
         # 보게 고쳐지기 전에 올린 "22년1기" 부가세 과세표준증명이 발급일자

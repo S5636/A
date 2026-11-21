@@ -128,6 +128,42 @@ body { padding-bottom: 40px; }
   margin: 14px 0 6px;
 }
 
+.doctype-header {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  margin: 10px 0 6px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.doctype-header:hover { background: var(--surface-2); }
+.doctype-count { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+.doctype-body {
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 2px 4px;
+}
+.period-btn-wrap { display: flex; align-items: center; gap: 2px; }
+.period-btn {
+  display: inline-block;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.period-btn:hover { background: var(--surface-3); }
+.issue-date-tag { color: var(--text-muted); font-size: 11px; margin: 0 2px; }
+
 table.agg-table {
   width: 100%;
   border-collapse: collapse;

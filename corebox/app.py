@@ -179,10 +179,71 @@ def _extract_generic_amount(doc_type, text):
     return None
 
 
+def _period_label_from_date(start_date):
+    """날짜 하나(기간 시작일)로 짧은 표시용 이름을 만든다 - 상반기(1~6월)면
+    "N기"=1, 하반기(7~12월)면 2. 부가세는 반기 단위로 끊기는 게 보통이라
+    이걸로 충분하다."""
+    y, m, _ = start_date.split("-")
+    half = 1 if int(m) <= 6 else 2
+    return f"{y}년 {half}기"
+
+
+_VAT_ROW_RE = re.compile(
+    r"(20\d{2})[./-](\d{1,2})[./-](\d{1,2})\D{0,10}?"
+    r"(20\d{2})[./-](\d{1,2})[./-](\d{1,2})\D{0,15}?([\d,]{4,})"
+)
+
+
+def _extract_vat_period_rows(text):
+    """부가가치세과세표준증명은 한 장에 "과세기간(부터~까지) / 배출과세표준
+    계" 행이 여러 개(보통 반기별로 2개) 같이 찍혀 나온다 - 발급 시점까지의
+    지난 기수를 전부 모아서 보여주는 서류라서다. 그 표의 모든 행을
+    찾아서 기수별로 따로따로 돌려준다(한 장을 여러 기수 버튼이 같은
+    파일을 가리키게 등록하기 위함). 표를 못 찾으면 빈 리스트."""
+    rows = []
+    for m in _VAT_ROW_RE.finditer(text):
+        start = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+        end = f"{m.group(4)}-{int(m.group(5)):02d}-{int(m.group(6)):02d}"
+        try:
+            amount = float(m.group(7).replace(",", ""))
+        except ValueError:
+            continue
+        rows.append({
+            "year": int(m.group(1)),
+            "period": f"{start}~{end}",
+            "period_label": _period_label_from_date(start),
+            "amount": amount,
+        })
+    return rows
+
+
 def _classify_document(filename, text):
+    """서류 하나를 분석해서 등록할 document 행(들)을 돌려준다. 보통 1건
+    이지만, 부가가치세과세표준증명처럼 한 장에 여러 기수 표가 들어있으면
+    기수 개수만큼 여러 건으로 나눠서 돌려준다(파일은 같은 걸 같이 씀)."""
     doc_type = _classify_text(text)
-    year = _extract_year(text, filename)
     issue_date = _extract_date_near_label(text, ["발급일자", "발급일"])
+
+    if doc_type == "부가가치세 과세표준증명":
+        vat_rows = _extract_vat_period_rows(text)
+        if vat_rows:
+            return [
+                {
+                    "name": f"{row['period_label']} {doc_type}",
+                    "category": doc_type,
+                    "issue_date": issue_date,
+                    "period": row["period"],
+                    "period_label": row["period_label"],
+                    "amount": row["amount"],
+                    "year": row["year"],
+                    "doc_type": doc_type,
+                    "income_amount": None,
+                    "taxable_income_amount": None,
+                }
+                for row in vat_rows
+            ]
+
+    year = _extract_year(text, filename)
     period = _extract_period(text)
     income_amount = None
     taxable_income_amount = None
@@ -192,23 +253,25 @@ def _classify_document(filename, text):
         taxable_income_amount = _extract_amount_near_label(text, "소득금액")
     else:
         amount = _extract_generic_amount(doc_type, text)
+    period_label = _period_label_from_date(period.split("~")[0]) if period else (f"{year}년" if year else "")
     if doc_type and year:
         name = f"{year} {doc_type}"
     elif doc_type:
         name = doc_type
     else:
         name = os.path.splitext(filename)[0]
-    return {
+    return [{
         "name": name,
         "category": doc_type,
         "issue_date": issue_date,
         "period": period,
+        "period_label": period_label,
         "amount": amount,
         "year": year,
         "doc_type": doc_type,
         "income_amount": income_amount,
         "taxable_income_amount": taxable_income_amount,
-    }
+    }]
 
 
 def _parse_float(value):
@@ -282,7 +345,7 @@ def create_document_auto():
 
     file_bytes = uploaded.read()
     text = _extract_text_from_file(uploaded.filename, file_bytes)
-    detected = _classify_document(uploaded.filename, text)
+    detected_list = _classify_document(uploaded.filename, text)
 
     ext = os.path.splitext(secure_filename(uploaded.filename))[1]
     file_name = f"{uuid.uuid4().hex}{ext}"
@@ -294,31 +357,39 @@ def create_document_auto():
         max_order = conn.execute(
             "SELECT COALESCE(MAX(sort_order), -1) AS m FROM documents"
         ).fetchone()["m"]
-        cur = conn.execute(
-            """INSERT INTO documents (name, category, year, doc_type, income_amount,
-               taxable_income_amount, amount, issue_date, period, file_name, original_name, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                detected["name"],
-                detected["category"],
-                detected["year"],
-                detected["doc_type"],
-                detected["income_amount"],
-                detected["taxable_income_amount"],
-                detected["amount"],
-                detected["issue_date"] or "",
-                detected["period"] or "",
-                file_name,
-                uploaded.filename,
-                max_order + 1,
-            ),
-        )
+        first_id = None
+        for detected in detected_list:
+            max_order += 1
+            cur = conn.execute(
+                """INSERT INTO documents (name, category, year, doc_type, income_amount,
+                   taxable_income_amount, amount, issue_date, period, period_label,
+                   file_name, original_name, sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    detected["name"],
+                    detected["category"],
+                    detected["year"],
+                    detected["doc_type"],
+                    detected["income_amount"],
+                    detected["taxable_income_amount"],
+                    detected["amount"],
+                    detected["issue_date"] or "",
+                    detected["period"] or "",
+                    detected["period_label"] or "",
+                    file_name,
+                    uploaded.filename,
+                    max_order,
+                ),
+            )
+            if first_id is None:
+                first_id = cur.lastrowid
         conn.commit()
         return jsonify({
             "documents": serialize_documents(conn),
             "aggregate": serialize_aggregate(conn),
-            "detected": detected,
-            "id": cur.lastrowid,
+            "detected": detected_list[0] if detected_list else {},
+            "detected_count": len(detected_list),
+            "id": first_id,
             "text_found": bool(text.strip()),
         })
     finally:
@@ -347,9 +418,9 @@ def create_document():
         ).fetchone()["m"]
         conn.execute(
             """INSERT INTO documents (name, category, year, doc_type, income_amount,
-               taxable_income_amount, amount, issue_date, period, file_name, original_name,
-               memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               taxable_income_amount, amount, issue_date, period, period_label, file_name,
+               original_name, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (request.form.get("category") or "").strip(),
@@ -360,6 +431,7 @@ def create_document():
                 _parse_float(request.form.get("amount")),
                 (request.form.get("issue_date") or "").strip(),
                 (request.form.get("period") or "").strip(),
+                (request.form.get("period_label") or "").strip(),
                 file_name,
                 original_name,
                 (request.form.get("memo") or "").strip(),
@@ -399,8 +471,8 @@ def update_document(doc_id):
 
         conn.execute(
             """UPDATE documents SET name=?, category=?, year=?, doc_type=?, income_amount=?,
-               taxable_income_amount=?, amount=?, issue_date=?, period=?, file_name=?,
-               original_name=?, memo=? WHERE id=?""",
+               taxable_income_amount=?, amount=?, issue_date=?, period=?, period_label=?,
+               file_name=?, original_name=?, memo=? WHERE id=?""",
             (
                 name,
                 (request.form.get("category", item["category"]) or "").strip(),
@@ -411,6 +483,7 @@ def update_document(doc_id):
                 _parse_float(request.form.get("amount", item["amount"])),
                 (request.form.get("issue_date", item["issue_date"]) or "").strip(),
                 (request.form.get("period", item["period"]) or "").strip(),
+                (request.form.get("period_label", item["period_label"]) or "").strip(),
                 file_name,
                 original_name,
                 (request.form.get("memo", item["memo"]) or "").strip(),
