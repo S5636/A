@@ -34,6 +34,7 @@ _ZIP_URL = f"https://github.com/{_REPO_OWNER}/{_REPO_NAME}/archive/refs/heads/{_
 _UPDATE_PROTECTED_NAMES = {
     "shop_data.db", "fees_config.json", "settings.json",
     "ownerclan_profile", "ownerclan_profile_whale", "ownerclan_profile_chrome",
+    ".admin_browser_profile",
     ".setup_done", ".git",
 }
 _UPDATE_PROTECTED_PATTERN = re.compile(r"^\.stock_recalc_v\d+_done$")
@@ -193,10 +194,73 @@ def _close_previous_instances():
                 pass
 
 
+# 재시작마다 새 탭이 계속 쌓이던 문제(사용자 지적: "나는 탭 정리해주길
+# 바라는데") - 오너클랜 자동화 창과 똑같은 방식(Playwright + CDP 디버그
+# 포트)으로 마진보드 전용 창을 하나만 띄우고, 다음 실행부터는 그 창에
+# 그대로 재접속해서 새로고침만 한다. 오너클랜 쪽과 마찬가지로, 이 창은
+# 재시작(START.bat의 강제 taskkill)에서 일부러 안 닫는다 - 그래야 고아
+# 프로세스로 살아남아서 다음 실행이 CDP로 이어받을 수 있다.
+_ADMIN_CDP_PORT = 17392
+_ADMIN_BROWSER_PROFILE_DIR = os.path.join(BASE_DIR, ".admin_browser_profile")
+
+
+def _try_reconnect_admin_browser(url):
+    pw = None
+    try:
+        from playwright.sync_api import sync_playwright
+        pw = sync_playwright().start()
+        browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{_ADMIN_CDP_PORT}", timeout=5000)
+        if not browser.contexts:
+            browser.close()
+            pw.stop()
+            return False
+        context = browser.contexts[0]
+        page = context.pages[0] if context.pages else context.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        try:
+            page.bring_to_front()
+        except Exception:
+            pass
+        print("[안내] 이전에 열어둔 마진보드 창을 그대로 새로고침했습니다 (새 탭을 또 열지 않습니다).")
+        return True
+    except Exception:
+        if pw is not None:
+            try:
+                pw.stop()
+            except Exception:
+                pass
+        return False
+
+
+def _launch_admin_browser(url):
+    try:
+        from playwright.sync_api import sync_playwright
+        os.makedirs(_ADMIN_BROWSER_PROFILE_DIR, exist_ok=True)
+        pw = sync_playwright().start()
+        context = pw.chromium.launch_persistent_context(
+            _ADMIN_BROWSER_PROFILE_DIR,
+            headless=False,
+            args=[f"--remote-debugging-port={_ADMIN_CDP_PORT}"],
+            no_viewport=True,
+        )
+        page = context.pages[0] if context.pages else context.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        return True
+    except Exception as e:
+        print(f"[안내] 마진보드 창을 자동으로 여는 데 실패했습니다({type(e).__name__}) - 브라우저에서 직접 {url} 로 접속해주세요.")
+        return False
+
+
 def open_browser_later():
     time.sleep(3)
+    url = "http://127.0.0.1:5000/"
+    if _try_reconnect_admin_browser(url):
+        return
+    if _launch_admin_browser(url):
+        return
+    # playwright가 아예 없거나 위 둘 다 실패한 경우의 최후 안전망
     try:
-        webbrowser.open("http://127.0.0.1:5000/")
+        webbrowser.open(url)
     except Exception:
         pass
 

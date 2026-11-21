@@ -6,6 +6,7 @@ venv/
 ownerclan_profile/
 ownerclan_profile_whale/
 ownerclan_profile_chrome/
+.admin_browser_profile/
 .setup_done
 .stock_recalc_v*_done
 Margin_Board.zip
