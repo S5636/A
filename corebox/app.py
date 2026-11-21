@@ -196,39 +196,52 @@ def _extract_generic_amount(doc_type, text):
 
 
 def _period_label_from_date(start_date):
-    """날짜 하나(기간 시작일)로 짧은 표시용 이름을 만든다 - 상반기(1~6월)면
-    "N기"=1, 하반기(7~12월)면 2. 부가세는 반기 단위로 끊기는 게 보통이라
-    이걸로 충분하다."""
+    """날짜 하나(기간 시작일)로 짧은 표시용 이름을 만든다 - "25년 1기"처럼
+    연도는 뒷 2자리만, 반기(1~6월=1기, 7~12월=2기)로 끊는다."""
     y, m, _ = start_date.split("-")
     half = 1 if int(m) <= 6 else 2
-    return f"{y}년 {half}기"
+    return f"{y[2:]}년 {half}기"
 
 
-_VAT_ROW_RE = re.compile(
+_VAT_DATE_PAIR_RE = re.compile(
     r"(20\d{2})[./-](\d{1,2})[./-](\d{1,2})\D{0,10}?"
-    r"(20\d{2})[./-](\d{1,2})[./-](\d{1,2})\D{0,15}?([\d,]{4,})"
+    r"(20\d{2})[./-](\d{1,2})[./-](\d{1,2})"
 )
 
 
 def _extract_vat_period_rows(text):
     """부가가치세과세표준증명은 한 장에 "과세기간(부터~까지) / 배출과세표준
-    계" 행이 여러 개(보통 반기별로 2개) 같이 찍혀 나온다 - 발급 시점까지의
-    지난 기수를 전부 모아서 보여주는 서류라서다. 그 표의 모든 행을
-    찾아서 기수별로 따로따로 돌려준다(한 장을 여러 기수 버튼이 같은
+    (계/과세분/면세분) / 납부할 세액" 행이 여러 개(보통 반기별로 2개) 같이
+    찍혀 나온다 - 발급 시점까지의 지난 기수를 전부 모아서 보여주는
+    서류라서다. 중요한 건 매출(과세표준)액이 아니라 실제 낸(또는 환급
+    받은) 세액이므로, 그 기간 뒤에 나오는 숫자들 중 "맨 마지막" 숫자
+    (납부할 세액 - 환급이면 마이너스로 찍힘)를 금액으로 쓴다. 표의 모든
+    행을 찾아서 기수별로 따로따로 돌려준다(한 장을 여러 기수 버튼이 같은
     파일을 가리키게 등록하기 위함). 표를 못 찾으면 빈 리스트."""
     rows = []
-    for m in _VAT_ROW_RE.finditer(text):
+    matches = list(_VAT_DATE_PAIR_RE.finditer(text))
+    for i, m in enumerate(matches):
         start = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
         end = f"{m.group(4)}-{int(m.group(5)):02d}-{int(m.group(6)):02d}"
+        # 이 행의 숫자 4개(계/과세분/면세분/세액)만 보면 되니, 다음 행
+        # 시작 전까지로 자르되 줄바꿈이 먼저 나오면 거기서 끊는다 - 안
+        # 그러면 다음 행이 없는 마지막 기수에서 그 뒤에 찍히는 발급일자
+        # 숫자("2026")까지 세액으로 잘못 집을 수 있다.
+        hard_end = matches[i + 1].start() if i + 1 < len(matches) else min(len(text), m.end() + 60)
+        newline_pos = text.find("\n", m.end())
+        chunk_end = min(hard_end, newline_pos) if 0 <= newline_pos < hard_end else hard_end
+        numbers = re.findall(r"-?[\d,]{4,}", text[m.end():chunk_end])
+        if not numbers:
+            continue
         try:
-            amount = float(m.group(7).replace(",", ""))
+            tax_amount = float(numbers[-1].replace(",", ""))
         except ValueError:
             continue
         rows.append({
             "year": int(m.group(1)),
             "period": f"{start}~{end}",
             "period_label": _period_label_from_date(start),
-            "amount": amount,
+            "amount": tax_amount,
         })
     return rows
 

@@ -21,10 +21,10 @@
       { key: "taxable_total", itemKey: "taxable_income_amount", label: "소득금액" },
     ],
     "부가가치세 과세표준증명": [
-      { key: "amount_total", itemKey: "amount", label: "과세표준액" },
+      { key: "amount_total", itemKey: "amount", label: "세액" },
     ],
     "부가가치세 신고서": [
-      { key: "amount_total", itemKey: "amount", label: "과세표준액" },
+      { key: "amount_total", itemKey: "amount", label: "세액" },
     ],
   };
   function columnsForType(docType) {
@@ -114,19 +114,14 @@
     let html = "";
     for (const [docType, docs] of groups) {
       const isOpen = openDocTypeGroups.has(docType);
-      const cols = columnsForType(docType);
       const btns = docs.map((d) => {
         const label = d.period_label || (d.year ? `${d.year}년` : d.name);
         const issueBadge = issueDateBadge(d.issue_date);
-        const amountText = cols
-          .map((c) => (d[c.itemKey] !== null && d[c.itemKey] !== undefined ? `${c.label} ${fmt(d[c.itemKey])}원` : ""))
-          .filter(Boolean).join(" / ");
         return `
           <div class="period-btn-wrap">
             ${d.file_name
               ? `<a class="period-btn" href="/api/documents/${d.id}/download" title="${escapeHtml(d.name)}">${escapeHtml(label)}</a>`
               : `<span class="period-btn" style="opacity:.6;" title="파일 없음">${escapeHtml(label)}</span>`}
-            ${amountText ? `<span class="issue-date-tag">${escapeHtml(amountText)}</span>` : ""}
             ${issueBadge}
             <button class="icon-btn edit-doc" data-id="${d.id}" title="수정">✏️</button>
             <button class="icon-btn delete-doc" data-id="${d.id}" title="삭제">🗑️</button>
