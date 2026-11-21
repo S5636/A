@@ -70,15 +70,28 @@ def _extract_text_from_file(filename, file_bytes):
 # (화면에 보여줄 이름, 집계/분류에 쓸 doc_type, 글자에서 찾을 키워드들) -
 # 사용자가 실제로 보관하려는 서류 종류가 늘어나면 여기 추가하면 된다.
 _DOC_TYPE_RULES = [
+    # "소득금액증명" 안에도 "종합소득세 신고(결정·경정) 현황"이라는
+    # 소제목이 들어있어서, 종합소득세 신고서보다 반드시 먼저 확인해야
+    # 소득금액증명이 종합소득세 신고서로 잘못 분류되지 않는다.
     ("소득금액증명", ["소득금액증명"]),
     ("부가가치세 과세표준증명", ["과세표준증명"]),
     ("부가가치세 신고서", ["부가가치세", "부가세"]),
+    ("종합소득세 신고서", ["종합소득세"]),
     ("사업자등록증", ["사업자등록증"]),
     ("통신판매업 신고증", ["통신판매업"]),
     ("건강기능식품 영업 신고증", ["건강기능식품"]),
     ("의료기기 판매업 신고증", ["의료기기"]),
     ("사업자 통장 사본", ["통장사본", "통장 사본"]),
 ]
+
+# 사업자등록증/신고증류는 한 장짜리 보관용 서류라 발급 시점의 연도를
+# 붙이는 게 의미가 없다(사업자등록증은 "2015년 사업자등록증"처럼 안
+# 부름) - 이 서류들은 연도/기간을 아예 안 붙이고 그냥 이름 그대로
+# 보관만 한다. 연도별 집계표에도 안 뜬다(그 표는 year IS NOT NULL만 봄).
+_NO_YEAR_DOC_TYPES = {
+    "사업자등록증", "통신판매업 신고증", "건강기능식품 영업 신고증",
+    "의료기기 판매업 신고증", "사업자 통장 사본",
+}
 
 # doc_type별로 "금액" 칸에 뽑을 라벨(소득금액증명은 수입/소득 2개를 따로
 # 보여주니 여기선 제외) - 서류에 없는 라벨이면 그냥 못 찾고 넘어간다.
@@ -322,8 +335,12 @@ def _classify_document(filename, text):
                 for row in vat_rows
             ]
 
-    year = _extract_year(text, filename)
-    period = _extract_period(text)
+    if doc_type in _NO_YEAR_DOC_TYPES:
+        year = None
+        period = None
+    else:
+        year = _extract_year(text, filename)
+        period = _extract_period(text)
     if not issue_date:
         used_dates = set(period.split("~")) if period else set()
         issue_date = _extract_issue_date_fallback(text, used_dates)
@@ -778,8 +795,34 @@ def _backfill_income_breakdown():
         conn.close()
 
 
+def _strip_year_from_single_page_docs():
+    """사업자등록증처럼 한 장짜리 보관용 서류(_NO_YEAR_DOC_TYPES)에
+    실수로 연도가 붙어서 등록된 게 있으면 지운다 - 발급일자의 해였을
+    뿐 귀속연도가 아니라서 의미가 없고, 연도별 집계표에도 뜨면 안 된다.
+    이름이 자동생성 그대로("2015 사업자등록증")였으면 doc_type 이름으로
+    되돌리고, 사용자가 직접 고쳐둔 이름이면 그대로 둔다."""
+    conn = models.get_conn()
+    try:
+        placeholders = ",".join("?" for _ in _NO_YEAR_DOC_TYPES)
+        rows = conn.execute(
+            f"SELECT id, doc_type, name, year FROM documents "
+            f"WHERE doc_type IN ({placeholders}) AND year IS NOT NULL",
+            tuple(_NO_YEAR_DOC_TYPES),
+        ).fetchall()
+        for row in rows:
+            new_name = row["doc_type"] if row["name"] == f"{row['year']} {row['doc_type']}" else row["name"]
+            conn.execute(
+                "UPDATE documents SET year=NULL, period='', period_label='', name=? WHERE id=?",
+                (new_name, row["id"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 _reclassify_blank_documents()
 _backfill_income_breakdown()
+_strip_year_from_single_page_docs()
 
 
 if __name__ == "__main__":
