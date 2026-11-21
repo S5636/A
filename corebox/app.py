@@ -89,8 +89,12 @@ _GENERIC_AMOUNT_LABELS = {
 
 
 def _classify_text(text):
+    """국세청 서류는 제목을 "소 득 금 액 증 명"처럼 글자 사이를 띄워서
+    뽑히는 경우가 많아(가운데 정렬용 레이아웃), 공백을 다 지운 텍스트로
+    비교한다."""
+    compact = re.sub(r"\s+", "", text)
     for label, keywords in _DOC_TYPE_RULES:
-        if any(k in text for k in keywords):
+        if any(k in compact for k in keywords):
             return label
     return ""
 
@@ -186,6 +190,24 @@ def _extract_amount_near_label(text, label):
         return float(m.group(1).replace(",", ""))
     except ValueError:
         return None
+
+
+def _extract_amount_from_row(text, label):
+    """소득금액증명의 "수입금액 0 0 72,934,754 ... 100,125,472"처럼 라벨과
+    숫자 사이가 표 칸 정렬용 공백으로 멀리 떨어져 있고, 숫자도 여러 개가
+    나오는 행이 있다. 그 행(같은 줄)에서 라벨을 찾아 그 줄의 마지막 숫자
+    (합계 칸)를 쓴다. 숫자가 없는 줄(용어설명 등)은 건너뛰고 다음 줄을
+    본다."""
+    for line in text.split("\n"):
+        if label not in line:
+            continue
+        numbers = re.findall(r"-?[\d,]{4,}", line)
+        if numbers:
+            try:
+                return float(numbers[-1].replace(",", ""))
+            except ValueError:
+                continue
+    return None
 
 
 def _extract_generic_amount(doc_type, text):
@@ -290,8 +312,8 @@ def _classify_document(filename, text):
     taxable_income_amount = None
     amount = None
     if doc_type == "소득금액증명":
-        income_amount = _extract_amount_near_label(text, "수입금액")
-        taxable_income_amount = _extract_amount_near_label(text, "소득금액")
+        income_amount = _extract_amount_from_row(text, "수입금액")
+        taxable_income_amount = _extract_amount_from_row(text, "소득금액")
     else:
         amount = _extract_generic_amount(doc_type, text)
     period_label = _period_label_from_date(period.split("~")[0]) if period else (f"{str(year)[2:]}년" if year else "")
