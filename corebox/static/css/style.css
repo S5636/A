@@ -54,34 +54,34 @@ body { padding-bottom: 40px; }
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 14px;
-  padding: 8px 0;
+  margin-bottom: 5px;
+  padding: 6px 0;
   background: var(--bg);
-  border-bottom: 1px solid var(--border);
 }
 
 .app-title { display: flex; align-items: center; gap: 8px; }
 .app-logo { height: 26px; width: auto; flex-shrink: 0; }
 .app-wordmark { height: 26px; width: auto; flex-shrink: 0; }
-.app-subtitle { color: var(--text-muted); font-size: 11px; margin-left: 2px; }
+.app-subtitle { font-size: 11px; color: var(--text-muted); }
 
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* 코어싱크와 똑같은 버튼 구조/크기, 색만 코어박스 톤(초록->보라)으로 */
 .btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-strong);
-  background: var(--surface-2);
-  color: var(--text-primary);
+  background: linear-gradient(135deg, var(--good), var(--accent-purple));
+  color: #fff;
+  border: none;
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
   font-size: 13px;
-  font-weight: 600;
   cursor: pointer;
 }
-.btn.primary { background: var(--series-1); border-color: var(--series-1); color: #fff; }
-.btn.secondary { background: transparent; }
-.btn.small { padding: 5px 10px; font-size: 12px; }
-.btn:hover { filter: brightness(1.1); }
+.btn:hover { filter: brightness(1.08); }
+.btn.secondary { background: var(--surface-3); border: 1px solid var(--border-strong); color: var(--text-primary); }
+.btn.primary { background: linear-gradient(135deg, var(--good), var(--accent-purple)); color: #fff; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.small { padding: 6px 11px; font-size: 12px; }
 
 .section-title {
   font-size: 15px;

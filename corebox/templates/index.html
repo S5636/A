@@ -18,10 +18,10 @@
         <img src="{{ url_for('static', filename='img/wordmark.png') }}" class="app-wordmark" alt="COREBOX">
         <span class="app-subtitle">서류 보관함</span>
       </div>
-      <div style="display:flex; gap:6px;">
-        <label class="btn primary" for="auto-upload-file" style="margin:0;">📄 파일 올리기(자동 분류)</label>
+      <div class="header-actions">
+        <label class="btn" for="auto-upload-file" style="margin:0;">📄 파일 올리기(자동 분류)</label>
         <input type="file" id="auto-upload-file" accept=".pdf,.jpg,.jpeg,.png,.webp,.bmp" multiple style="display:none;">
-        <button class="btn secondary" id="btn-add-doc">+ 직접 입력</button>
+        <button class="btn secondary small" id="btn-add-doc">+ 직접 입력</button>
       </div>
     </div>
     <div id="auto-upload-log"></div>
@@ -57,14 +57,17 @@
       <label>목록에 보일 짧은 이름 (선택, 예: "2025년 1기")
         <input type="text" id="doc-period-label" placeholder="예: 2025년 1기">
       </label>
-      <label>수입금액 (선택, 소득금액증명용)
+      <label id="doc-income-row">수입금액
         <input type="number" id="doc-income" min="0" step="1" placeholder="예: 48956333">
       </label>
-      <label>소득금액 (선택, 소득금액증명용)
+      <label id="doc-taxable-row">소득금액
         <input type="number" id="doc-taxable" step="1" placeholder="예: 33323540">
       </label>
-      <label>금액 (선택, 그 외 서류용)
+      <label id="doc-amount-row">과세표준액
         <input type="number" id="doc-amount" step="1" placeholder="예: 150000000">
+      </label>
+      <label id="doc-tax-amount-row">세액 (환급이면 음수)
+        <input type="number" id="doc-tax-amount" step="1" placeholder="예: -324723">
       </label>
       <label>파일 (선택 - 비워두면 기존 파일 유지)
         <input type="file" id="doc-file">

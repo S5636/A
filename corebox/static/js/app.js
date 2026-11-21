@@ -21,10 +21,12 @@
       { key: "taxable_total", itemKey: "taxable_income_amount", label: "소득금액" },
     ],
     "부가가치세 과세표준증명": [
-      { key: "amount_total", itemKey: "amount", label: "세액" },
+      { key: "amount_total", itemKey: "amount", label: "과세표준액" },
+      { key: "tax_total", itemKey: "tax_amount", label: "세액" },
     ],
     "부가가치세 신고서": [
-      { key: "amount_total", itemKey: "amount", label: "세액" },
+      { key: "amount_total", itemKey: "amount", label: "과세표준액" },
+      { key: "tax_total", itemKey: "tax_amount", label: "세액" },
     ],
   };
   function columnsForType(docType) {
@@ -155,6 +157,25 @@
   }
 
   const modal = document.getElementById("doc-modal");
+
+  // 수정/추가 모달도 아는 문서 종류면 그 종류에 실제 있는 항목 칸만
+  // 보여준다(부가세엔 수입금액/소득금액 칸, 소득금액증명엔 과세표준액/
+  // 세액 칸 같은 게 비어있는 채로 안 뜨게). 모르는 종류거나 비어있으면
+  // 전부 보여줘서(뭘로 쓸지 모르니) 자유롭게 입력 가능.
+  const FIELD_VISIBILITY = {
+    "소득금액증명": { income: true, taxable: true, amount: false, taxAmount: false },
+    "부가가치세 과세표준증명": { income: false, taxable: false, amount: true, taxAmount: true },
+    "부가가치세 신고서": { income: false, taxable: false, amount: true, taxAmount: true },
+  };
+  function applyFieldVisibility(docType) {
+    const v = FIELD_VISIBILITY[docType] || { income: true, taxable: true, amount: true, taxAmount: true };
+    document.getElementById("doc-income-row").style.display = v.income ? "" : "none";
+    document.getElementById("doc-taxable-row").style.display = v.taxable ? "" : "none";
+    document.getElementById("doc-amount-row").style.display = v.amount ? "" : "none";
+    document.getElementById("doc-tax-amount-row").style.display = v.taxAmount ? "" : "none";
+  }
+  document.getElementById("doc-type").addEventListener("input", (e) => applyFieldVisibility(e.target.value.trim()));
+
   function openDocModal(item) {
     editingId = item ? item.id : null;
     document.getElementById("doc-modal-title").textContent = item ? "서류 수정" : "서류 추가";
@@ -168,8 +189,10 @@
     document.getElementById("doc-income").value = item && item.income_amount !== null && item.income_amount !== undefined ? item.income_amount : "";
     document.getElementById("doc-taxable").value = item && item.taxable_income_amount !== null && item.taxable_income_amount !== undefined ? item.taxable_income_amount : "";
     document.getElementById("doc-amount").value = item && item.amount !== null && item.amount !== undefined ? item.amount : "";
+    document.getElementById("doc-tax-amount").value = item && item.tax_amount !== null && item.tax_amount !== undefined ? item.tax_amount : "";
     document.getElementById("doc-file").value = "";
     document.getElementById("doc-memo").value = item ? (item.memo || "") : "";
+    applyFieldVisibility(item ? (item.doc_type || "") : "");
     modal.classList.add("open");
   }
   document.getElementById("btn-add-doc").addEventListener("click", () => openDocModal(null));
@@ -188,6 +211,7 @@
     formData.append("income_amount", document.getElementById("doc-income").value);
     formData.append("taxable_income_amount", document.getElementById("doc-taxable").value);
     formData.append("amount", document.getElementById("doc-amount").value);
+    formData.append("tax_amount", document.getElementById("doc-tax-amount").value);
     formData.append("memo", document.getElementById("doc-memo").value.trim());
     const file = document.getElementById("doc-file").files[0];
     if (file) formData.append("file", file);

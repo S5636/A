@@ -213,11 +213,11 @@ def _extract_vat_period_rows(text):
     """부가가치세과세표준증명은 한 장에 "과세기간(부터~까지) / 배출과세표준
     (계/과세분/면세분) / 납부할 세액" 행이 여러 개(보통 반기별로 2개) 같이
     찍혀 나온다 - 발급 시점까지의 지난 기수를 전부 모아서 보여주는
-    서류라서다. 중요한 건 매출(과세표준)액이 아니라 실제 낸(또는 환급
-    받은) 세액이므로, 그 기간 뒤에 나오는 숫자들 중 "맨 마지막" 숫자
-    (납부할 세액 - 환급이면 마이너스로 찍힘)를 금액으로 쓴다. 표의 모든
-    행을 찾아서 기수별로 따로따로 돌려준다(한 장을 여러 기수 버튼이 같은
-    파일을 가리키게 등록하기 위함). 표를 못 찾으면 빈 리스트."""
+    서류라서다. 매출(과세표준)액과 실제 낸(또는 환급받은) 세액 둘 다
+    중요하므로 같이 뽑는다 - 그 기간 뒤에 나오는 숫자들 중 첫 번째(계=
+    과세표준액)와 마지막(납부할 세액, 환급이면 마이너스)을 쓴다. 표의
+    모든 행을 찾아서 기수별로 따로따로 돌려준다(한 장을 여러 기수
+    버튼이 같은 파일을 가리키게 등록하기 위함). 표를 못 찾으면 빈 리스트."""
     rows = []
     matches = list(_VAT_DATE_PAIR_RE.finditer(text))
     for i, m in enumerate(matches):
@@ -234,6 +234,7 @@ def _extract_vat_period_rows(text):
         if not numbers:
             continue
         try:
+            base_amount = float(numbers[0].replace(",", ""))
             tax_amount = float(numbers[-1].replace(",", ""))
         except ValueError:
             continue
@@ -241,7 +242,8 @@ def _extract_vat_period_rows(text):
             "year": int(m.group(1)),
             "period": f"{start}~{end}",
             "period_label": _period_label_from_date(start),
-            "amount": tax_amount,
+            "amount": base_amount,
+            "tax_amount": tax_amount,
         })
     return rows
 
@@ -269,6 +271,7 @@ def _classify_document(filename, text):
                     "period": row["period"],
                     "period_label": row["period_label"],
                     "amount": row["amount"],
+                    "tax_amount": row["tax_amount"],
                     "year": row["year"],
                     "doc_type": doc_type,
                     "income_amount": None,
@@ -304,6 +307,7 @@ def _classify_document(filename, text):
         "period": period,
         "period_label": period_label,
         "amount": amount,
+        "tax_amount": None,
         "year": year,
         "doc_type": doc_type,
         "income_amount": income_amount,
@@ -345,6 +349,7 @@ def serialize_aggregate(conn):
                   SUM(income_amount) AS income_total,
                   SUM(taxable_income_amount) AS taxable_total,
                   SUM(amount) AS amount_total,
+                  SUM(tax_amount) AS tax_total,
                   COUNT(*) AS doc_count
            FROM documents
            WHERE doc_type != '' AND year IS NOT NULL
@@ -399,9 +404,9 @@ def create_document_auto():
             max_order += 1
             cur = conn.execute(
                 """INSERT INTO documents (name, category, year, doc_type, income_amount,
-                   taxable_income_amount, amount, issue_date, period, period_label,
+                   taxable_income_amount, amount, tax_amount, issue_date, period, period_label,
                    file_name, original_name, sort_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     detected["name"],
                     detected["category"],
@@ -410,6 +415,7 @@ def create_document_auto():
                     detected["income_amount"],
                     detected["taxable_income_amount"],
                     detected["amount"],
+                    detected.get("tax_amount"),
                     detected["issue_date"] or "",
                     detected["period"] or "",
                     detected["period_label"] or "",
@@ -455,9 +461,9 @@ def create_document():
         ).fetchone()["m"]
         conn.execute(
             """INSERT INTO documents (name, category, year, doc_type, income_amount,
-               taxable_income_amount, amount, issue_date, period, period_label, file_name,
-               original_name, memo, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               taxable_income_amount, amount, tax_amount, issue_date, period, period_label,
+               file_name, original_name, memo, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
                 (request.form.get("category") or "").strip(),
@@ -466,6 +472,7 @@ def create_document():
                 _parse_float(request.form.get("income_amount")),
                 _parse_float(request.form.get("taxable_income_amount")),
                 _parse_float(request.form.get("amount")),
+                _parse_float(request.form.get("tax_amount")),
                 (request.form.get("issue_date") or "").strip(),
                 (request.form.get("period") or "").strip(),
                 (request.form.get("period_label") or "").strip(),
@@ -508,8 +515,8 @@ def update_document(doc_id):
 
         conn.execute(
             """UPDATE documents SET name=?, category=?, year=?, doc_type=?, income_amount=?,
-               taxable_income_amount=?, amount=?, issue_date=?, period=?, period_label=?,
-               file_name=?, original_name=?, memo=? WHERE id=?""",
+               taxable_income_amount=?, amount=?, tax_amount=?, issue_date=?, period=?,
+               period_label=?, file_name=?, original_name=?, memo=? WHERE id=?""",
             (
                 name,
                 (request.form.get("category", item["category"]) or "").strip(),
@@ -518,6 +525,7 @@ def update_document(doc_id):
                 _parse_float(request.form.get("income_amount", item["income_amount"])),
                 _parse_float(request.form.get("taxable_income_amount", item["taxable_income_amount"])),
                 _parse_float(request.form.get("amount", item["amount"])),
+                _parse_float(request.form.get("tax_amount", item["tax_amount"])),
                 (request.form.get("issue_date", item["issue_date"]) or "").strip(),
                 (request.form.get("period", item["period"]) or "").strip(),
                 (request.form.get("period_label", item["period_label"]) or "").strip(),

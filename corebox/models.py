@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS documents (
     doc_type TEXT DEFAULT '',        -- 집계용 문서 종류(예: "소득금액증명") - 비어있으면 집계표에 안 잡힘
     income_amount REAL,              -- 수입금액(해당 없으면 NULL)
     taxable_income_amount REAL,      -- 소득금액(해당 없으면 NULL)
-    amount REAL,                     -- 소득금액증명 외 서류의 금액(과세표준액 등, 해당 없으면 NULL)
+    amount REAL,                     -- 소득금액증명 외 서류의 금액(부가세는 과세표준액, 해당 없으면 NULL)
+    tax_amount REAL,                 -- 부가세의 실제 납부/환급 세액(환급이면 음수, 해당 없으면 NULL)
     issue_date TEXT DEFAULT '',      -- 발급일(YYYY-MM-DD) - 제출 유효기간(보통 한 달) 확인용
     period TEXT DEFAULT '',          -- 서류가 다루는 기간(과세기간 등, "YYYY-MM-DD~YYYY-MM-DD") - 발급일과 별개
     period_label TEXT DEFAULT '',    -- 목록 버튼에 보여줄 짧은 이름(예: "2025년 1기", "2020년")
@@ -55,6 +56,7 @@ def init_db():
         _ensure_column(conn, "documents", "issue_date", "issue_date TEXT DEFAULT ''")
         _ensure_column(conn, "documents", "period", "period TEXT DEFAULT ''")
         _ensure_column(conn, "documents", "period_label", "period_label TEXT DEFAULT ''")
+        _ensure_column(conn, "documents", "tax_amount", "tax_amount REAL")
 
         # 2026-11: 자동분류 로직이 아직 "발급일자"보다 "과세기간"을 우선
         # 보게 고쳐지기 전에 올린 "22년1기" 부가세 과세표준증명이 발급일자
