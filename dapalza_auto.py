@@ -238,6 +238,32 @@ def _find_smallest_text_match(win, title, log=None, descendants=None):
     return candidates[0][3]
 
 
+def _find_and_click_confirm(win, L, descendants=None):
+    """화면에 '확인' 버튼이 보이면 찾아서 누른다 - 눌렀으면 True.
+
+    예전엔 특정 완료 문구('완료하였습니다'/'실패하였습니다')를 먼저 찾고 그
+    근처에서만 '확인'을 찾았는데, 실제로는 "운송장 등록 중 일부 실패가
+    있습니다"처럼 전혀 다른 문구도 나온다는 게 스크린샷으로 확인됐다 -
+    그 문구를 못 잡아서 팝업이 안 닫힌 채 몇 시간이고 화면에 남아 다음
+    주기까지 전부 막아버린 사고로 이어졌다(사용자 지적: "확인창 끄라고
+    했잖아 - 왜 안 꺼졌어"). 문구를 미리 알아맞히려 하지 말고, 그 시점에
+    '확인' 버튼이 실제로 보이면(=뭔가 완료/실패 팝업이 떠 있다는 뜻) 문구가
+    뭐든 상관없이 바로 누른다."""
+    ok_ctrl = _find_smallest_text_match(win, '확인', None, descendants=descendants)
+    if ok_ctrl is None:
+        return False
+    try:
+        ok_ctrl.invoke()
+    except Exception:
+        try:
+            ok_ctrl.click_input()
+        except Exception as e:
+            L(f"화면에 남은 '확인' 버튼을 찾았지만 클릭에 실패했습니다(무시하고 계속 진행): {type(e).__name__}: {e}")
+            return False
+    L("화면에 남아있던 '확인' 팝업을 발견해서 눌러서 닫았습니다.")
+    return True
+
+
 def _find_near(anchor, title, log=None, max_up=10):
     """전체 창(963개 요소)을 다 훑어서 title을 찾으면, 완전히 동떨어진 곳에
     우연히 같은 글자가 들어간 요소(예: 주문 목록 어딘가의 텍스트)를 잘못 골라서
@@ -464,10 +490,11 @@ def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
     사용자 스크린샷으로 실제 운송장등록 실패 팝업을 확인했다: "운송장
     등록에 실패하였습니다. (성공 0건 / 실패 1건 ...)" - '완료하였습니다'만
     찾고 있었어서 이 실패 팝업은 전혀 못 잡고 '확인'도 못 눌러서 다음
-    단계로 영영 못 넘어갔다(사용자 지적: "이 다음에 안 넘어가네"). 성공/
-    실패 둘 다 '확인' 버튼을 누르는 건 똑같이 필요하니, '완료하였습니다'와
-    '실패하였습니다' 둘 다 완료 신호로 인정한다 - '배송완료'/'구매확정'
-    같은 상태 배지는 이 문구 전체를 포함하지 않아서 잘못 걸릴 위험은 없다."""
+    단계로 영영 못 넘어갔다(사용자 지적: "이 다음에 안 넘어가네"). 그 뒤
+    "운송장 등록 중 일부 실패가 있습니다"처럼 또 다른 문구도 나온다는 게
+    확인됐다(부분 실패) - 문구를 하나씩 계속 쫓아가는 대신, 완료 문구가
+    뭐든(또는 전혀 모르는 새 문구든) 그 시점에 '확인' 버튼이 보이면 그
+    자체를 완료 신호로 보고 바로 누른다(_find_and_click_confirm)."""
     elapsed = 0
     check_interval = 2
     while elapsed < wait_seconds:
@@ -480,35 +507,35 @@ def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
         if _dismiss_sync_toast(win, L, descendants=descendants):
             time.sleep(1)
         done_marker, matched_phrase = _find_any_completion_marker(win, descendants=descendants)
-        if done_marker is None:
+        ok_ctrl = _find_near(done_marker, '확인', L) if done_marker is not None else None
+        if ok_ctrl is None:
+            ok_ctrl = _find_smallest_text_match(win, '확인', None, descendants=descendants)
+        if ok_ctrl is None:
             continue
-        L(f"'{matched_phrase}' 메시지 확인됨 - '확인' 버튼 찾는 중...")
-        ok_ctrl = _find_near(done_marker, '확인', L)
-        if ok_ctrl is None:
-            ok_ctrl = _find_smallest_text_match(win, '확인', L, descendants=descendants)
-        if ok_ctrl is None:
-            ok_ctrl = _find_control(win, '확인', 'Button')
+        if matched_phrase:
+            L(f"'{matched_phrase}' 메시지 확인됨 - '확인' 버튼 클릭...")
+        else:
+            L("완료/실패 문구는 못 찾았지만 '확인' 버튼이 보여서 완료 팝업으로 보고 클릭합니다...")
         clicked = False
-        if ok_ctrl is not None:
+        try:
+            ok_ctrl.invoke()
+            clicked = True
+            L("'확인' 버튼 invoke()로 클릭 완료.")
+        except Exception:
             try:
-                ok_ctrl.invoke()
+                ok_ctrl.click_input()
                 clicked = True
-                L("'확인' 버튼 invoke()로 클릭 완료.")
-            except Exception:
-                try:
-                    ok_ctrl.click_input()
-                    clicked = True
-                    L("'확인' 버튼 클릭 완료.")
-                except Exception as e:
-                    L(f"'확인' 버튼 클릭 실패(invoke/click_input 둘 다): {type(e).__name__}: {e}")
+                L("'확인' 버튼 클릭 완료.")
+            except Exception as e:
+                L(f"'확인' 버튼 클릭 실패(invoke/click_input 둘 다): {type(e).__name__}: {e}")
         if clicked:
             return True
-        L("확인 버튼을 못 찾았거나 클릭에 실패했습니다 - Enter 키로 대체 시도합니다...")
+        L("확인 버튼 클릭에 실패했습니다 - Enter 키로 대체 시도합니다...")
         try:
             win.type_keys('{ENTER}')
             time.sleep(1)
-            still_there, _ = _find_any_completion_marker(win)
-            if still_there is None:
+            still_there = _find_smallest_text_match(win, '확인', None) is not None
+            if not still_there:
                 L('Enter 키로 완료 팝업이 닫힌 것으로 보입니다.')
                 return True
         except Exception as e:
@@ -1187,17 +1214,8 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
                 descendants_pre = win.descendants()
             except Exception:
                 descendants_pre = None
-            ok_ctrl = _find_smallest_text_match(win, '확인', None, descendants=descendants_pre)
-            if ok_ctrl is None:
+            if not _find_and_click_confirm(win, L, descendants=descendants_pre):
                 break
-            L("정리 중 '확인' 버튼을 발견해서 눌러서 닫습니다...")
-            try:
-                ok_ctrl.invoke()
-            except Exception:
-                try:
-                    ok_ctrl.click_input()
-                except Exception as e:
-                    L(f"'확인' 버튼 클릭 실패(무시하고 계속 진행): {type(e).__name__}: {e}")
             time.sleep(1)
 
         # 다팔자는 클래스명이 Chrome_WidgetWin_1(Electron/Chromium 기반)이다.
@@ -1238,6 +1256,15 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
             except Exception as e:
                 cnt = -1
                 L(f'  - {elapsed}초 경과, 조회 실패: {type(e).__name__}: {e}')
+                continue
+            # 사전 정리(위) 시점엔 아직 접근성 트리가 안 열려있어서 '확인'
+            # 버튼이 안 보였을 수 있다 - 트리가 늦게 열리는 중에 팝업이
+            # 뒤늦게 눈에 띌 수도 있으니, 대기하는 동안에도 계속 확인한다.
+            # 안 그러면 "완료/실패" 팝업이 화면을 막은 채로 300초를 꽉 채워
+            # 소진하고 "다팔자가 바쁜 상태"로 잘못 포기해버린다(사용자 지적:
+            # "확인창 끄라고 했잖아 - 왜 안 꺼졌어").
+            if _find_and_click_confirm(win, L, descendants=initial_descendants):
+                time.sleep(1)
                 continue
             if elapsed - last_wait_log >= 6:
                 L(f'  - {elapsed}초 경과, 하위 요소 {cnt}개 확인됨')
