@@ -21,7 +21,17 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5051 ^| findstr LISTENING') 
 )
 if "%FOUND_OLD_PORT%"=="0" echo No old server was using port 5051.
 
-set CBX_WAS_RUNNING=%FOUND_OLD_PORT%
+rem An auto-restart (see the bottom of this file) re-runs this whole file
+rem from the top, so by the time we get here the old server has already
+rem exited on its own and the netstat check above finds nothing - without
+rem this, CBX_AUTO_RESTART would get overwritten back to 0 and a browser
+rem tab would pop open every single auto-restart, not just the first run.
+if "%CBX_AUTO_RESTART%"=="1" (
+    set CBX_WAS_RUNNING=1
+) else (
+    set CBX_WAS_RUNNING=%FOUND_OLD_PORT%
+)
+set CBX_AUTO_RESTART=0
 
 title COREBOX
 
@@ -39,5 +49,19 @@ if errorlevel 1 (
 )
 
 python launcher.py
+
+rem Exit code 42 means launcher.py found a new version on github and shut
+rem itself down on purpose so it can come back up with it (no one needs to
+rem touch this window). Re-running this same file from scratch (not just
+rem looping back to "python launcher.py") also picks up a new START.bat if
+rem that changed too, and is safer than a goto-based loop since this file
+rem could get overwritten by the update while it is still running.
+if %ERRORLEVEL% EQU 42 (
+    echo.
+    echo Restarting with the updated version...
+    set CBX_AUTO_RESTART=1
+    "%~f0"
+    exit /b 0
+)
 
 pause

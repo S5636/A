@@ -119,8 +119,15 @@ def self_update(quiet=False):
 
 def _update_watcher():
     """아무도 START.bat을 다시 누르지 않아도 되게, 켜져 있는 동안 몇 분마다
-    깃허브에 새 코드가 올라왔는지 조용히 확인한다. 바뀐 게 있으면 지금 켜진
-    서버를 그 자리에서 자동으로 재시작한다(db/uploads는 안 건드림)."""
+    깃허브에 새 코드가 올라왔는지 조용히 확인한다. 바뀐 게 있으면 특수
+    종료코드(42)로 꺼지고, START.bat이 그 코드를 보고 자동으로 다시
+    켜준다(db/uploads는 안 건드림).
+
+    처음엔 os.execv(지금 프로세스를 그대로 교체)로 만들었는데, 윈도우는
+    진짜 exec()이 없어서 CRT가 흉내만 내는 거라 안정성을 믿을 수가 없다
+    (조용히 실패해도 알 방법이 없음). 그래서 그냥 깔끔하게 완전히
+    종료하고, 재시작은 배치 파일 쪽 루프에 맡긴다 - 더 단순하고 윈도우
+    cmd.exe에서 검증된 방식."""
     while True:
         time.sleep(120)
         try:
@@ -130,8 +137,7 @@ def _update_watcher():
         if updated:
             print()
             print(f"[자동 업데이트] 새 코드 발견: {', '.join(updated)} - 서버 재시작합니다.")
-            os.environ["CBX_WAS_RUNNING"] = "1"
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            os._exit(42)
 
 
 def _requirements_hash():
