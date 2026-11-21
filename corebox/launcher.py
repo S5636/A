@@ -155,7 +155,7 @@ def _ensure_tailscale_https():
         return
     try:
         result = subprocess.run(
-            ["tailscale", "serve", "--bg", "https", "/", f"http://127.0.0.1:{PORT}"],
+            ["tailscale", "serve", "--bg", f"http://127.0.0.1:{PORT}"],
             capture_output=True, text=True, timeout=10,
         )
         if result.returncode == 0:
