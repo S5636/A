@@ -145,11 +145,11 @@ body { padding-bottom: 40px; }
 .doctype-header:hover { background: var(--surface-2); }
 .doctype-count { color: var(--text-muted); font-weight: 400; font-size: 12px; }
 .doctype-body {
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   padding: 8px 2px 4px;
 }
-.period-btn-wrap { display: flex; align-items: center; gap: 2px; }
+.period-btn-wrap { display: flex; align-items: center; gap: 6px; width: 100%; }
 .period-btn {
   display: inline-block;
   padding: 8px 14px;
@@ -160,6 +160,8 @@ body { padding-bottom: 40px; }
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
+  min-width: 90px;
+  text-align: center;
 }
 .period-btn:hover { background: var(--surface-3); }
 .issue-date-tag { color: var(--text-muted); font-size: 11px; margin: 0 2px; }
