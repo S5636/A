@@ -36,6 +36,16 @@ def get_progress():
         return list(_progress_log)
 
 
+def is_busy():
+    """지금 DPJ 자동화(수동/자동 둘 다 _run_lock을 쓴다)가 돌고 있는 중인지.
+    launcher.py의 2분 주기 업데이트 확인이 이 값을 보고, 돌고 있는 중이면
+    종료코드 42로 재시작하는 걸 미룬다(사용자 요청: "DPJ 자동화 돌고 있는
+    중간에는 업데이트가 안 되게" - 한창 다팔자/오너클랜 창을 조작하는
+    도중에 프로세스가 통째로 꺼지면 그 창이 어중간한 상태로 남을 수
+    있어서)."""
+    return _run_lock.locked()
+
+
 def _reset_progress():
     with _progress_lock:
         _progress_log.clear()
@@ -1314,6 +1324,17 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
         except Exception as e:
             L(f"'주문관리' 탭을 못 찾았습니다 (이미 열려있으면 무시해도 됨): {e}")
         time.sleep(1)
+
+        # 운송장수집/등록이 끝나면 매번 '전체' 탭을 눌러 배송상태 필터를
+        # 풀어주긴 하는데(_unfilter_delivery_prep), 그게 실패하면(화면이
+        # 블롭으로 뭉쳐 '전체' 탭을 못 찾는 등) '배송준비' 필터가 눌린 채로
+        # 남아버린다(사용자 지적: "운송장 수집하는 것 때문에 배송 준비
+        # 눌렀던 게 눌렸다가 안 풀리는 경우가 있어서"). DPJ를 실행할 때마다
+        # 초기 상태로 한 번 더 확실히 되돌리려고, 여기서도(이전 실행 끝에서
+        # 한 번 실패했더라도) '전체' 탭을 한 번 더 눌러준다 - 이미 '전체'가
+        # 선택돼 있는 정상 상태에서 또 눌러도 아무 부작용이 없다.
+        L("배송상태 필터를 초기화하기 위해 '전체' 탭 클릭...")
+        _unfilter_delivery_prep(win, L)
 
         L("기간을 '1개월'로 설정...")
         _click(win, '1개월', 'Button', L)

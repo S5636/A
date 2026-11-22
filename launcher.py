@@ -348,6 +348,25 @@ def _periodic_update_check_loop():
         if not remote_version or remote_version == local_version:
             print(f"[자동업데이트] 확인함 - 변경 없음 (현재 버전: {local_version or '(없음)'})")
             continue
+        # 새 버전을 찾았어도, 하필 그 순간 DPJ/오너클랜 자동화가 다팔자나
+        # 오너클랜 창을 한창 조작하는 중이면 바로 꺼버리면 안 된다 - 창이
+        # 중간 상태로 어중간하게 남을 수 있다(사용자 요청: "DPJ 자동화
+        # 돌고 있는 중간에는 업데이트가 안 되게"). 확인 주기를 늘리는 건
+        # 확률을 낮출 뿐 근본 해결이 아니라서(자동화가 최대 15분까지도
+        # 걸릴 수 있어 어떤 간격을 줘도 겹칠 수 있음), 대신 그때그때
+        # 실제로 돌고 있는지 물어보고, 돌고 있으면 이번엔 재시작을 건너뛰고
+        # 다음 2분 뒤에 다시 확인한다 - 자동화가 끝나는 즉시(늦어도 다음
+        # 주기 안에) 재시작된다.
+        try:
+            import dapalza_auto
+            import ownerclan_auto
+            busy = dapalza_auto.is_busy() or ownerclan_auto.is_busy()
+        except Exception:
+            busy = False
+        if busy:
+            print(f"[자동업데이트] 새 버전 발견 (현재: {local_version or '(없음)'} -> 최신: {remote_version}) - "
+                  f"지금 자동화가 진행 중이라 재시작을 미룹니다 (다음 확인 때 다시 시도).")
+            continue
         print(f"[자동업데이트] 새 버전 발견 (현재: {local_version or '(없음)'} -> 최신: {remote_version}) - "
               f"서버를 재시작해서 적용합니다...")
         os._exit(_AUTO_RESTART_EXIT_CODE)

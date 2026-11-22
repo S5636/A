@@ -98,14 +98,28 @@ def _push_oc_progress(msg):
         _oc_progress_log.append(msg)
 
 
+_worker_busy = False
+
+
 def _worker_loop():
+    global _worker_busy
     while True:
         func, args, kwargs, result_queue = _task_queue.get()
+        _worker_busy = True
         try:
             result = func(*args, **kwargs)
             result_queue.put(('ok', result))
         except Exception as e:
             result_queue.put(('err', e))
+        finally:
+            _worker_busy = False
+
+
+def is_busy():
+    """지금 오너클랜 자동화(STOCK/ORDER/매입수집 등)가 돌고 있는 중인지 -
+    dapalza_auto.is_busy()와 같은 용도로, launcher.py의 2분 주기 업데이트
+    확인이 재시작을 미룰지 판단하는 데 쓴다."""
+    return _worker_busy or not _task_queue.empty()
 
 
 def _run_on_worker(func, *args, **kwargs):
