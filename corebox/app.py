@@ -762,7 +762,7 @@ def serialize_aggregate(conn):
            LEFT JOIN doc_type_order o ON o.doc_type = d.doc_type
            WHERE d.doc_type != '' AND d.year IS NOT NULL
            GROUP BY d.year, d.doc_type, half
-           ORDER BY COALESCE(o.sort_order, 999999), d.doc_type, d.year DESC, half"""
+           ORDER BY COALESCE(o.sort_order, 999999), d.doc_type, d.year DESC, half DESC"""
     ).fetchall()
     return [dict(r) for r in rows]
 
