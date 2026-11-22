@@ -117,15 +117,35 @@
       `).join("");
       html += `
         <div class="year-group-title">${escapeHtml(docType)}</div>
-        <div class="table-scroll">
-          <table class="agg-table">
-            <thead><tr><th>연도</th>${cols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}</tr></thead>
-            <tbody>${trs}</tbody>
-          </table>
+        <div class="table-scroll-wrap">
+          <button class="table-scroll-arrow prev" type="button" aria-label="왼쪽으로">‹</button>
+          <div class="table-scroll">
+            <table class="agg-table">
+              <thead><tr><th>연도</th>${cols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}</tr></thead>
+              <tbody>${trs}</tbody>
+            </table>
+          </div>
+          <button class="table-scroll-arrow next" type="button" aria-label="오른쪽으로">›</button>
         </div>
       `;
     }
     area.innerHTML = html;
+
+    // 손가락 스와이프는 그대로 되고, 화살표는 한 번 누를 때마다 한
+    // 칸(대략 표 칸 하나 너비)씩 옆으로 넘겨주는 보조 버튼. 스크롤할
+    // 내용이 없는(칸이 몇 개 안 되는) 표는 화살표를 아예 숨긴다.
+    area.querySelectorAll(".table-scroll-wrap").forEach((wrap) => {
+      const scroller = wrap.querySelector(".table-scroll");
+      const prevBtn = wrap.querySelector(".table-scroll-arrow.prev");
+      const nextBtn = wrap.querySelector(".table-scroll-arrow.next");
+      if (scroller.scrollWidth <= scroller.clientWidth + 1) {
+        prevBtn.style.display = "none";
+        nextBtn.style.display = "none";
+        return;
+      }
+      prevBtn.addEventListener("click", () => scroller.scrollBy({ left: -120, behavior: "smooth" }));
+      nextBtn.addEventListener("click", () => scroller.scrollBy({ left: 120, behavior: "smooth" }));
+    });
   }
 
   const openDocTypeGroups = new Set();
