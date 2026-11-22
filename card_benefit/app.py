@@ -2092,31 +2092,55 @@ def _ocr_pil_image(pil_img):
 def _extract_text_from_loan_attachment(filename, file_bytes):
     """금융거래확인서 등 첨부파일에서 어느 대출인지 가려낼 글자를 뽑는다.
     PDF는 먼저 pypdf로 시도하고(실제 글자 정보가 있는 PDF), 글자가 하나도
-    안 나오면(스캔해서 이미지로만 들어있는 PDF) 페이지를 그림으로
-    변환해서 OCR로 다시 읽는다. 사진은 처음부터 OCR(기존 영수증 인식에
-    쓰는 easyocr 리더를 그대로 재사용)."""
+    안 나오면(스캔해서 이미지로만 들어있는 PDF, 또는 특정 페이지에서
+    pypdf가 실패하는 PDF) 페이지를 그림으로 변환해서 OCR로 다시
+    읽는다. 사진은 처음부터 OCR(기존 영수증 인식에 쓰는 easyocr
+    리더를 그대로 재사용).
+
+    실제로 글자 정보가 있는 정상 PDF인데도 pypdf 버전에 따라 특정
+    페이지에서 예외가 나는 경우가 있었다(기존엔 pypdf 시도와 OCR
+    fallback이 같은 try 블록 안에 있어서, 한 페이지 실패로 전체가
+    바로 빈 문자열이 되고 OCR까지 가보지도 못했음) - pypdf는 페이지
+    단위로, 전체 pypdf 시도와 OCR fallback도 서로 독립적으로
+    실패하게 나눠서, 한쪽이 깨져도 다른 쪽은 계속 시도되게 한다."""
     from PIL import Image
     ext = os.path.splitext(filename.lower())[1]
-    try:
-        if ext == ".pdf":
+    if ext == ".pdf":
+        text = ""
+        try:
             from pypdf import PdfReader
             reader = PdfReader(BytesIO(file_bytes))
-            text = "\n".join((page.extract_text() or "") for page in reader.pages)
-            if text.strip():
-                return text
+            parts = []
+            for page in reader.pages:
+                try:
+                    parts.append(page.extract_text() or "")
+                except Exception:
+                    continue
+            text = "\n".join(parts)
+        except Exception:
+            text = ""
+        if text.strip():
+            return text
+        try:
             import fitz
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             parts = []
             for page in doc:
-                pix = page.get_pixmap(dpi=200)
-                pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                parts.append(_ocr_pil_image(pil_img))
+                try:
+                    pix = page.get_pixmap(dpi=200)
+                    pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                    parts.append(_ocr_pil_image(pil_img))
+                except Exception:
+                    continue
             return "\n".join(parts)
-        if ext in _LOAN_ATTACHMENT_IMAGE_EXTS:
+        except Exception:
+            return ""
+    if ext in _LOAN_ATTACHMENT_IMAGE_EXTS:
+        try:
             pil_img = Image.open(BytesIO(file_bytes)).convert("RGB")
             return _ocr_pil_image(pil_img)
-    except Exception:
-        return ""
+        except Exception:
+            return ""
     return ""
 
 
