@@ -810,6 +810,7 @@ def serialize_full():
             "suspected_duplicates": find_suspected_duplicates(conn),
             "stocks": serialize_stocks(conn),
             "trash": serialize_trash(conn),
+            "unassigned_attachments": serialize_unassigned_attachments(conn),
         }
     finally:
         conn.close()
@@ -2046,6 +2047,72 @@ def serialize_loans(conn):
     return result
 
 
+def serialize_unassigned_attachments(conn):
+    """한꺼번에 올렸는데 어느 대출인지 자동으로 못 가려낸 파일들 -
+    대출 탭 위쪽에 따로 보여주고 수동으로 배정하게 한다."""
+    rows = conn.execute(
+        "SELECT * FROM loan_attachments WHERE loan_id IS NULL ORDER BY id DESC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+_LOAN_ATTACHMENT_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
+
+
+def _extract_text_from_loan_attachment(filename, file_bytes):
+    """금융거래확인서 등 첨부파일에서 어느 대출인지 가려낼 글자를 뽑는다.
+    PDF는 pypdf로(실제 글자 정보가 있는 PDF만 가능), 사진은 기존
+    영수증 인식에 쓰는 easyocr 리더를 그대로 재사용한다."""
+    ext = os.path.splitext(filename.lower())[1]
+    try:
+        if ext == ".pdf":
+            from pypdf import PdfReader
+            reader = PdfReader(BytesIO(file_bytes))
+            return "\n".join((page.extract_text() or "") for page in reader.pages)
+        if ext in _LOAN_ATTACHMENT_IMAGE_EXTS:
+            from PIL import Image
+            import numpy as np
+            pil_img = Image.open(BytesIO(file_bytes)).convert("RGB")
+            target_width = 1600
+            if pil_img.width < target_width:
+                scale = target_width / pil_img.width
+                resample = getattr(Image, "Resampling", Image).LANCZOS
+                pil_img = pil_img.resize((target_width, round(pil_img.height * scale)), resample)
+            reader_ocr = _get_ocr_reader()
+            detections = reader_ocr.readtext(np.array(pil_img), paragraph=False)
+            return "\n".join(d[1] for d in detections)
+    except Exception:
+        return ""
+    return ""
+
+
+def _loan_match_tokens(withdrawal_account):
+    """대출의 '출금계좌' 표기(예: "카카오뱅크 1234")에서 은행명 등
+    글자 토큰과 계좌 뒤 4자리를 따로 뽑는다."""
+    text = withdrawal_account or ""
+    digits = re.sub(r"\D", "", text)
+    last4 = digits[-4:] if len(digits) >= 4 else ""
+    words = re.findall(r"[가-힣A-Za-z]{2,}", text)
+    return words, last4
+
+
+def _match_loan_for_attachment_text(loans, text):
+    """첨부파일 글자 안에 등록된 대출의 출금계좌 뒤 4자리(+가능하면 은행명
+    등 글자까지)가 들어있으면 그 대출로 본다. 정확히 하나만 걸리면
+    매칭하고, 하나도 없거나 여럿이 걸리면(애매하면) 추측하지 않고
+    미분류로 남긴다."""
+    compact_digits = re.sub(r"\D", "", text)
+    candidates = []
+    for loan in loans:
+        words, last4 = _loan_match_tokens(loan["withdrawal_account"])
+        if not last4 or last4 not in compact_digits:
+            continue
+        if words and not any(w in text for w in words):
+            continue
+        candidates.append(loan)
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _display_month_bounds():
     """쿼리스트링의 ?month=YYYY-MM을 달력 월 경계([시작일, 종료일))로 바꾼다.
     없거나 형식이 틀리면 None. 상단 월 선택 바에서 과거/미래 달을 고르면
@@ -2885,6 +2952,67 @@ def delete_loan_attachment(attachment_id):
             if os.path.exists(path):
                 os.remove(path)
         conn.execute("DELETE FROM loan_attachments WHERE id = ?", (attachment_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/loans/attachments/auto", methods=["POST"])
+def upload_loan_attachments_auto():
+    """금융거래확인서 등을 한꺼번에 여러 장 올리면, 파일 안의 글자에서
+    등록된 대출의 출금계좌 뒤 4자리를 찾아 자동으로 그 대출에 넣는다.
+    어느 대출인지 하나로 못 좁히면(0개 또는 2개 이상 걸리면) 추측하지
+    않고 "미분류"로 남겨서 나중에 수동으로 배정하게 한다."""
+    files = request.files.getlist("file")
+    if not files:
+        return jsonify({"error": "파일을 선택하세요."}), 400
+    conn = get_conn()
+    try:
+        loans = conn.execute("SELECT * FROM loans WHERE withdrawal_account != ''").fetchall()
+        for uploaded in files:
+            if not uploaded or not uploaded.filename:
+                continue
+            file_bytes = uploaded.read()
+            file_hash = hashlib.sha256(file_bytes).hexdigest()
+            dup = conn.execute(
+                "SELECT id FROM loan_attachments WHERE file_hash = ?", (file_hash,)
+            ).fetchone()
+            if dup:
+                continue
+            text = _extract_text_from_loan_attachment(uploaded.filename, file_bytes)
+            matched = _match_loan_for_attachment_text(loans, text) if text else None
+            ext = os.path.splitext(secure_filename(uploaded.filename))[1]
+            file_name = f"{uuid.uuid4().hex}{ext}"
+            with open(os.path.join(UPLOAD_DIR, file_name), "wb") as f:
+                f.write(file_bytes)
+            conn.execute(
+                "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash) "
+                "VALUES (?, ?, ?, ?)",
+                (matched["id"] if matched else None, file_name, uploaded.filename, file_hash),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/loan-attachments/<int:attachment_id>/assign", methods=["PUT"])
+def assign_loan_attachment(attachment_id):
+    """자동 분류 못 한 첨부파일을 사용자가 직접 대출에 배정한다."""
+    data = request.get_json(force=True) or {}
+    try:
+        loan_id = int(data.get("loan_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "대출을 선택하세요."}), 400
+    conn = get_conn()
+    try:
+        loan = conn.execute("SELECT id FROM loans WHERE id = ?", (loan_id,)).fetchone()
+        if not loan:
+            return jsonify({"error": "대출을 찾을 수 없습니다."}), 404
+        conn.execute(
+            "UPDATE loan_attachments SET loan_id = ? WHERE id = ?", (loan_id, attachment_id)
+        )
         conn.commit()
     finally:
         conn.close()

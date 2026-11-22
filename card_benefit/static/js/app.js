@@ -73,7 +73,7 @@
     return idx >= 0 ? colorForIndex(idx) : "var(--text-muted)";
   }
 
-  let state = { cards: [], inbox: [], no_benefit: [], trash: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [], suspected_duplicates: [], stocks: [] };
+  let state = { cards: [], inbox: [], no_benefit: [], trash: [], loans: [], recurring_payments: [], insurances: [], medical_expenses: [], suspected_duplicates: [], stocks: [], unassigned_attachments: [] };
   let inboxOpen = false;
   let noBenefitOpen = false;
   let trashOpen = false;
@@ -1033,7 +1033,51 @@
     return loans;
   }
 
+  function renderUnassignedAttachments() {
+    const area = document.getElementById("loan-unassigned-attachments");
+    const items = state.unassigned_attachments || [];
+    if (!items.length) {
+      area.innerHTML = "";
+      return;
+    }
+    const options = state.loans.map((l) => `<option value="${l.id}">${escapeHtml(l.name)}</option>`).join("");
+    area.innerHTML = `
+      <div class="card" style="border-color:var(--accent-purple);">
+        <div class="card-title" style="margin-bottom:8px;">📎 어느 대출인지 못 가린 첨부파일 (${items.length})</div>
+        ${items.map((a) => `
+          <div class="log-item">
+            <a href="/api/loan-attachments/${a.id}/download" target="_blank">${escapeHtml(a.original_name || a.file_name)}</a>
+            <span style="display:flex; gap:4px; align-items:center;">
+              <select class="assign-attachment-select" data-id="${a.id}"><option value="">대출 선택</option>${options}</select>
+              <button class="btn small assign-attachment-btn" data-id="${a.id}">배정</button>
+              <button class="delete-loan-attachment" data-id="${a.id}">삭제</button>
+            </span>
+          </div>
+        `).join("")}
+      </div>
+    `;
+    area.querySelectorAll(".assign-attachment-btn").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        const sel = area.querySelector(`.assign-attachment-select[data-id="${btn.dataset.id}"]`);
+        if (!sel.value) { alert("대출을 선택하세요."); return; }
+        state = await api(`/api/loan-attachments/${btn.dataset.id}/assign`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ loan_id: Number(sel.value) }),
+        });
+        render();
+      })
+    );
+    area.querySelectorAll(".delete-loan-attachment").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("이 첨부파일을 삭제할까요?")) return;
+        state = await api(`/api/loan-attachments/${btn.dataset.id}`, { method: "DELETE" });
+        render();
+      })
+    );
+  }
+
   function renderLoans() {
+    renderUnassignedAttachments();
     const loanList = document.getElementById("loan-list");
     const emptyLoanHint = document.getElementById("empty-loan-hint");
     loanList.querySelectorAll(".card").forEach((el) => el.remove());
@@ -1562,6 +1606,23 @@
     state = result;
     render();
     alert(`${result.auto_match_count || 0}건 자동 매칭됐습니다(해당 대출 "당월 상환" 체크, 알림은 큐에서 제외).`);
+  });
+
+  document.getElementById("loan-attach-auto-input").addEventListener("change", async (e) => {
+    const input = e.target;
+    if (!input.files.length) return;
+    const n = input.files.length;
+    const formData = new FormData();
+    for (const f of input.files) formData.append("file", f);
+    const before = new Set((state.unassigned_attachments || []).map((a) => a.id));
+    state = await api("/api/loans/attachments/auto", { method: "POST", body: formData });
+    input.value = "";
+    const newUnassigned = (state.unassigned_attachments || []).filter((a) => !before.has(a.id)).length;
+    const logEl = document.getElementById("loan-attach-auto-log");
+    logEl.innerHTML = `<div class="upload-log-item">${n}장 올림 - ${
+      newUnassigned ? `${newUnassigned}장은 어느 대출인지 못 가렸습니다. 아래에서 직접 배정해주세요.` : "전부 자동으로 대출에 들어갔습니다."
+    }</div>`;
+    render();
   });
 
   const matchConfirmBtn = document.getElementById("match-modal-confirm-selected");

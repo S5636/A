@@ -116,8 +116,12 @@
         <option value="manual">직접 정한 순서</option>
       </select>
       <button class="btn small" id="btn-loan-automatch">자동 매칭</button>
+      <label class="btn small" for="loan-attach-auto-input" style="margin:0;">📎 증빙 한번에 올리기</label>
+      <input type="file" id="loan-attach-auto-input" multiple style="display:none;">
       <span id="loan-unpaid-total" style="margin-left:auto; font-weight:700; color:var(--accent-purple);"></span>
     </div>
+    <div id="loan-attach-auto-log"></div>
+    <div id="loan-unassigned-attachments"></div>
     <main id="loan-list" class="card-list">
       <p class="empty-hint" id="empty-loan-hint">아직 등록된 대출이 없습니다. "대출 추가"를 눌러 시작하세요.</p>
     </main>

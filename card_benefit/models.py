@@ -135,10 +135,12 @@ CREATE TABLE IF NOT EXISTS loan_payments (
 
 -- 대출마다 금융거래확인서 등 증빙 파일을 여러 장 첨부해둘 수 있게
 -- (코어박스 서류 보관함과 같은 방식: uploads/ 안의 실제 파일명은 랜덤,
--- 다운로드할 때 원래 파일명으로 돌려줌).
+-- 다운로드할 때 원래 파일명으로 돌려줌). loan_id가 비어있으면(NULL)
+-- 한꺼번에 올렸는데 어느 대출인지 자동으로 못 가려낸 파일 - 나중에
+-- 수동으로 배정한다.
 CREATE TABLE IF NOT EXISTS loan_attachments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    loan_id INTEGER NOT NULL REFERENCES loans(id) ON DELETE CASCADE,
+    loan_id INTEGER REFERENCES loans(id) ON DELETE CASCADE,
     file_name TEXT DEFAULT '',
     original_name TEXT DEFAULT '',
     file_hash TEXT DEFAULT '',
@@ -229,6 +231,25 @@ def init_db():
     conn = get_conn()
     try:
         conn.executescript(SCHEMA)
+        # loan_attachments를 처음 만들 때는 loan_id가 NOT NULL이었는데,
+        # 한꺼번에 올려서 자동분류 안 된 파일은 loan_id 없이 잠깐 가지고
+        # 있어야 해서 nullable로 바꿨다 - 예전 제약 그대로 만들어진 DB는
+        # 다시 만든다(이 표는 막 추가돼서 실제 데이터가 없었을 시점이라
+        # 안전).
+        loan_attach_cols = conn.execute("PRAGMA table_info(loan_attachments)").fetchall()
+        loan_id_col = next((c for c in loan_attach_cols if c["name"] == "loan_id"), None)
+        if loan_id_col and loan_id_col["notnull"]:
+            conn.execute("DROP TABLE loan_attachments")
+            conn.execute(
+                """CREATE TABLE loan_attachments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    loan_id INTEGER REFERENCES loans(id) ON DELETE CASCADE,
+                    file_name TEXT DEFAULT '',
+                    original_name TEXT DEFAULT '',
+                    file_hash TEXT DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+                )"""
+            )
         _ensure_column(conn, "cards", "short_name", "short_name TEXT DEFAULT ''")
         _ensure_column(conn, "cards", "last4", "last4 TEXT DEFAULT ''")
         _ensure_column(conn, "cards", "perf_threshold", "perf_threshold REAL NOT NULL DEFAULT 0")
