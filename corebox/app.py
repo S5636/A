@@ -379,6 +379,29 @@ def _salary_parse_number(line):
     return None
 
 
+_SALARY_WORK_MONTH_RE = re.compile(r"\(?\s*(\d{1,2})\s*\)?\s*월\s*급여")
+_SALARY_PAY_DATE_RE = re.compile(r"(20\d{2})-(\d{1,2})-(\d{1,2})")
+
+
+def _extract_salary_period(text):
+    """명세서 맨 앞의 "(4)월 급여명세서"가 실제 일한 달이고, 머리글에
+    하이픈으로 찍힌 "2026-05-08" 같은 날짜가 그 급여를 받은 지급일이다
+    (이름 옆 "2025,10,13,"처럼 쉼표로 된 날짜는 다른 용도라 안 씀).
+    지급일의 연도를 기준으로 일한 연도를 구하되, 12월에 일하고 다음 해
+    1월에 받는 경우만 한 해 앞당긴다."""
+    m_month = _SALARY_WORK_MONTH_RE.search(text)
+    worked_month = int(m_month.group(1)) if m_month else None
+    if worked_month is not None and not (1 <= worked_month <= 12):
+        worked_month = None
+
+    m_date = _SALARY_PAY_DATE_RE.search(text)
+    worked_year = None
+    if worked_month and m_date:
+        pay_year, pay_month = int(m_date.group(1)), int(m_date.group(2))
+        worked_year = pay_year - 1 if (worked_month == 12 and pay_month == 1) else pay_year
+    return worked_year, worked_month
+
+
 def _extract_salary_slip(text):
     """월급여명세서는 "항목명" 줄 다음에 "숫자" 줄이 오는 걸 반복하는
     표인데, 지급 항목과 공제 항목이 나란히 두 칸으로 인쇄돼 있어서 OCR이
@@ -986,16 +1009,15 @@ _SALARY_FIELD_NAMES = [
 
 @app.route("/api/salary/auto", methods=["POST"])
 def create_salary_auto():
-    """월급여명세서 파일을 올리면 항목별 금액을 읽어서 채운다. "몇 월
-    분"인지는 서식마다 제각각이라(발급일/서명일만 있고 귀속월이 명확히
-    안 찍힘) 자동으로 못 정하므로 연/월은 반드시 같이 받는다."""
+    """월급여명세서 파일을 올리면 항목별 금액을 읽어서 채운다. 서식
+    맨 앞의 "(4)월 급여명세서"와 지급일로 실제 일한 연/월을 알아낼 수
+    있으면 그걸 쓰고(업로드할 때 고른 값은 못 알아냈을 때만 대신 씀),
+    둘 다 없으면 에러."""
     uploaded = request.files.get("file")
     if not uploaded or not uploaded.filename:
         return jsonify({"error": "파일을 선택하세요."}), 400
-    year = _parse_year(request.form.get("year"))
-    month = _parse_year(request.form.get("month"))
-    if not year or not month or not (1 <= month <= 12):
-        return jsonify({"error": "연도와 월을 선택하세요."}), 400
+    form_year = _parse_year(request.form.get("year"))
+    form_month = _parse_year(request.form.get("month"))
 
     file_bytes = uploaded.read()
     file_hash = hashlib.sha256(file_bytes).hexdigest()
@@ -1012,6 +1034,11 @@ def create_salary_auto():
 
         text = _extract_text_from_file(uploaded.filename, file_bytes)
         parsed = _extract_salary_slip(text) if text else {}
+        detected_year, detected_month = _extract_salary_period(text) if text else (None, None)
+        year = detected_year or form_year
+        month = detected_month or form_month
+        if not year or not month or not (1 <= month <= 12):
+            return jsonify({"error": "연도와 월을 선택하세요."}), 400
 
         ext = os.path.splitext(secure_filename(uploaded.filename))[1]
         file_name = f"{uuid.uuid4().hex}{ext}"
@@ -1034,6 +1061,9 @@ def create_salary_auto():
             "salary": serialize_salary(conn),
             "id": cur.lastrowid,
             "text_found": bool(text),
+            "year": year,
+            "month": month,
+            "period_detected": bool(detected_year and detected_month),
         })
     finally:
         conn.close()

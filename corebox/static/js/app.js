@@ -538,12 +538,21 @@
         continue;
       }
       state = { ...state, salary: data.salary };
-      salaryYear = year;
+      // 명세서 안에서 실제 일한 월을 알아낸 경우 그 값을 쓰고(다음
+      // 파일의 기본값도 거기 이어서), 못 알아냈을 때만 내가 고른
+      // 연/월을 그대로 쓴다.
+      const actualYear = data.year ?? year;
+      const actualMonth = data.month ?? month;
+      salaryYear = actualYear;
       renderSalary();
-      const summary = data.text_found ? `${year}년 ${month}월로 등록됨 - 읽은 금액 확인해줘` : "글자를 못 읽음 - 직접 수정 필요";
+      const periodNote = data.period_detected ? "(서류에서 자동 인식)" : "";
+      const summary = data.text_found
+        ? `${actualYear}년 ${actualMonth}월로 등록됨${periodNote} - 읽은 금액 확인해줘`
+        : "글자를 못 읽음 - 직접 수정 필요";
       lines[lines.length - 1] = `<div class="upload-log-item">${prefix}${escapeHtml(file.name)} - ${summary}</div>`;
       renderLog();
-      month += 1;
+      year = actualYear;
+      month = actualMonth + 1;
       if (month > 12) { month = 1; year += 1; }
     }
     e.target.value = "";
