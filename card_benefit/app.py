@@ -5,21 +5,25 @@
 접속해서 카드별 혜택의 이번 달 남은 한도를 같이 보고 같이 기록한다.
 """
 import calendar
+import hashlib
 import json
 import os
 import re
 import secrets
+import uuid
 import zipfile
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from io import BytesIO
 
-from flask import Flask, jsonify, make_response, render_template, request, send_file
+from flask import Flask, jsonify, make_response, render_template, request, send_file, send_from_directory
 from openpyxl import Workbook, load_workbook
+from werkzeug.utils import secure_filename
 
 from models import (
     TIME_BLOCKED_LABEL,
     DEFAULT_PERFORMANCE_EXCLUDED_KEYWORDS,
+    UPLOAD_DIR,
     annotate_merchant,
     card_codes_match,
     compute_change_earned,
@@ -2009,6 +2013,11 @@ def serialize_loans(conn):
         # 맞게. 상환표가 없는 대출(만기일시 등)은 등록된 값 그대로 둠.
         due_amount = amortization[0]["payment"] if amortization else loan["monthly_payment"]
 
+        attachments = conn.execute(
+            "SELECT * FROM loan_attachments WHERE loan_id = ? ORDER BY id DESC",
+            (loan["id"],),
+        ).fetchall()
+
         result.append({
             "id": loan["id"],
             "name": loan["name"],
@@ -2032,6 +2041,7 @@ def serialize_loans(conn):
             "sort_order": loan["sort_order"],
             "payments": [dict(p) for p in payments],
             "amortization": amortization,
+            "attachments": [dict(a) for a in attachments],
         })
     return result
 
@@ -2823,6 +2833,81 @@ def delete_loan_payment(payment_id):
     finally:
         conn.close()
     return jsonify(serialize_full())
+
+
+@app.route("/api/loans/<int:loan_id>/attachments", methods=["POST"])
+def upload_loan_attachment(loan_id):
+    """금융거래확인서 등 증빙 파일을 대출에 첨부한다 - 한 번에 여러 장
+    올릴 수 있다(코어박스 서류 업로드와 동일하게)."""
+    files = request.files.getlist("file")
+    if not files:
+        return jsonify({"error": "파일을 선택하세요."}), 400
+    conn = get_conn()
+    try:
+        loan = conn.execute("SELECT id FROM loans WHERE id = ?", (loan_id,)).fetchone()
+        if not loan:
+            return jsonify({"error": "대출을 찾을 수 없습니다."}), 404
+        for uploaded in files:
+            if not uploaded or not uploaded.filename:
+                continue
+            file_bytes = uploaded.read()
+            file_hash = hashlib.sha256(file_bytes).hexdigest()
+            dup = conn.execute(
+                "SELECT id FROM loan_attachments WHERE loan_id = ? AND file_hash = ?",
+                (loan_id, file_hash),
+            ).fetchone()
+            if dup:
+                continue
+            ext = os.path.splitext(secure_filename(uploaded.filename))[1]
+            file_name = f"{uuid.uuid4().hex}{ext}"
+            with open(os.path.join(UPLOAD_DIR, file_name), "wb") as f:
+                f.write(file_bytes)
+            conn.execute(
+                "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash) "
+                "VALUES (?, ?, ?, ?)",
+                (loan_id, file_name, uploaded.filename, file_hash),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/loan-attachments/<int:attachment_id>", methods=["DELETE"])
+def delete_loan_attachment(attachment_id):
+    conn = get_conn()
+    try:
+        item = conn.execute(
+            "SELECT file_name FROM loan_attachments WHERE id = ?", (attachment_id,)
+        ).fetchone()
+        if item and item["file_name"]:
+            path = os.path.join(UPLOAD_DIR, item["file_name"])
+            if os.path.exists(path):
+                os.remove(path)
+        conn.execute("DELETE FROM loan_attachments WHERE id = ?", (attachment_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify(serialize_full())
+
+
+@app.route("/api/loan-attachments/<int:attachment_id>/download")
+def download_loan_attachment(attachment_id):
+    conn = get_conn()
+    try:
+        item = conn.execute(
+            "SELECT file_name, original_name FROM loan_attachments WHERE id = ?", (attachment_id,)
+        ).fetchone()
+        if not item or not item["file_name"]:
+            return jsonify({"error": "파일이 없습니다."}), 404
+        # as_attachment=True면 크롬/웨일이 http 주소에서 "안전하게 받을 수
+        # 없음"이라고 막아버린다(코어박스 다운로드와 동일한 이유로 inline).
+        return send_from_directory(
+            UPLOAD_DIR, item["file_name"],
+            as_attachment=False, download_name=item["original_name"] or item["file_name"],
+        )
+    finally:
+        conn.close()
 
 
 # ---- 고정지출(구독/자동이체) ----

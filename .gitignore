@@ -7,5 +7,6 @@ ownerclan_profile/
 .setup_done
 .tailscale_serve_done
 card_benefit/card_benefit.db
+card_benefit/uploads/
 corebox/corebox.db
 corebox/uploads/

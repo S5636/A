@@ -16,6 +16,7 @@ from datetime import date, datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "card_benefit.db")
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
@@ -132,6 +133,18 @@ CREATE TABLE IF NOT EXISTS loan_payments (
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- 대출마다 금융거래확인서 등 증빙 파일을 여러 장 첨부해둘 수 있게
+-- (코어박스 서류 보관함과 같은 방식: uploads/ 안의 실제 파일명은 랜덤,
+-- 다운로드할 때 원래 파일명으로 돌려줌).
+CREATE TABLE IF NOT EXISTS loan_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    loan_id INTEGER NOT NULL REFERENCES loans(id) ON DELETE CASCADE,
+    file_name TEXT DEFAULT '',
+    original_name TEXT DEFAULT '',
+    file_hash TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 -- 구독/자동이체 등 매달 고정으로 나가는 지출. 대출처럼 잔액 추적이 필요 없고
 -- "뭐가, 얼마씩, 뭘로, 며칠에 나가는지"만 등록해두고 한 달 합계를 보는 용도.
 CREATE TABLE IF NOT EXISTS recurring_payments (
@@ -212,6 +225,7 @@ def _ensure_column(conn, table, column, ddl):
 
 
 def init_db():
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     conn = get_conn()
     try:
         conn.executescript(SCHEMA)

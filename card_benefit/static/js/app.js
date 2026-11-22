@@ -1108,6 +1108,18 @@
       ? `${shortDate(amortRows[amortRows.length - 1].date)} 완납 예정(총 ${amortRows.length}회, 현재 조건 유지 가정)`
       : "";
 
+    const attachKey = `loan-attach-${loan.id}`;
+    const attachOpen = openLogPanels.has(attachKey);
+    const attachments = loan.attachments || [];
+    const attachmentsHtml = attachments.length
+      ? attachments.map((a) => `
+          <div class="log-item">
+            <a href="/api/loan-attachments/${a.id}/download" target="_blank">${escapeHtml(a.original_name || a.file_name)}</a>
+            <button class="delete-loan-attachment" data-id="${a.id}">삭제</button>
+          </div>
+        `).join("")
+      : `<div class="log-item"><span>첨부된 파일 없음</span></div>`;
+
     const reorderHtml = showReorder ? `
       <div class="reorder-buttons">
         <button class="move-loan-up" data-id="${loan.id}" ${isFirst ? "disabled" : ""} title="위로">▲</button>
@@ -1146,6 +1158,7 @@
           <button class="icon-btn add-loan-payment" data-id="${loan.id}" title="상환 기록">➕</button>
           <button class="btn small toggle-loan-log" data-id="${loan.id}">내역</button>
           ${amortRows.length ? `<button class="btn small toggle-loan-amort" data-id="${loan.id}">예상 상환표</button>` : ""}
+          <button class="btn small toggle-loan-attachments" data-id="${loan.id}">📎 첨부${attachments.length ? `(${attachments.length})` : ""}</button>
         </div>
         <div class="benefit-buttons">
           <button class="icon-btn edit-loan" data-id="${loan.id}" title="대출 수정">✏️</button>
@@ -1159,6 +1172,13 @@
           ${amortHtml}
         </div>
       ` : ""}
+      <div class="log-list ${attachOpen ? "open" : ""}" data-log-for="${attachKey}">
+        <div class="log-item">
+          <label class="btn small" for="loan-file-${loan.id}" style="margin:0;">📎 금융거래확인서 올리기</label>
+          <input type="file" id="loan-file-${loan.id}" class="loan-attach-input" data-id="${loan.id}" multiple style="display:none;">
+        </div>
+        ${attachmentsHtml}
+      </div>
     `;
   }
 
@@ -1196,6 +1216,30 @@
         render();
       });
     }
+    el.querySelector(".toggle-loan-attachments").addEventListener("click", () => {
+      const key = `loan-attach-${loan.id}`;
+      if (openLogPanels.has(key)) openLogPanels.delete(key);
+      else openLogPanels.add(key);
+      render();
+    });
+    const attachInput = el.querySelector(".loan-attach-input");
+    if (attachInput) {
+      attachInput.addEventListener("change", async () => {
+        if (!attachInput.files.length) return;
+        const formData = new FormData();
+        for (const f of attachInput.files) formData.append("file", f);
+        openLogPanels.add(`loan-attach-${loan.id}`);
+        state = await api(`/api/loans/${loan.id}/attachments`, { method: "POST", body: formData });
+        render();
+      });
+    }
+    el.querySelectorAll(".delete-loan-attachment").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("이 첨부파일을 삭제할까요?")) return;
+        state = await api(`/api/loan-attachments/${btn.dataset.id}`, { method: "DELETE" });
+        render();
+      })
+    );
     el.querySelectorAll(".memo-toggle").forEach((btn) =>
       btn.addEventListener("click", () => {
         const key = btn.dataset.memoKey;
