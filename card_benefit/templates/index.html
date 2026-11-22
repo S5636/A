@@ -103,6 +103,10 @@
           <div class="summary-label">전체 대출잔액 합계</div>
           <div class="summary-value" id="loan-total-balance-value">0원</div>
         </div>
+        <div class="summary-box summary-rate">
+          <div class="summary-label">미확인</div>
+          <div class="summary-value" id="loan-unpaid-total">0원</div>
+        </div>
       </div>
     </section>
     <div class="sort-row">
@@ -117,8 +121,7 @@
       <button class="btn small" id="btn-loan-automatch">자동 매칭</button>
       <label class="btn small" for="loan-attach-auto-input" style="margin:0;">📎 업로드</label>
       <input type="file" id="loan-attach-auto-input" multiple style="display:none;">
-      <a class="btn secondary small" href="/api/export/loan-diag.txt" download>매칭 진단 파일</a>
-      <span id="loan-unpaid-total" style="margin-left:auto; font-weight:700; color:var(--accent-purple);"></span>
+      <a class="btn secondary small" href="/api/export/loan-diag.txt" download>매칭 진단</a>
     </div>
     <div id="loan-attach-auto-log"></div>
     <div id="loan-unassigned-attachments"></div>
@@ -138,6 +141,10 @@
           <div class="summary-label">당월 지출 금액 합계</div>
           <div class="summary-value" id="recurring-grand-total-value">0원</div>
         </div>
+        <div class="summary-box summary-rate">
+          <div class="summary-label">미확인</div>
+          <div class="summary-value" id="recurring-unmatched-total">0원</div>
+        </div>
       </div>
     </section>
 
@@ -150,7 +157,6 @@
         <option value="amount">금액순</option>
       </select>
       <button class="btn small" id="btn-recurring-automatch">자동 매칭</button>
-      <span id="recurring-unmatched-total" style="margin-left:auto; font-weight:700; color:var(--accent-purple);"></span>
     </div>
     <main id="recurring-list" class="card-list">
       <p class="empty-hint" id="empty-recurring-hint">아직 등록된 지출이 없습니다. "지출 추가"를 눌러 시작하세요.</p>

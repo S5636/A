@@ -1088,7 +1088,7 @@
     document.getElementById("loan-total-monthly-value").textContent =
       `₩${fmt(sumBy(state.loans, (l) => l.due_this_month, "due_amount"))}`;
     document.getElementById("loan-unpaid-total").textContent =
-      `미확인 ₩${fmt(sumBy(state.loans, (l) => l.due_this_month && !l.paid_this_month, "due_amount"))}`;
+      `₩${fmt(sumBy(state.loans, (l) => l.due_this_month && !l.paid_this_month, "due_amount"))}`;
 
     const loans = sortedLoans();
     loans.forEach((loan, idx) => {
@@ -1479,7 +1479,7 @@
     document.getElementById("recurring-grand-total-value").textContent = `₩${fmt(total + loanTotal)}`;
 
     document.getElementById("recurring-unmatched-total").textContent =
-      `미확인 ₩${fmt(sumBy(state.recurring_payments, (r) => r.active && !r.matched_this_month, "amount"))}`;
+      `₩${fmt(sumBy(state.recurring_payments, (r) => r.active && !r.matched_this_month, "amount"))}`;
 
     renderRecurringCardSummary();
 
