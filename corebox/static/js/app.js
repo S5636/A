@@ -391,7 +391,17 @@
     }
   }
   const today = new Date();
-  document.getElementById("salary-upload-year").value = today.getFullYear();
+  {
+    const sel = document.getElementById("salary-upload-year");
+    const thisYear = today.getFullYear();
+    for (let y = thisYear - 3; y <= thisYear; y++) {
+      const opt = document.createElement("option");
+      opt.value = String(y);
+      opt.textContent = `${y}년`;
+      sel.appendChild(opt);
+    }
+    sel.value = String(thisYear);
+  }
   document.getElementById("salary-upload-month").value = String(today.getMonth() + 1);
 
   let salaryYear = null;
