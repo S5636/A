@@ -187,7 +187,9 @@
         byYear.get(key).push(d);
       }
       const btns = yearOrder.map((key) => {
-        const groupDocs = byYear.get(key);
+        const groupDocs = byYear.get(key)
+          .slice()
+          .sort((a, b) => (a.period || a.period_label || "").localeCompare(b.period || b.period_label || ""));
         const items = groupDocs.map((d) => {
           const label = d.period_label || (d.year ? `${shortYear(d.year)}년` : d.name);
           return `
