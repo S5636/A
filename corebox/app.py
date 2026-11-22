@@ -380,6 +380,26 @@ def _salary_parse_number(line):
     return None
 
 
+def _salary_collect_number(lines, start):
+    """하이라이트 배경이 있는 큰 금액(실지급액 등)은 OCR이 콤마 앞뒤로
+    숫자를 "3" / "425,910"처럼 두 줄 이상으로 쪼개 읽는 경우가 있다.
+    숫자로만 된 줄이 연속되는 동안은 전부 이어붙여 하나의 값으로
+    합치고, 숫자가 아닌 줄(= 다음 항목명)을 만나면 멈춘다."""
+    digits = ""
+    consumed = 0
+    i = start
+    while i < len(lines):
+        cleaned = lines[i].strip().replace(",", "").replace("O", "0").replace("o", "0")
+        if not re.fullmatch(r"-?\d+", cleaned):
+            break
+        digits += cleaned
+        consumed += 1
+        i += 1
+    if not digits:
+        return None, 0
+    return float(digits), consumed
+
+
 _SALARY_WORK_MONTH_RE = re.compile(r"\(?\s*(\d{1,2})\s*\)?\s*월\s*급여")
 _SALARY_PAY_DATE_RE = re.compile(r"(20\d{2})-(\d{1,2})-(\d{1,2})")
 
@@ -425,7 +445,6 @@ def _extract_salary_slip(text):
     while i < len(lines):
         line = lines[i]
         matched = False
-        next_val = _salary_parse_number(lines[i + 1]) if i + 1 < len(lines) else None
         if pay_fields and _salary_label_match(line, pay_fields[0][1]):
             key, _ = pay_fields.pop(0)
             matched = True
@@ -440,9 +459,10 @@ def _extract_salary_slip(text):
             key = "net_pay"
             matched = True
         if matched:
+            next_val, consumed = _salary_collect_number(lines, i + 1)
             if next_val is not None:
                 result[key] = next_val
-                i += 2
+                i += 1 + consumed
             else:
                 i += 1
         else:
@@ -1364,11 +1384,48 @@ def _backfill_salary_future_year():
         conn.close()
 
 
+def _backfill_salary_truncated_amounts():
+    """하이라이트 배경 때문에 OCR이 큰 금액을 콤마 앞뒤로 쪼개 읽어서
+    "3,425,910" 같은 값이 "3"으로만 잘려 저장된 기록이 있다(병합 로직
+    넣기 전). 실지급액이 비정상적으로 작은(실제 월급이 될 수 없는
+    1,000원 미만) 기록만 원본 파일을 다시 읽어서 17개 항목을 전부
+    다시 채운다."""
+    conn = models.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, file_name, original_name FROM salary_records "
+            "WHERE net_pay IS NOT NULL AND net_pay < 1000 AND file_name != ''"
+        ).fetchall()
+        for row in rows:
+            path = os.path.join(models.UPLOAD_DIR, row["file_name"])
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception:
+                continue
+            fname = row["original_name"] or row["file_name"]
+            text = _extract_text_from_file(fname, file_bytes)
+            if not text:
+                continue
+            parsed = _extract_salary_slip(text)
+            if not parsed.get("net_pay") or parsed["net_pay"] < 1000:
+                continue
+            set_clause = ", ".join(f"{f}=?" for f in _SALARY_FIELD_NAMES)
+            conn.execute(
+                f"UPDATE salary_records SET {set_clause} WHERE id=?",
+                (*[parsed.get(f) for f in _SALARY_FIELD_NAMES], row["id"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 _reclassify_blank_documents()
 _backfill_income_breakdown()
 _backfill_wage_payers()
 _strip_year_from_single_page_docs()
 _backfill_salary_future_year()
+_backfill_salary_truncated_amounts()
 
 
 if __name__ == "__main__":
