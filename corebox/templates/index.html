@@ -23,7 +23,7 @@
 
     <div class="main-tabs">
       <button class="main-tab active" id="tab-btn-documents" type="button">서류</button>
-      <button class="main-tab" id="tab-btn-salary" type="button">월급여</button>
+      <button class="main-tab" id="tab-btn-salary" type="button">급여</button>
     </div>
 
     <div id="documents-tab">
@@ -45,17 +45,17 @@
 
     <div id="salary-tab" style="display:none;">
       <div class="header-actions">
-        <label>연도 <input type="number" id="salary-upload-year" step="1" style="width:68px;"></label>
-        <select id="salary-upload-month"></select>
-        <label class="btn small" for="salary-upload-file" style="margin:0;">📄 명세서 올리기</label>
+        <label>연도 <input type="number" id="salary-upload-year" step="1" style="width:56px;"></label>
+        <select id="salary-upload-month" style="width:52px;"></select>
+        <label class="btn small" for="salary-upload-file" style="margin:0;">📄 올리기</label>
         <input type="file" id="salary-upload-file" accept="image/*,application/pdf" multiple style="display:none;">
-        <button class="btn secondary small" id="btn-add-salary">+ 직접 입력</button>
+        <button class="btn secondary small" id="btn-add-salary">+ 입력</button>
       </div>
       <div id="salary-upload-log"></div>
 
       <div class="section-title">
         <button class="icon-btn" id="salary-year-prev" title="이전 연도">◀</button>
-        <span id="salary-year-label">월급여</span>
+        <span id="salary-year-label">급여</span>
         <button class="icon-btn" id="salary-year-next" title="다음 연도">▶</button>
       </div>
       <div id="salary-table-area"></div>
@@ -131,7 +131,7 @@
 
   <div class="modal-backdrop" id="salary-modal">
     <div class="modal">
-      <h3 id="salary-modal-title">월급여 추가</h3>
+      <h3 id="salary-modal-title">급여 추가</h3>
       <label>연도
         <input type="number" id="salary-year" step="1">
       </label>

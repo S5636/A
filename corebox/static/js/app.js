@@ -400,15 +400,15 @@
     const area = document.getElementById("salary-table-area");
     if (!state.salary.length) {
       if (salaryYear === null) salaryYear = today.getFullYear();
-      label.textContent = `${salaryYear}년 월급여`;
-      area.innerHTML = `<div class="empty-hint">아직 등록된 월급여 기록이 없습니다.</div>`;
+      label.textContent = `${salaryYear}년 급여`;
+      area.innerHTML = `<div class="empty-hint">아직 등록된 급여 기록이 없습니다.</div>`;
       return;
     }
     const years = [...new Set(state.salary.map((s) => s.year))];
     if (salaryYear === null || !years.includes(salaryYear)) {
       salaryYear = Math.max(...years);
     }
-    label.textContent = `${salaryYear}년 월급여`;
+    label.textContent = `${salaryYear}년 급여`;
 
     const byMonth = new Map(state.salary.filter((s) => s.year === salaryYear).map((s) => [s.month, s]));
     const yearRows = [...byMonth.values()];
@@ -450,7 +450,7 @@
     );
     area.querySelectorAll(".delete-salary").forEach((btn) =>
       btn.addEventListener("click", async () => {
-        if (!confirm("이 월급여 기록을 삭제할까요?")) return;
+        if (!confirm("이 급여 기록을 삭제할까요?")) return;
         state = { ...state, ...await api(`/api/salary/${btn.dataset.id}`, { method: "DELETE" }) };
         renderSalary();
       })
@@ -479,7 +479,7 @@
   let editingSalaryId = null;
   function openSalaryModal(item) {
     editingSalaryId = item ? item.id : null;
-    document.getElementById("salary-modal-title").textContent = item ? "월급여 수정" : "월급여 추가";
+    document.getElementById("salary-modal-title").textContent = item ? "급여 수정" : "급여 추가";
     document.getElementById("salary-year").value = item ? item.year : (salaryYear ?? today.getFullYear());
     document.getElementById("salary-month").value = item ? item.month : (today.getMonth() + 1);
     for (const [key, id] of SALARY_FIELD_IDS) {
