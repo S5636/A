@@ -3037,12 +3037,21 @@ def upload_loan_attachments_auto():
             file_bytes = uploaded.read()
             file_hash = hashlib.sha256(file_bytes).hexdigest()
             dup = conn.execute(
-                "SELECT id FROM loan_attachments WHERE file_hash = ?", (file_hash,)
+                "SELECT id, loan_id FROM loan_attachments WHERE file_hash = ?", (file_hash,)
             ).fetchone()
-            if dup:
-                continue
             text = _extract_text_from_loan_attachment(uploaded.filename, file_bytes)
             matched = _match_loan_for_attachment_text(loans, text) if text else None
+            if dup:
+                # 전에 못 가려서 미분류로 남아있던 파일을 같은 내용으로 다시
+                # 올리면, 매칭 로직이 그 사이 고쳐졌을 수 있으니 다시 시도한다
+                # - 예전엔 그냥 "이미 있는 파일"로 보고 조용히 넘어가서,
+                # 로직을 고쳐도 다시 안 올리는 한 영영 미분류로 남았었다.
+                if dup["loan_id"] is None and matched:
+                    conn.execute(
+                        "UPDATE loan_attachments SET loan_id = ? WHERE id = ?",
+                        (matched["id"], dup["id"]),
+                    )
+                continue
             ext = os.path.splitext(secure_filename(uploaded.filename))[1]
             file_name = f"{uuid.uuid4().hex}{ext}"
             with open(os.path.join(UPLOAD_DIR, file_name), "wb") as f:
@@ -5721,8 +5730,47 @@ def create_inbox_item_from_image():
     return jsonify(result)
 
 
+def _retry_unassigned_loan_attachments():
+    """미분류로 남아있는 증빙파일을, 서버가 켜질 때마다 최신 매칭
+    로직으로 다시 시도한다 - 매칭 로직을 고친 뒤에도 사용자가 같은
+    파일을 다시 올려야만 재시도되던 걸(그것도 "이미 있는 파일"로 보고
+    조용히 건너뛰어서 실제로는 재시도조차 안 됐음), 재업로드 없이
+    자동으로 풀리게 한다."""
+    conn = get_conn()
+    try:
+        unassigned = conn.execute(
+            "SELECT id, file_name, original_name FROM loan_attachments WHERE loan_id IS NULL"
+        ).fetchall()
+        if not unassigned:
+            return
+        loans = conn.execute("SELECT * FROM loans").fetchall()
+        for item in unassigned:
+            path = os.path.join(UPLOAD_DIR, item["file_name"])
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception:
+                continue
+            fname = item["original_name"] or item["file_name"]
+            text = _extract_text_from_loan_attachment(fname, file_bytes)
+            if not text:
+                continue
+            matched = _match_loan_for_attachment_text(loans, text)
+            if matched:
+                conn.execute(
+                    "UPDATE loan_attachments SET loan_id = ? WHERE id = ?",
+                    (matched["id"], item["id"]),
+                )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
 init_db()
 apply_startup_data_fixes()
+_retry_unassigned_loan_attachments()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
