@@ -206,6 +206,26 @@ _ADMIN_CHROME_PROFILE_DIR = os.path.join(BASE_DIR, ".admin_browser_profile_chrom
 _ADMIN_BROWSER_PROFILE_DIR = os.path.join(BASE_DIR, ".admin_browser_profile")
 
 
+def _describe_admin_browser_process():
+    """17392 포트를 디버그 포트로 쥐고 있는 프로세스가 있으면 그 실행파일
+    경로를 알려준다 - "크롬으로 켜지는데 왜?" 같은 걸 다음부턴 로그만 보고
+    바로 원인을 알 수 있게(재접속이 옛날 크롬 고아를 그대로 이어받은
+    건지, 아예 새로 웨일/크롬 중 뭘로 띄운 건지 구분하기 위함)."""
+    try:
+        import psutil
+    except ImportError:
+        return "(psutil 없음)"
+    port_flag = f"--remote-debugging-port={_ADMIN_CDP_PORT}"
+    for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
+        try:
+            cmdline = proc.info.get('cmdline') or []
+            if any(port_flag in (arg or '') for arg in cmdline):
+                return f"{proc.info.get('name')} (PID {proc.pid}, {proc.info.get('exe')})"
+        except Exception:
+            continue
+    return "(해당 포트를 쥔 프로세스를 못 찾았음)"
+
+
 def _try_reconnect_admin_browser(url):
     pw = None
     try:
@@ -223,9 +243,11 @@ def _try_reconnect_admin_browser(url):
             page.bring_to_front()
         except Exception:
             pass
-        print("[안내] 이전에 열어둔 마진보드 창을 그대로 새로고침했습니다 (새 탭을 또 열지 않습니다).")
+        print(f"[안내] 이전에 열어둔 마진보드 창을 그대로 새로고침했습니다 (새 탭을 또 열지 않습니다). "
+              f"재사용한 프로세스: {_describe_admin_browser_process()}")
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[안내] 마진보드 전용 창 재접속 실패({type(e).__name__}) - 새로 하나 엽니다.")
         if pw is not None:
             try:
                 pw.stop()
@@ -249,12 +271,17 @@ def _launch_admin_browser(url):
             whale_path = _find_whale_executable()
             if whale_path:
                 exe_path, profile_dir = whale_path, _ADMIN_WHALE_PROFILE_DIR
+                print(f"[안내] 웨일을 찾았습니다: {whale_path} - 이걸로 마진보드 창을 엽니다.")
             else:
                 chrome_path = _find_chrome_executable()
                 if chrome_path:
                     exe_path, profile_dir = chrome_path, _ADMIN_CHROME_PROFILE_DIR
-        except Exception:
+                    print(f"[안내] 웨일을 못 찾아서 크롬으로 엽니다: {chrome_path}")
+                else:
+                    print("[안내] 웨일/크롬 실행파일을 둘 다 못 찾았습니다 - 내장 크로미움으로 엽니다.")
+        except Exception as e:
             exe_path, profile_dir = None, _ADMIN_BROWSER_PROFILE_DIR
+            print(f"[안내] 웨일/크롬 탐색 중 오류({type(e).__name__}) - 내장 크로미움으로 엽니다.")
         os.makedirs(profile_dir, exist_ok=True)
         pw = sync_playwright().start()
         launch_kwargs = dict(
