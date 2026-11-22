@@ -414,6 +414,17 @@
     label.textContent = `${salaryYear}년 월급여`;
 
     const byMonth = new Map(state.salary.filter((s) => s.year === salaryYear).map((s) => [s.month, s]));
+    const yearRows = [...byMonth.values()];
+    const totals = SALARY_COLUMNS.map((c) =>
+      yearRows.reduce((sum, s) => (s[c.key] != null ? sum + s[c.key] : sum), 0)
+    );
+    const totalRow = `
+      <tr class="salary-total-row">
+        <td>합계</td>
+        ${totals.map((v) => `<td>${fmt(v)}</td>`).join("")}
+        <td></td>
+      </tr>
+    `;
     const rows = [];
     for (let m = 1; m <= 12; m++) {
       const s = byMonth.get(m);
@@ -421,11 +432,11 @@
         <tr>
           <td>${m}월</td>
           ${SALARY_COLUMNS.map((c) => `<td>${s && s[c.key] != null ? fmt(s[c.key]) : "-"}</td>`).join("")}
-          <td>${s ? `
+          <td><div class="salary-actions">${s ? `
             ${s.file_name ? `<a class="icon-btn" href="/api/salary/${s.id}/download" title="파일 보기">📎</a>` : ""}
             <button class="icon-btn edit-salary" data-id="${s.id}" title="수정">✏️</button>
             <button class="icon-btn delete-salary" data-id="${s.id}" title="삭제">🗑️</button>
-          ` : ""}</td>
+          ` : ""}</div></td>
         </tr>
       `);
     }
@@ -433,7 +444,7 @@
       <div class="table-scroll">
         <table class="agg-table">
           <thead><tr><th>월</th>${SALARY_COLUMNS.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}<th></th></tr></thead>
-          <tbody>${rows.join("")}</tbody>
+          <tbody>${totalRow}${rows.join("")}</tbody>
         </table>
       </div>
     `;

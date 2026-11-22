@@ -249,6 +249,18 @@ table.agg-table th:first-child, table.agg-table td:first-child {
 table.agg-table th { color: var(--text-muted); font-weight: 600; background: var(--surface-2); }
 table.agg-table tr:last-child td { border-bottom: none; }
 
+/* 액션 아이콘(📎✏️🗑️)이 있는 달과 없는 달("-"만 있는 빈 달)의 줄
+   높이가 달라 보이던 문제 - 내용이 있든 없든 항상 같은 높이를
+   차지하게 고정한다. */
+.salary-actions { min-height: 23px; display: flex; align-items: center; gap: 2px; }
+
+/* 합계는 표 맨 위에 고정해서 보여주고, 구분되게 강조한다. */
+tr.salary-total-row td {
+  font-weight: 700;
+  background: var(--surface-2);
+  border-bottom: 2px solid var(--border-strong);
+}
+
 .empty-hint { color: var(--text-muted); font-size: 13px; padding: 16px; text-align: center; }
 
 .upload-log-item { padding: 8px 10px; border-radius: 8px; background: var(--surface-2); margin-bottom: 5px; font-size: 13px; }

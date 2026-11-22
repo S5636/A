@@ -384,19 +384,27 @@ def _salary_collect_number(lines, start):
     """하이라이트 배경이 있는 큰 금액(실지급액 등)은 OCR이 콤마 앞뒤로
     숫자를 "3" / "425,910"처럼 두 줄 이상으로 쪼개 읽는 경우가 있다.
     숫자로만 된 줄이 연속되는 동안은 전부 이어붙여 하나의 값으로
-    합치고, 숫자가 아닌 줄(= 다음 항목명)을 만나면 멈춘다."""
-    digits = ""
-    consumed = 0
+    합치고, 숫자가 아닌 줄(= 다음 항목명)을 만나면 멈춘다. 마이너스
+    부호가 숫자와 붙어있지 않고 "-"만 따로 한 줄로 찍히는 경우(연말정산
+    환급액 등)도 있어서, 숫자 앞에 "-" 한 글자짜리 줄이 있으면 음수로
+    본다."""
     i = start
+    negative = False
+    if i < len(lines) and lines[i].strip() in ("-", "ー", "一", "−"):
+        negative = True
+        i += 1
+    digits = ""
     while i < len(lines):
         cleaned = lines[i].strip().replace(",", "").replace("O", "0").replace("o", "0")
         if not re.fullmatch(r"-?\d+", cleaned):
             break
         digits += cleaned
-        consumed += 1
         i += 1
+    consumed = i - start
     if not digits:
         return None, 0
+    if negative and not digits.startswith("-"):
+        digits = "-" + digits
     return float(digits), consumed
 
 
