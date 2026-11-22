@@ -2131,11 +2131,13 @@ def _loan_match_tokens(withdrawal_account):
 
 
 def _account_last4_candidates_in_text(text):
-    """글자 안에서 계좌번호처럼 보이는(6자리 이상 붙어있는 숫자, 중간에
-    "-" 등 구분기호 있어도 됨) 토큰들의 뒤 4자리를 전부 뽑는다. 대출
-    계좌번호를 "출금계좌" 칸이 아니라 메모에 적어둔 경우를 위함."""
+    """글자 안에서 계좌번호처럼 보이는 숫자 토큰(중간에 "-" 있어도 됨)의
+    뒤 4자리를 전부 뽑는다. 메모에 전체 계좌번호를 적어둔 경우("계좌
+    310-107-277677")와, 뒤 4자리만 따로 적어둔 경우("7677") 둘 다
+    된다 - 대출 계좌번호를 "출금계좌" 칸이 아니라 메모에 적어둔 경우를
+    위함."""
     candidates = set()
-    for run in re.findall(r"\d[\d\-]{5,}\d", text or ""):
+    for run in re.findall(r"[\d\-]{4,}", text or ""):
         digits = re.sub(r"\D", "", run)
         if len(digits) >= 4:
             candidates.add(digits[-4:])
@@ -2152,14 +2154,17 @@ def _loan_name_tokens(name):
     return [w for w in words if w not in _LOAN_NAME_GENERIC_WORDS]
 
 
-def _match_loan_for_attachment_text(loans, text):
-    """첨부파일 글자 안에서 등록된 대출을 찾는다 - (1)출금계좌 뒤 4자리
-    (+가능하면 은행명 등 글자까지)가 들어있거나, (2)대출 계좌번호를
+def _match_loans_for_attachment_text(loans, text):
+    """첨부파일 글자 안에서 등록된 대출을 전부 찾는다 - (1)출금계좌 뒤
+    4자리(+가능하면 은행명 등 글자까지)가 들어있거나, (2)대출 계좌번호를
     "출금계좌" 칸이 아니라 메모에 적어둔 경우를 위해 메모 안의 계좌번호
     뒤 4자리도 같이 보거나, (3)대출명의 구체적인 단어(은행명/상품명 등,
     "대출"/"신용" 같은 흔한 말 제외)가 그대로 들어있으면 그 대출로 본다.
-    정확히 하나만 걸리면 매칭하고, 하나도 없거나 여럿이 걸리면(애매하면)
-    추측하지 않고 미분류로 남긴다."""
+    "금융거래확인서"는 한 은행의 여신 전체를 한 장에 같이 보여주는
+    경우가 많아서(대출이 여러 개 같이 찍힘), 걸리는 대출이 여러 개면
+    전부 돌려준다 - 그 파일이 실제로 그 대출들 전부에 대한 증빙이기
+    때문에 하나만 추측해서 고르는 게 아니라 전부 다 첨부한다. 하나도
+    안 걸리면 빈 리스트(미분류로 남김)."""
     compact_digits = re.sub(r"\D", "", text)
     candidates = []
     for loan in loans:
@@ -2171,7 +2176,7 @@ def _match_loan_for_attachment_text(loans, text):
         name_match = bool(name_words) and any(w in text for w in name_words)
         if account_match or memo_match or name_match:
             candidates.append(loan)
-    return candidates[0] if len(candidates) == 1 else None
+    return candidates
 
 
 def _display_month_bounds():
@@ -2965,16 +2970,23 @@ def delete_loan_payment(payment_id):
 
 @app.route("/api/loan-attachments/<int:attachment_id>", methods=["DELETE"])
 def delete_loan_attachment(attachment_id):
+    """한 파일이 여러 대출(은행 여신 전체를 보여주는 서류 등)에 같이
+    첨부돼 있을 수 있어서, 다른 대출이 아직 같은 파일을 쓰고 있으면
+    실제 파일은 지우지 않고 이 대출과의 연결(행)만 지운다."""
     conn = get_conn()
     try:
         item = conn.execute(
             "SELECT file_name FROM loan_attachments WHERE id = ?", (attachment_id,)
         ).fetchone()
-        if item and item["file_name"]:
-            path = os.path.join(UPLOAD_DIR, item["file_name"])
-            if os.path.exists(path):
-                os.remove(path)
         conn.execute("DELETE FROM loan_attachments WHERE id = ?", (attachment_id,))
+        if item and item["file_name"]:
+            still_used = conn.execute(
+                "SELECT 1 FROM loan_attachments WHERE file_name = ? LIMIT 1", (item["file_name"],)
+            ).fetchone()
+            if not still_used:
+                path = os.path.join(UPLOAD_DIR, item["file_name"])
+                if os.path.exists(path):
+                    os.remove(path)
         conn.commit()
     finally:
         conn.close()
@@ -2984,9 +2996,11 @@ def delete_loan_attachment(attachment_id):
 @app.route("/api/loans/attachments/auto", methods=["POST"])
 def upload_loan_attachments_auto():
     """금융거래확인서 등을 한꺼번에 여러 장 올리면, 파일 안의 글자에서
-    등록된 대출의 출금계좌 뒤 4자리를 찾아 자동으로 그 대출에 넣는다.
-    어느 대출인지 하나로 못 좁히면(0개 또는 2개 이상 걸리면) 추측하지
-    않고 "미분류"로 남겨서 나중에 수동으로 배정하게 한다."""
+    등록된 대출을 찾아 자동으로 넣는다. 은행 여신 전체를 한 장에 같이
+    보여주는 서류(금융거래확인서 등)는 대출이 여러 개 걸릴 수 있는데,
+    그 경우 추측해서 하나만 고르지 않고 걸리는 대출 전부에 같은 파일을
+    첨부한다(실제로 그 대출들 전부의 증빙이 맞기 때문). 하나도 안
+    걸리면 "미분류"로 남겨서 나중에 수동으로 배정하게 한다."""
     files = request.files.getlist("file")
     if not files:
         return jsonify({"error": "파일을 선택하세요."}), 400
@@ -2998,31 +3012,56 @@ def upload_loan_attachments_auto():
                 continue
             file_bytes = uploaded.read()
             file_hash = hashlib.sha256(file_bytes).hexdigest()
-            dup = conn.execute(
+            existing = conn.execute(
                 "SELECT id, loan_id FROM loan_attachments WHERE file_hash = ?", (file_hash,)
-            ).fetchone()
+            ).fetchall()
             text = _extract_text_from_loan_attachment(uploaded.filename, file_bytes)
-            matched = _match_loan_for_attachment_text(loans, text) if text else None
-            if dup:
+            matched_loans = _match_loans_for_attachment_text(loans, text) if text else []
+            already_loan_ids = {e["loan_id"] for e in existing if e["loan_id"] is not None}
+            if existing:
                 # 전에 못 가려서 미분류로 남아있던 파일을 같은 내용으로 다시
-                # 올리면, 매칭 로직이 그 사이 고쳐졌을 수 있으니 다시 시도한다
-                # - 예전엔 그냥 "이미 있는 파일"로 보고 조용히 넘어가서,
-                # 로직을 고쳐도 다시 안 올리는 한 영영 미분류로 남았었다.
-                if dup["loan_id"] is None and matched:
+                # 올리면, 매칭 로직이 그 사이 고쳐졌을 수 있으니 다시
+                # 시도한다 - 예전엔 그냥 "이미 있는 파일"로 보고 조용히
+                # 넘어가서, 로직을 고쳐도 다시 안 올리는 한 영영 미분류로
+                # 남았었다. 이미 하나라도 배정돼 있으면 그 파일(실제
+                # 디스크의 file_name)을 그대로 두고, 새로 걸린 대출마다
+                # 행만 추가한다.
+                unassigned_row = next((e for e in existing if e["loan_id"] is None), None)
+                file_name_row = conn.execute(
+                    "SELECT file_name FROM loan_attachments WHERE file_hash = ? LIMIT 1", (file_hash,)
+                ).fetchone()
+                shared_file_name = file_name_row["file_name"]
+                new_loans = [l for l in matched_loans if l["id"] not in already_loan_ids]
+                if unassigned_row and new_loans:
                     conn.execute(
                         "UPDATE loan_attachments SET loan_id = ? WHERE id = ?",
-                        (matched["id"], dup["id"]),
+                        (new_loans[0]["id"], unassigned_row["id"]),
+                    )
+                    new_loans = new_loans[1:]
+                for loan in new_loans:
+                    conn.execute(
+                        "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash) "
+                        "VALUES (?, ?, ?, ?)",
+                        (loan["id"], shared_file_name, uploaded.filename, file_hash),
                     )
                 continue
             ext = os.path.splitext(secure_filename(uploaded.filename))[1]
             file_name = f"{uuid.uuid4().hex}{ext}"
             with open(os.path.join(UPLOAD_DIR, file_name), "wb") as f:
                 f.write(file_bytes)
-            conn.execute(
-                "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash) "
-                "VALUES (?, ?, ?, ?)",
-                (matched["id"] if matched else None, file_name, uploaded.filename, file_hash),
-            )
+            if matched_loans:
+                for loan in matched_loans:
+                    conn.execute(
+                        "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash) "
+                        "VALUES (?, ?, ?, ?)",
+                        (loan["id"], file_name, uploaded.filename, file_hash),
+                    )
+            else:
+                conn.execute(
+                    "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash) "
+                    "VALUES (?, ?, ?, ?)",
+                    (None, file_name, uploaded.filename, file_hash),
+                )
         conn.commit()
     finally:
         conn.close()
@@ -5718,11 +5757,18 @@ def _retry_unassigned_loan_attachments():
             text = _extract_text_from_loan_attachment(fname, file_bytes)
             if not text:
                 continue
-            matched = _match_loan_for_attachment_text(loans, text)
-            if matched:
+            matched_loans = _match_loans_for_attachment_text(loans, text)
+            if not matched_loans:
+                continue
+            conn.execute(
+                "UPDATE loan_attachments SET loan_id = ? WHERE id = ?",
+                (matched_loans[0]["id"], item["id"]),
+            )
+            for loan in matched_loans[1:]:
                 conn.execute(
-                    "UPDATE loan_attachments SET loan_id = ? WHERE id = ?",
-                    (matched["id"], item["id"]),
+                    "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash) "
+                    "SELECT ?, file_name, original_name, file_hash FROM loan_attachments WHERE id = ?",
+                    (loan["id"], item["id"]),
                 )
         conn.commit()
     except Exception:
