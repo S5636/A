@@ -158,10 +158,18 @@
     }
     // 문서 종류별로 제목을 누르면 열리고 닫히는 작은 박스 하나씩 만들고,
     // 그 안에 기수/연도 버튼을 나열한다(부가세는 부가세끼리, 소득금액증명은
-    // 소득금액증명끼리) - 버튼을 누르면 바로 다운로드.
+    // 소득금액증명끼리) - 버튼을 누르면 바로 다운로드. 연도 구분이 없는
+    // 보관용 서류(사업자등록증 등)는 종류별로 따로따로 안 나누고 "사업자
+    // 서류" 하나로 묶어서 보여준다 - 연도별로 갈라지는 서류와 성격이
+    // 달라서 섞어 보고 싶다는 요청.
+    const NO_YEAR_GROUP_TYPES = new Set([
+      "사업자등록증", "통신판매업 신고증", "건강기능식품 영업 신고증",
+      "의료기기 판매업 신고증", "사업자 통장 사본",
+    ]);
+    const NO_YEAR_GROUP_LABEL = "사업자 서류";
     const groups = new Map();
     for (const d of state.documents) {
-      const key = d.doc_type || "기타";
+      const key = NO_YEAR_GROUP_TYPES.has(d.doc_type) ? NO_YEAR_GROUP_LABEL : (d.doc_type || "기타");
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(d);
     }
