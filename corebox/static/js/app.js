@@ -49,12 +49,10 @@
   }
 
   function issueDateBadge(issueDate) {
-    // 발급일 기준 서류, 보통 한 달 지나면 제출처에서 안 받아주므로
-    // 30일 넘으면 눈에 띄게 경고 표시(평소엔 조용히 발급일만 작게 표시).
     if (!issueDate) return "";
-    const days = Math.floor((Date.now() - new Date(issueDate).getTime()) / 86400000);
-    const stale = days > 30;
-    return `<span class="issue-date-tag" style="${stale ? "color:var(--critical);font-weight:700;" : ""}">${escapeHtml(issueDate)}${stale ? ` (${days}일 지남)` : ""}</span>`;
+    const parts = issueDate.split("-");
+    const yymmdd = parts.length === 3 ? parts[0].slice(2) + parts[1] + parts[2] : issueDate;
+    return `<span class="issue-date-tag">${escapeHtml(yymmdd)}</span>`;
   }
 
   // 종합소득세 신고서는 급여를 준 회사가 여러 곳일 수 있어서(근로소득
@@ -177,19 +175,28 @@
     let html = "";
     for (const [docType, docs] of groups) {
       const isOpen = openDocTypeGroups.has(docType);
-      const btns = docs.map((d) => {
+      // 같은 연도(같은 라벨)로 묶이는 서류(부가세 1기/2기처럼 라벨 구분이
+      // 안 되는 경우 등)는 줄을 따로 쓰지 않고 한 줄에 같이 나오게 묶는다.
+      const labelOrder = [];
+      const byLabel = new Map();
+      for (const d of docs) {
         const label = d.period_label || (d.year ? `${shortYear(d.year)}년` : d.name);
-        const issueBadge = issueDateBadge(d.issue_date);
+        if (!byLabel.has(label)) { byLabel.set(label, []); labelOrder.push(label); }
+        byLabel.get(label).push(d);
+      }
+      const btns = labelOrder.map((label) => {
+        const groupDocs = byLabel.get(label);
+        const items = groupDocs.map((d) => `
+          ${d.file_name
+            ? `<a class="period-btn" href="/api/documents/${d.id}/download" title="${escapeHtml(d.name)}">${escapeHtml(label)}</a>`
+            : `<span class="period-btn" style="opacity:.6;" title="파일 없음">${escapeHtml(label)}</span>`}
+          ${issueDateBadge(d.issue_date)}
+          <button class="icon-btn edit-doc" data-id="${d.id}" title="수정">✏️</button>
+          <button class="icon-btn delete-doc" data-id="${d.id}" title="삭제">🗑️</button>
+        `).join("");
         return `
-          <div class="period-btn-wrap">
-            ${d.file_name
-              ? `<a class="period-btn" href="/api/documents/${d.id}/download" title="${escapeHtml(d.name)}">${escapeHtml(label)}</a>`
-              : `<span class="period-btn" style="opacity:.6;" title="파일 없음">${escapeHtml(label)}</span>`}
-            ${issueBadge}
-            <button class="icon-btn edit-doc" data-id="${d.id}" title="수정">✏️</button>
-            <button class="icon-btn delete-doc" data-id="${d.id}" title="삭제">🗑️</button>
-          </div>
-          ${incomeSourcesLine(d.income_sources)}
+          <div class="period-btn-wrap">${items}</div>
+          ${groupDocs.map((d) => incomeSourcesLine(d.income_sources)).join("")}
         `;
       }).join("");
       html += `

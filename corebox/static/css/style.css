@@ -191,7 +191,7 @@ body { padding-bottom: 40px; }
   gap: 6px;
   padding: 8px 2px 4px;
 }
-.period-btn-wrap { display: flex; align-items: center; gap: 6px; width: 100%; }
+.period-btn-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; }
 .period-btn {
   display: inline-block;
   padding: 8px 14px;
