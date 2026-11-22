@@ -86,6 +86,7 @@ def self_update(quiet=False):
     import urllib.request
 
     updated = []
+    failed = []
     for rel in _UPDATE_FILES:
         url = (
             f"https://raw.githubusercontent.com/{_UPDATE_OWNER}/{_UPDATE_REPO}/"
@@ -95,7 +96,8 @@ def self_update(quiet=False):
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=8) as resp:
                 remote_data = resp.read()
-        except Exception:
+        except Exception as e:
+            failed.append((rel, f"{type(e).__name__}: {e}"))
             continue
         local_path = os.path.join(BASE_DIR, rel)
         try:
@@ -111,6 +113,16 @@ def self_update(quiet=False):
                 updated.append(rel)
             except Exception:
                 pass
+    # "확인은 했는데 바뀐 게 없다"와 "애초에 못 받아왔다"는 전혀 다른
+    # 상황인데 지금까지는 둘 다 조용히 같은 결과(빈 목록)로 처리돼서
+    # 구분이 안 됐다 - 실패한 게 있으면 quiet 모드여도 반드시 보여준다.
+    if failed:
+        print(
+            f"[자동 업데이트] 깃허브에서 파일을 못 받아옴 "
+            f"({len(failed)}/{len(_UPDATE_FILES)}개 실패) - 인터넷/방화벽/VPN 문제일 수 있음:"
+        )
+        for rel, err in failed[:3]:
+            print(f"  - {rel}: {err}")
     if updated and not quiet:
         print(f"최신 버전으로 자동 업데이트됨: {', '.join(updated)}")
         print()
