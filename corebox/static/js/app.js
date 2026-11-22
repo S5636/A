@@ -504,31 +504,48 @@
 
   const salaryUploadLog = document.getElementById("salary-upload-log");
   document.getElementById("salary-upload-file").addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const year = document.getElementById("salary-upload-year").value;
-    const month = document.getElementById("salary-upload-month").value;
-    salaryUploadLog.innerHTML = `<div class="upload-log-item">${escapeHtml(file.name)} - 읽는 중... (처음 한 번은 오래 걸릴 수 있음)</div>`;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    // 한 번에 여러 장 고르면, 선택한 연/월부터 시작해서 파일 순서대로
+    // 한 달씩 넘어가며 자동 배정한다(1월치 고르고 1~12월 전부 골라
+    // 올리는 식의 사용을 가정) - 틀리게 배정된 건 나중에 수정하면 됨.
+    let year = Number(document.getElementById("salary-upload-year").value);
+    let month = Number(document.getElementById("salary-upload-month").value);
 
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("year", year);
-    formData.append("month", month);
-    let data;
-    try {
-      const res = await fetch("/api/salary/auto", { method: "POST", body: formData });
-      data = await res.json();
-      if (!res.ok) throw new Error(data.error || "등록 실패");
-    } catch (err) {
-      salaryUploadLog.innerHTML = `<div class="upload-log-item err">${escapeHtml(file.name)} - ${escapeHtml(err.message)}</div>`;
-      e.target.value = "";
-      return;
+    const lines = [];
+    const renderLog = () => { salaryUploadLog.innerHTML = lines.join(""); };
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const prefix = files.length > 1 ? `[${i + 1}/${files.length}] ` : "";
+      lines.push(`<div class="upload-log-item">${prefix}${escapeHtml(file.name)} - 읽는 중... (처음 한 번은 오래 걸릴 수 있음)</div>`);
+      renderLog();
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("year", String(year));
+      formData.append("month", String(month));
+      let data;
+      try {
+        const res = await fetch("/api/salary/auto", { method: "POST", body: formData });
+        data = await res.json();
+        if (!res.ok) throw new Error(data.error || "등록 실패");
+      } catch (err) {
+        lines[lines.length - 1] = `<div class="upload-log-item err">${prefix}${escapeHtml(file.name)} - ${escapeHtml(err.message)}</div>`;
+        renderLog();
+        month += 1;
+        if (month > 12) { month = 1; year += 1; }
+        continue;
+      }
+      state = { ...state, salary: data.salary };
+      salaryYear = year;
+      renderSalary();
+      const summary = data.text_found ? `${year}년 ${month}월로 등록됨 - 읽은 금액 확인해줘` : "글자를 못 읽음 - 직접 수정 필요";
+      lines[lines.length - 1] = `<div class="upload-log-item">${prefix}${escapeHtml(file.name)} - ${summary}</div>`;
+      renderLog();
+      month += 1;
+      if (month > 12) { month = 1; year += 1; }
     }
-    state = { ...state, salary: data.salary };
-    salaryYear = Number(year);
-    renderSalary();
-    const summary = data.text_found ? `${year}년 ${month}월로 등록됨 - 읽은 금액 확인해줘` : "글자를 못 읽음 - 직접 수정 필요";
-    salaryUploadLog.innerHTML = `<div class="upload-log-item">${escapeHtml(file.name)} - ${summary}</div>`;
     e.target.value = "";
   });
 
