@@ -4852,6 +4852,7 @@ def export_loan_diag():
             lines.append(f"월상환액(등록값, 금액+날짜 느슨한 매칭에 쓰임): {loan['monthly_payment']:,.0f}원")
             lines.append(f"결제일(등록값, 이 날짜 ±3일 안이어야 느슨한 매칭 대상): {loan['payment_day']}일")
             lines.append(f"출금계좌(등록값, 알림 문구에 이 숫자가 그대로 있으면 금액 상관없이 매칭): {loan['withdrawal_account'] or '(미입력)'}")
+            lines.append(f"메모(증빙파일 자동매칭이 계좌번호를 여기서도 찾음): {loan['memo'] or '(비어있음)'}")
             lines.append("최근 상환 내역(최대 10건) 및 그 날짜+금액으로 찾은 원본 알림 후보:")
             payments = conn.execute(
                 "SELECT * FROM loan_payments WHERE loan_id = ? ORDER BY paid_at DESC, id DESC LIMIT 10",
