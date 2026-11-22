@@ -2963,44 +2963,6 @@ def delete_loan_payment(payment_id):
     return jsonify(serialize_full())
 
 
-@app.route("/api/loans/<int:loan_id>/attachments", methods=["POST"])
-def upload_loan_attachment(loan_id):
-    """금융거래확인서 등 증빙 파일을 대출에 첨부한다 - 한 번에 여러 장
-    올릴 수 있다(코어박스 서류 업로드와 동일하게)."""
-    files = request.files.getlist("file")
-    if not files:
-        return jsonify({"error": "파일을 선택하세요."}), 400
-    conn = get_conn()
-    try:
-        loan = conn.execute("SELECT id FROM loans WHERE id = ?", (loan_id,)).fetchone()
-        if not loan:
-            return jsonify({"error": "대출을 찾을 수 없습니다."}), 404
-        for uploaded in files:
-            if not uploaded or not uploaded.filename:
-                continue
-            file_bytes = uploaded.read()
-            file_hash = hashlib.sha256(file_bytes).hexdigest()
-            dup = conn.execute(
-                "SELECT id FROM loan_attachments WHERE loan_id = ? AND file_hash = ?",
-                (loan_id, file_hash),
-            ).fetchone()
-            if dup:
-                continue
-            ext = os.path.splitext(secure_filename(uploaded.filename))[1]
-            file_name = f"{uuid.uuid4().hex}{ext}"
-            with open(os.path.join(UPLOAD_DIR, file_name), "wb") as f:
-                f.write(file_bytes)
-            conn.execute(
-                "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash) "
-                "VALUES (?, ?, ?, ?)",
-                (loan_id, file_name, uploaded.filename, file_hash),
-            )
-        conn.commit()
-    finally:
-        conn.close()
-    return jsonify(serialize_full())
-
-
 @app.route("/api/loan-attachments/<int:attachment_id>", methods=["DELETE"])
 def delete_loan_attachment(attachment_id):
     conn = get_conn()

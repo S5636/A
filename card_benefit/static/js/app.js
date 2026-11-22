@@ -1217,10 +1217,6 @@
         </div>
       ` : ""}
       <div class="log-list ${attachOpen ? "open" : ""}" data-log-for="${attachKey}">
-        <div class="log-item">
-          <label class="btn small" for="loan-file-${loan.id}" style="margin:0;">📎 금융거래확인서 올리기</label>
-          <input type="file" id="loan-file-${loan.id}" class="loan-attach-input" data-id="${loan.id}" multiple style="display:none;">
-        </div>
         ${attachmentsHtml}
       </div>
     `;
@@ -1266,17 +1262,6 @@
       else openLogPanels.add(key);
       render();
     });
-    const attachInput = el.querySelector(".loan-attach-input");
-    if (attachInput) {
-      attachInput.addEventListener("change", async () => {
-        if (!attachInput.files.length) return;
-        const formData = new FormData();
-        for (const f of attachInput.files) formData.append("file", f);
-        openLogPanels.add(`loan-attach-${loan.id}`);
-        state = await api(`/api/loans/${loan.id}/attachments`, { method: "POST", body: formData });
-        render();
-      });
-    }
     el.querySelectorAll(".delete-loan-attachment").forEach((btn) =>
       btn.addEventListener("click", async () => {
         if (!confirm("이 첨부파일을 삭제할까요?")) return;
