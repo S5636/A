@@ -80,6 +80,10 @@ _DOC_TYPE_RULES = [
     ("부가가치세 과세표준증명", ["과세표준증명"]),
     ("부가가치세 신고서", ["부가가치세", "부가세"]),
     ("종합소득세 신고서", ["종합소득세"]),
+    # "사업자등록증명원"이라는 글자 안에 "사업자등록증"이 그대로 들어있어서
+    # (증명원 ⊃ 등록증) 사업자등록증보다 먼저 확인해야 증명원이 등록증으로
+    # 잘못 분류되지 않는다.
+    ("사업자등록증명원", ["사업자등록증명원"]),
     ("사업자등록증", ["사업자등록증"]),
     ("통신판매업 신고증", ["통신판매업"]),
     ("건강기능식품 영업 신고증", ["건강기능식품"]),
@@ -96,7 +100,7 @@ _DOC_TYPE_RULES = [
 # 부름) - 이 서류들은 연도/기간을 아예 안 붙이고 그냥 이름 그대로
 # 보관만 한다. 연도별 집계표에도 안 뜬다(그 표는 year IS NOT NULL만 봄).
 _NO_YEAR_DOC_TYPES = {
-    "사업자등록증", "통신판매업 신고증", "건강기능식품 영업 신고증",
+    "사업자등록증", "사업자등록증명원", "통신판매업 신고증", "건강기능식품 영업 신고증",
     "의료기기 판매업 신고증", "사업자 통장 사본",
 }
 
@@ -1535,6 +1539,45 @@ def _backfill_vat_return_periods():
         conn.close()
 
 
+def _backfill_business_cert_misclassified():
+    """"사업자등록증명원"이라는 글자 안에 "사업자등록증"이 그대로 들어있어서
+    (사업자등록증명원을 이 구분 추가하기 전까지) 전부 "사업자등록증"으로
+    잘못 분류돼 있었다. "사업자등록증"으로 저장된 서류만 원본 파일로
+    다시 분류해서, 실제로는 증명원이었던 것만 바로잡는다(진짜 사업자
+    등록증은 다시 돌려도 그대로라 안전)."""
+    conn = models.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, file_name, original_name, name FROM documents "
+            "WHERE doc_type = '사업자등록증' AND file_name != ''"
+        ).fetchall()
+        for row in rows:
+            path = os.path.join(models.UPLOAD_DIR, row["file_name"])
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception:
+                continue
+            fname = row["original_name"] or row["file_name"]
+            text = _extract_text_from_file(fname, file_bytes)
+            if not text:
+                continue
+            detected_list = _classify_document(fname, text)
+            if not detected_list:
+                continue
+            d = detected_list[0]
+            if d["doc_type"] != "사업자등록증명원":
+                continue
+            new_name = d["name"] if row["name"] == "사업자등록증" else row["name"]
+            conn.execute(
+                "UPDATE documents SET doc_type=?, name=? WHERE id=?",
+                (d["doc_type"], new_name, row["id"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 _reclassify_blank_documents()
 _backfill_income_breakdown()
 _backfill_wage_payers()
@@ -1543,6 +1586,7 @@ _backfill_salary_future_year()
 _backfill_salary_net_pay()
 _backfill_salary_other_pay()
 _backfill_vat_return_periods()
+_backfill_business_cert_misclassified()
 
 
 if __name__ == "__main__":
