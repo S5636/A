@@ -2198,9 +2198,14 @@ _LOAN_NAME_GENERIC_WORDS = {
 def _loan_name_tokens(name):
     # 3글자 단어는 우연히 다른 서류 글자와 겹치는 사고가 있었다(예:
     # 케이뱅크 서류가 엉뚱한 IBK 대출에 붙음) - 4글자 이상만 매칭
-    # 신호로 쓴다.
+    # 신호로 쓴다. "비상금대출"/"사잇돌대출"처럼 은행마다 똑같이 쓰는
+    # 상품명(업계 공통 상품명)은 다른 은행 서류와도 겹쳐버린다(실제로
+    # 카카오뱅크 서류가 "하나은행 비상금대출"에 잘못 붙었음) - 대출명은
+    # 보통 "은행명 상품명" 순서라, 제일 앞 단어(보통 은행/기관명)만
+    # 매칭 신호로 쓰고 뒤에 오는 상품명 단어는 안 쓴다.
     words = re.findall(r"[가-힣A-Za-z0-9]{4,}", name or "")
-    return [w for w in words if w not in _LOAN_NAME_GENERIC_WORDS]
+    words = [w for w in words if w not in _LOAN_NAME_GENERIC_WORDS]
+    return words[:1]
 
 
 def _match_loans_for_attachment_text(loans, text):
