@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """COREBOX - 자주 쓰는 서류를 한 곳에 모아두는 보관함. 연도/문서종류별로
 숫자가 있는 서류(소득금액증명 등)는 자동으로 연도별 집계표를 보여준다."""
+import datetime
 import difflib
 import hashlib
 import json
@@ -399,6 +400,11 @@ def _extract_salary_period(text):
     if worked_month and m_date:
         pay_year, pay_month = int(m_date.group(1)), int(m_date.group(2))
         worked_year = pay_year - 1 if (worked_month == 12 and pay_month == 1) else pay_year
+    # 이미 지난 달 월급명세서가 미래 연도로 읽힐 수는 없다(OCR이 숫자
+    # 하나를 잘못 읽은 것) - 그런 값은 버리고 업로드할 때 고른 연도를
+    # 대신 쓰게 한다.
+    if worked_year is not None and worked_year > datetime.date.today().year:
+        worked_year = None
     return worked_year, worked_month
 
 
@@ -1324,10 +1330,45 @@ def _strip_year_from_single_page_docs():
         conn.close()
 
 
+def _backfill_salary_future_year():
+    """미래 연도 방어 코드를 넣기 전에 올라간 급여명세서는 이미 틀린
+    연도로 저장돼 있다. 아직 오지 않은 연도로 찍힌 기록만 실제 원본
+    파일을 다시 읽어서 올바른 연/월로 고친다 - 못 읽으면 그대로 두고
+    사용자가 직접 수정 버튼으로 고치게 한다."""
+    conn = models.get_conn()
+    try:
+        this_year = datetime.date.today().year
+        rows = conn.execute(
+            "SELECT id, year, month, file_name, original_name FROM salary_records "
+            "WHERE year > ? AND file_name != ''", (this_year,),
+        ).fetchall()
+        for row in rows:
+            path = os.path.join(models.UPLOAD_DIR, row["file_name"])
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception:
+                continue
+            fname = row["original_name"] or row["file_name"]
+            text = _extract_text_from_file(fname, file_bytes)
+            if not text:
+                continue
+            fixed_year, fixed_month = _extract_salary_period(text)
+            if fixed_year and fixed_month:
+                conn.execute(
+                    "UPDATE salary_records SET year=?, month=? WHERE id=?",
+                    (fixed_year, fixed_month, row["id"]),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 _reclassify_blank_documents()
 _backfill_income_breakdown()
 _backfill_wage_payers()
 _strip_year_from_single_page_docs()
+_backfill_salary_future_year()
 
 
 if __name__ == "__main__":
