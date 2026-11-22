@@ -262,6 +262,35 @@ def _find_and_click_confirm(win, L, descendants=None):
     ok_ctrl = _find_smallest_text_match(win, '확인', None, descendants=descendants)
     if ok_ctrl is None:
         return False
+    # 실제로 뭘 눌렀는지 로그에 안 남아서, 이게 진짜 완료/실패 팝업이었는지
+    # 아니면 "동기화를 지금 실행하시겠습니까?" 같은 실행 확인창을 잘못
+    # 누른 건지(사용자 의심: 그래서 우리가 직접 대량 동기화를 유발한 거
+    # 아니냐) 전혀 구분할 수가 없었다 - 클릭하기 직전에 버튼 텍스트와
+    # 주변 글자를 남겨서, 다음에 똑같은 상황이 생기면 뭘 눌렀는지 바로
+    # 알 수 있게 한다.
+    try:
+        ctrl_text = ok_ctrl.window_text()
+        r = ok_ctrl.rectangle()
+        nearby = []
+        container = ok_ctrl
+        for _ in range(3):
+            try:
+                container = container.parent()
+            except Exception:
+                break
+            if container is None:
+                break
+            try:
+                texts = [c.window_text().strip() for c in container.descendants() if (c.window_text() or '').strip()]
+                if len(texts) > 1:
+                    nearby = texts[:30]
+                    break
+            except Exception:
+                continue
+        L(f"'확인' 버튼 클릭 직전 - 버튼 텍스트: '{ctrl_text}', 위치: "
+          f"({r.left},{r.top},{r.width()}x{r.height()}), 주변 글자(최대 30개): {nearby}")
+    except Exception as e:
+        L(f"'확인' 버튼 주변 정보 수집 실패(무시하고 진행): {type(e).__name__}: {e}")
     try:
         ok_ctrl.invoke()
     except Exception:
