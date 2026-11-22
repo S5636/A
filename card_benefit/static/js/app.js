@@ -1158,9 +1158,9 @@
           <button class="icon-btn add-loan-payment" data-id="${loan.id}" title="상환 기록">➕</button>
           <button class="btn small toggle-loan-log" data-id="${loan.id}">내역</button>
           ${amortRows.length ? `<button class="btn small toggle-loan-amort" data-id="${loan.id}">예상 상환표</button>` : ""}
-          <button class="btn small toggle-loan-attachments" data-id="${loan.id}">📎 첨부${attachments.length ? `(${attachments.length})` : ""}</button>
         </div>
         <div class="benefit-buttons">
+          <button class="icon-btn toggle-loan-attachments" data-id="${loan.id}" title="첨부파일${attachments.length ? ` (${attachments.length})` : ""}">📎</button>
           <button class="icon-btn edit-loan" data-id="${loan.id}" title="대출 수정">✏️</button>
           <button class="icon-btn delete-loan" data-id="${loan.id}" title="대출 삭제">🗑️</button>
         </div>
