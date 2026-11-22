@@ -4910,7 +4910,36 @@ def export_loan_diag():
     어느 게 진짜인지 추측 안 함)."""
     conn = get_conn()
     try:
+        diag_lines = ["[증빙파일 자동매칭 진단]"]
+        for pkg in ("pypdf", "fitz", "easyocr", "PIL", "numpy"):
+            try:
+                __import__(pkg)
+                diag_lines.append(f"  {pkg}: 설치됨")
+            except Exception as e:
+                diag_lines.append(f"  {pkg}: 설치 안 됨/실패 - {e}")
         loans = conn.execute("SELECT * FROM loans ORDER BY sort_order ASC, id ASC").fetchall()
+        attachments = conn.execute(
+            "SELECT id, loan_id, file_name, original_name FROM loan_attachments ORDER BY id"
+        ).fetchall()
+        for a in attachments:
+            path = os.path.join(UPLOAD_DIR, a["file_name"])
+            diag_lines.append(f"  첨부 id={a['id']} 파일={a['original_name']} 배정된 대출id={a['loan_id']}")
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+                text = _extract_text_from_loan_attachment(a["original_name"] or a["file_name"], file_bytes)
+                if not text:
+                    diag_lines.append("    -> 글자를 하나도 못 뽑음(추출 실패)")
+                else:
+                    preview = text.replace("\n", " / ")[:150]
+                    diag_lines.append(f"    -> 뽑은 글자 미리보기: {preview}")
+                    matched = _match_loans_for_attachment_text(loans, text)
+                    matched_names = ", ".join(l["name"] for l in matched) or "(없음)"
+                    diag_lines.append(f"    -> 지금 기준으로 매칭되는 대출: {matched_names}")
+            except Exception as e:
+                diag_lines.append(f"    -> 처리 중 오류: {e}")
+        diag_lines.append("")
+
         blocks = []
         for loan in loans:
             lines = []
@@ -4940,7 +4969,7 @@ def export_loan_diag():
                     raw_preview = (c["raw_text"] or "").replace("\n", " / ")[:200]
                     lines.append(f"    후보 알림({c['occurred_at']}): {raw_preview}")
             blocks.append("\n".join(lines))
-        text = ("\n" + "=" * 60 + "\n\n").join(blocks)
+        text = "\n".join(diag_lines) + "\n" + ("\n" + "=" * 60 + "\n\n").join(blocks)
     finally:
         conn.close()
 
