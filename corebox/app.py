@@ -467,6 +467,12 @@ def _extract_salary_slip(text):
                 i += 1
         else:
             i += 1
+    # "실지급액"은 하이라이트 배경 때문에 OCR이 제일 잘 틀리는 칸이다 -
+    # 반면 지급소계/공제소계는 배경이 없어서 거의 항상 정확하게 읽힌다.
+    # 실지급액 = 지급소계 - 공제소계가 항상 성립하므로, 둘 다 읽혔으면
+    # OCR로 읽은 실지급액 값 대신 계산으로 구한 값을 쓴다.
+    if result.get("gross_pay") is not None and result.get("total_deduction") is not None:
+        result["net_pay"] = result["gross_pay"] - result["total_deduction"]
     return result
 
 
@@ -1384,37 +1390,26 @@ def _backfill_salary_future_year():
         conn.close()
 
 
-def _backfill_salary_truncated_amounts():
-    """하이라이트 배경 때문에 OCR이 큰 금액을 콤마 앞뒤로 쪼개 읽어서
-    "3,425,910" 같은 값이 "3"으로만 잘려 저장된 기록이 있다(병합 로직
-    넣기 전). 실지급액이 비정상적으로 작은(실제 월급이 될 수 없는
-    1,000원 미만) 기록만 원본 파일을 다시 읽어서 17개 항목을 전부
-    다시 채운다."""
+def _backfill_salary_net_pay():
+    """하이라이트 배경 때문에 OCR이 "실지급액"(큰 금액)을 콤마 앞뒤로
+    쪼개 읽어서 "3,425,910"이 "3"이나 "3,426"처럼 일부만 잘려 저장된
+    기록이 있다(병합 로직 넣기 전) - 어디서 잘렸는지는 파일마다 달라서
+    원본을 다시 읽어 맞혀야 했는데, 사실 지급소계-공제소계를 계산하면
+    항상 정확한 실지급액이 나온다(배경 없는 숫자라 OCR도 거의 안
+    틀림). 파일을 다시 읽을 필요 없이 그냥 계산해서 바로잡는다."""
     conn = models.get_conn()
     try:
         rows = conn.execute(
-            "SELECT id, file_name, original_name FROM salary_records "
-            "WHERE net_pay IS NOT NULL AND net_pay < 1000 AND file_name != ''"
+            "SELECT id, gross_pay, total_deduction, net_pay FROM salary_records "
+            "WHERE gross_pay IS NOT NULL AND total_deduction IS NOT NULL"
         ).fetchall()
         for row in rows:
-            path = os.path.join(models.UPLOAD_DIR, row["file_name"])
-            try:
-                with open(path, "rb") as f:
-                    file_bytes = f.read()
-            except Exception:
-                continue
-            fname = row["original_name"] or row["file_name"]
-            text = _extract_text_from_file(fname, file_bytes)
-            if not text:
-                continue
-            parsed = _extract_salary_slip(text)
-            if not parsed.get("net_pay") or parsed["net_pay"] < 1000:
-                continue
-            set_clause = ", ".join(f"{f}=?" for f in _SALARY_FIELD_NAMES)
-            conn.execute(
-                f"UPDATE salary_records SET {set_clause} WHERE id=?",
-                (*[parsed.get(f) for f in _SALARY_FIELD_NAMES], row["id"]),
-            )
+            correct_net = row["gross_pay"] - row["total_deduction"]
+            if row["net_pay"] != correct_net:
+                conn.execute(
+                    "UPDATE salary_records SET net_pay=? WHERE id=?",
+                    (correct_net, row["id"]),
+                )
         conn.commit()
     finally:
         conn.close()
@@ -1425,7 +1420,7 @@ _backfill_income_breakdown()
 _backfill_wage_payers()
 _strip_year_from_single_page_docs()
 _backfill_salary_future_year()
-_backfill_salary_truncated_amounts()
+_backfill_salary_net_pay()
 
 
 if __name__ == "__main__":
