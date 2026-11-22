@@ -106,8 +106,10 @@
       if (!byType.has(r.doc_type)) byType.set(r.doc_type, []);
       byType.get(r.doc_type).push(r);
     }
+    const docTypes = [...byType.keys()];
     let html = "";
-    for (const [docType, rows] of byType) {
+    docTypes.forEach((docType, idx) => {
+      const rows = byType.get(docType);
       const cols = columnsForType(docType);
       const trs = rows.map((r) => `
         <tr>
@@ -116,35 +118,33 @@
         </tr>
       `).join("");
       html += `
-        <div class="year-group-title">${escapeHtml(docType)}</div>
-        <div class="table-scroll-wrap">
-          <button class="table-scroll-arrow prev" type="button" aria-label="왼쪽으로">‹</button>
-          <div class="table-scroll">
-            <table class="agg-table">
-              <thead><tr><th>연도</th>${cols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}</tr></thead>
-              <tbody>${trs}</tbody>
-            </table>
+        <div class="year-group-title">
+          <div class="reorder-buttons">
+            <button class="move-doctype-up" data-doctype="${escapeHtml(docType)}" ${idx === 0 ? "disabled" : ""} title="위로">▲</button>
+            <button class="move-doctype-down" data-doctype="${escapeHtml(docType)}" ${idx === docTypes.length - 1 ? "disabled" : ""} title="아래로">▼</button>
           </div>
-          <button class="table-scroll-arrow next" type="button" aria-label="오른쪽으로">›</button>
+          ${escapeHtml(docType)}
+        </div>
+        <div class="table-scroll">
+          <table class="agg-table">
+            <thead><tr><th>연도</th>${cols.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}</tr></thead>
+            <tbody>${trs}</tbody>
+          </table>
         </div>
       `;
-    }
+    });
     area.innerHTML = html;
 
-    // 손가락 스와이프는 그대로 되고, 화살표는 한 번 누를 때마다 한
-    // 칸(대략 표 칸 하나 너비)씩 옆으로 넘겨주는 보조 버튼. 스크롤할
-    // 내용이 없는(칸이 몇 개 안 되는) 표는 화살표를 아예 숨긴다.
-    area.querySelectorAll(".table-scroll-wrap").forEach((wrap) => {
-      const scroller = wrap.querySelector(".table-scroll");
-      const prevBtn = wrap.querySelector(".table-scroll-arrow.prev");
-      const nextBtn = wrap.querySelector(".table-scroll-arrow.next");
-      if (scroller.scrollWidth <= scroller.clientWidth + 1) {
-        prevBtn.style.display = "none";
-        nextBtn.style.display = "none";
-        return;
-      }
-      prevBtn.addEventListener("click", () => scroller.scrollBy({ left: -120, behavior: "smooth" }));
-      nextBtn.addEventListener("click", () => scroller.scrollBy({ left: 120, behavior: "smooth" }));
+    area.querySelectorAll(".move-doctype-up, .move-doctype-down").forEach((btn) => {
+      if (btn.disabled) return;
+      const direction = btn.classList.contains("move-doctype-up") ? "up" : "down";
+      btn.addEventListener("click", async () => {
+        state = await api(`/api/doc_type_order/${encodeURIComponent(btn.dataset.doctype)}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ direction }),
+        });
+        render();
+      });
     });
   }
 

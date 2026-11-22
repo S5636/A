@@ -12,6 +12,11 @@ DB_PATH = os.path.join(BASE_DIR, "corebox.db")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS doc_type_order (
+    doc_type TEXT PRIMARY KEY,       -- "소득금액증명" 등 - 연도별 집계 섹션 순서 기억용
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,              -- 서류명(예: "사업자 등록증", "2020 소득금액증명")

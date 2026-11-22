@@ -126,7 +126,22 @@ body { padding-bottom: 40px; }
   font-size: 13px;
   font-weight: 700;
   margin: 14px 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+.reorder-buttons { display: flex; flex-direction: column; gap: 2px; }
+.reorder-buttons button {
+  border: none;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 1px 5px;
+  cursor: pointer;
+}
+.reorder-buttons button:hover { color: var(--text-primary); }
+.reorder-buttons button:disabled { opacity: .3; cursor: not-allowed; }
 
 .doctype-header {
   color: var(--text-primary);
@@ -175,9 +190,8 @@ body { padding-bottom: 40px; }
 
 /* 칸 수가 많아지면(소득금액증명 세부 항목 등) 줄바꿈으로 찌그러뜨리지
    말고 가로 스크롤로 보여준다 - 숫자가 줄바꿈되면 표가 알아보기 힘들다.
-   스크롤바는 지저분해 보여서 숨기고, 대신 좌우 화살표 버튼으로 넘긴다
-   (손가락 스와이프는 그대로 됨 - 화살표는 보조 수단). */
-.table-scroll-wrap { position: relative; }
+   스크롤바는 지저분해 보여서 숨기고(스와이프는 그대로 됨), 넘기는 건
+   화살표 없이 손가락으로 직접 한다. */
 .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -186,28 +200,6 @@ body { padding-bottom: 40px; }
   -ms-overflow-style: none;
 }
 .table-scroll::-webkit-scrollbar { display: none; }
-.table-scroll-arrow {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-3);
-  color: var(--text-primary);
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2;
-  opacity: 0.9;
-}
-.table-scroll-arrow:active { filter: brightness(1.15); }
-.table-scroll-arrow.prev { left: -8px; }
-.table-scroll-arrow.next { right: -8px; }
 table.agg-table {
   width: 100%;
   min-width: max-content;

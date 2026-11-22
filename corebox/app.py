@@ -524,27 +524,54 @@ def serialize_documents(conn):
     return [dict(r) for r in rows]
 
 
+def _ensure_doc_type_order(conn):
+    """연도별 집계에 등장하는 문서 종류마다 순서값이 있어야 위/아래로
+    옮길 수 있다 - 새로 보는 문서 종류가 생기면(처음 분류됐을 때) 지금
+    있는 것 중 제일 뒤에 자동으로 추가해준다."""
+    known = {r["doc_type"] for r in conn.execute("SELECT doc_type FROM doc_type_order")}
+    used = [
+        r["doc_type"] for r in conn.execute(
+            "SELECT DISTINCT doc_type FROM documents WHERE doc_type != '' ORDER BY doc_type"
+        )
+    ]
+    missing = [d for d in used if d not in known]
+    if not missing:
+        return
+    max_order = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) AS m FROM doc_type_order"
+    ).fetchone()["m"]
+    for doc_type in missing:
+        max_order += 1
+        conn.execute(
+            "INSERT INTO doc_type_order (doc_type, sort_order) VALUES (?, ?)",
+            (doc_type, max_order),
+        )
+
+
 def serialize_aggregate(conn):
     """doc_type이 등록된(비어있지 않은) 서류만 연도+문서종류로 묶어서
     금액 합계를 보여준다. doc_type이 없는 서류(사업자등록증 등 집계
-    의미가 없는 서류)는 여기 안 잡힌다."""
+    의미가 없는 서류)는 여기 안 잡힌다. 문서종류(섹션) 순서는 사용자가
+    위/아래 버튼으로 바꿔둔 순서(doc_type_order)를 따른다."""
+    _ensure_doc_type_order(conn)
     rows = conn.execute(
-        """SELECT year, doc_type,
-                  SUM(income_amount) AS income_total,
-                  SUM(taxable_income_amount) AS taxable_total,
-                  SUM(income_business) AS income_business_total,
-                  SUM(income_wage) AS income_wage_total,
-                  SUM(income_other) AS income_other_total,
-                  SUM(taxable_business) AS taxable_business_total,
-                  SUM(taxable_wage) AS taxable_wage_total,
-                  SUM(taxable_other) AS taxable_other_total,
-                  SUM(amount) AS amount_total,
-                  SUM(tax_amount) AS tax_total,
+        """SELECT d.year, d.doc_type,
+                  SUM(d.income_amount) AS income_total,
+                  SUM(d.taxable_income_amount) AS taxable_total,
+                  SUM(d.income_business) AS income_business_total,
+                  SUM(d.income_wage) AS income_wage_total,
+                  SUM(d.income_other) AS income_other_total,
+                  SUM(d.taxable_business) AS taxable_business_total,
+                  SUM(d.taxable_wage) AS taxable_wage_total,
+                  SUM(d.taxable_other) AS taxable_other_total,
+                  SUM(d.amount) AS amount_total,
+                  SUM(d.tax_amount) AS tax_total,
                   COUNT(*) AS doc_count
-           FROM documents
-           WHERE doc_type != '' AND year IS NOT NULL
-           GROUP BY year, doc_type
-           ORDER BY doc_type, year DESC"""
+           FROM documents d
+           LEFT JOIN doc_type_order o ON o.doc_type = d.doc_type
+           WHERE d.doc_type != '' AND d.year IS NOT NULL
+           GROUP BY d.year, d.doc_type
+           ORDER BY COALESCE(o.sort_order, 999999), d.doc_type, d.year DESC"""
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -576,6 +603,39 @@ def index():
 def api_full():
     conn = models.get_conn()
     try:
+        return jsonify({
+            "documents": serialize_documents(conn),
+            "aggregate": serialize_aggregate(conn),
+        })
+    finally:
+        conn.close()
+
+
+@app.route("/api/doc_type_order/<doc_type>", methods=["PUT"])
+def update_doc_type_order(doc_type):
+    """연도별 집계에서 문서 종류별 표(섹션)를 한 칸 위/아래로 옮긴다 -
+    인접한 문서 종류와 sort_order를 서로 맞바꾼다. 맨 위/아래면 그냥
+    아무 것도 안 하고 지금 상태 그대로 돌려준다."""
+    data = request.get_json(silent=True) or {}
+    direction = data.get("direction")
+    if direction not in ("up", "down"):
+        return jsonify({"error": "direction은 up 또는 down이어야 합니다."}), 400
+    conn = models.get_conn()
+    try:
+        _ensure_doc_type_order(conn)
+        rows = conn.execute(
+            "SELECT doc_type, sort_order FROM doc_type_order ORDER BY sort_order"
+        ).fetchall()
+        order_list = [r["doc_type"] for r in rows]
+        if doc_type in order_list:
+            idx = order_list.index(doc_type)
+            swap_idx = idx - 1 if direction == "up" else idx + 1
+            if 0 <= swap_idx < len(order_list):
+                other = order_list[swap_idx]
+                a, b = rows[idx]["sort_order"], rows[swap_idx]["sort_order"]
+                conn.execute("UPDATE doc_type_order SET sort_order=? WHERE doc_type=?", (b, doc_type))
+                conn.execute("UPDATE doc_type_order SET sort_order=? WHERE doc_type=?", (a, other))
+                conn.commit()
         return jsonify({
             "documents": serialize_documents(conn),
             "aggregate": serialize_aggregate(conn),
