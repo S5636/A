@@ -248,6 +248,53 @@ def _find_smallest_text_match(win, title, log=None, descendants=None):
     return candidates[0][3]
 
 
+def _find_real_confirm_button(win, descendants=None, log=None):
+    """'확인' 버튼만 정확히 찾는다 - 몇 주째 반복된 "다팔자가 바쁜 상태"
+    사고의 진짜 원인이 바로 이 검색의 예전 버전이었다(사용자가 콘솔 로그로
+    실제 확인). '확인'을 "포함하는" 아무 글자나 찾다 보니, 사이드바의 깨진
+    이미지 아이콘에 달린 접근성 설명 "누락된 이미지 설명을 확인하려면
+    컨텍스트 메뉴를 여세요."까지 걸려버렸다(위치 18,227 / 크기 24x25 -
+    진짜 팝업이 아니라 전혀 상관없는 작은 아이콘). 이 아이콘은 절대 안
+    사라지는 고정 UI라서, 완료 팝업을 기다리는 루프가 매번 이것만
+    "발견"하고 클릭하길 반복하며 300초를 통째로 날렸다 - 다팔자가 바쁜 게
+    아니라 우리가 엉뚱한 아이콘을 계속 잘못 누르고 있었던 것이다. 그래서
+    '확인'을 "포함"하는 건 받아주되, 실제 완료/실패 팝업의 '확인' 버튼은
+    지금까지 전부 정확히 '확인' 두 글자뿐이었으니, 긴 문장(설명/안내
+    텍스트)은 제외한다."""
+    try:
+        if descendants is None:
+            descendants = win.descendants()
+        candidates = []
+        for c in descendants:
+            try:
+                t = (c.window_text() or '').strip()
+            except Exception:
+                continue
+            if not t or '확인' not in t:
+                continue
+            if t != '확인' and len(t) > 6:
+                # "...확인하려면..." 같은 긴 설명 문장 - 버튼이 아니라서 제외.
+                continue
+            try:
+                if not c.is_visible():
+                    continue
+                r = c.rectangle()
+                area = max(0, r.width()) * max(0, r.height())
+            except Exception:
+                continue
+            if area <= 0:
+                continue
+            candidates.append((0 if t == '확인' else 1, area, c))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: (x[0], x[1]))
+        return candidates[0][2]
+    except Exception as e:
+        if log is not None:
+            log(f"'확인' 버튼 탐색 중 오류(무시하고 계속 진행): {type(e).__name__}: {e}")
+        return None
+
+
 def _find_and_click_confirm(win, L, descendants=None):
     """화면에 '확인' 버튼이 보이면 찾아서 누른다 - 눌렀으면 True.
 
@@ -259,7 +306,7 @@ def _find_and_click_confirm(win, L, descendants=None):
     했잖아 - 왜 안 꺼졌어"). 문구를 미리 알아맞히려 하지 말고, 그 시점에
     '확인' 버튼이 실제로 보이면(=뭔가 완료/실패 팝업이 떠 있다는 뜻) 문구가
     뭐든 상관없이 바로 누른다."""
-    ok_ctrl = _find_smallest_text_match(win, '확인', None, descendants=descendants)
+    ok_ctrl = _find_real_confirm_button(win, descendants=descendants, log=L)
     if ok_ctrl is None:
         return False
     # 실제로 뭘 눌렀는지 로그에 안 남아서, 이게 진짜 완료/실패 팝업이었는지
@@ -548,7 +595,7 @@ def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
         done_marker, matched_phrase = _find_any_completion_marker(win, descendants=descendants)
         ok_ctrl = _find_near(done_marker, '확인', L) if done_marker is not None else None
         if ok_ctrl is None:
-            ok_ctrl = _find_smallest_text_match(win, '확인', None, descendants=descendants)
+            ok_ctrl = _find_real_confirm_button(win, descendants=descendants, log=L)
         if ok_ctrl is None:
             continue
         if matched_phrase:
@@ -573,7 +620,7 @@ def _wait_for_completion_popup_and_confirm(win, L, wait_seconds=180):
         try:
             win.type_keys('{ENTER}')
             time.sleep(1)
-            still_there = _find_smallest_text_match(win, '확인', None) is not None
+            still_there = _find_real_confirm_button(win) is not None
             if not still_there:
                 L('Enter 키로 완료 팝업이 닫힌 것으로 보입니다.')
                 return True
@@ -1451,7 +1498,7 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
                 # 완료 메시지 요소 근처 범위부터 먼저 찾는다.
                 ok_ctrl = _find_near(done_marker, '확인', L)
                 if ok_ctrl is None:
-                    ok_ctrl = _find_smallest_text_match(win, '확인', L, descendants=descendants)
+                    ok_ctrl = _find_real_confirm_button(win, descendants=descendants, log=L)
                 if ok_ctrl is None:
                     ok_ctrl = _find_control(win, '확인', 'Button')
                 clicked = False
