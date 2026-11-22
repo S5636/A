@@ -784,9 +784,13 @@ def download_document(doc_id):
         item = conn.execute("SELECT file_name, original_name FROM documents WHERE id = ?", (doc_id,)).fetchone()
         if not item or not item["file_name"]:
             return jsonify({"error": "파일이 없습니다."}), 404
+        # as_attachment=True면 "다운로드"로 취급돼서 크롬/웨일이
+        # http 주소에서는 "안전하게 받을 수 없음"이라고 막아버린다.
+        # inline으로 그냥 보여주면(브라우저 내장 PDF 뷰어 등) 다운로드로
+        # 안 잡혀서 안 막힌다 - 필요하면 거기서 직접 길게 눌러 저장하면 됨.
         return send_from_directory(
             models.UPLOAD_DIR, item["file_name"],
-            as_attachment=True, download_name=item["original_name"] or item["file_name"],
+            as_attachment=False, download_name=item["original_name"] or item["file_name"],
         )
     finally:
         conn.close()
