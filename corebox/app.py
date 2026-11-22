@@ -908,10 +908,13 @@ def _backfill_income_breakdown():
 
 
 def _backfill_wage_payers():
-    """근로소득 지급자(회사)별 내역을 나중에 추가해서, 그 전에 이미
-    등록된 종합소득세 신고서는 안 채워져 있다. 그런 서류만 찾아서
-    income_sources만 채운다(회사가 없으면 빈 채로 둠 - 매번 다시 OCR
-    돌리는 게 낭비라 재시도는 안 함)."""
+    """근로소득 지급자(회사)별 내역, 발급일(신고일), 금액을 나중에
+    고쳐서(pypdf 실제 출력 기준으로 다시 검증하기 전까지 세 개 다
+    버그가 있었음) 그 전에 이미 등록된 종합소득세 신고서는 틀린 채로
+    남아있다. income_sources가 비어있는 서류(= 이 수정 전에 등록된
+    서류)만 다시 원본 파일로 분류해서 issue_date/amount/tax_amount/
+    income_sources를 전부 다시 채운다 - 이미 맞게 올라간 서류는
+    income_sources가 채워져 있으니 안 건드림."""
     conn = models.get_conn()
     try:
         rows = conn.execute(
@@ -930,12 +933,15 @@ def _backfill_wage_payers():
             text = _extract_text_from_file(fname, file_bytes)
             if not text:
                 continue
-            payers = _extract_wage_payers(text)
-            if not payers:
+            detected_list = _classify_document(fname, text)
+            if not detected_list:
                 continue
+            d = detected_list[0]
             conn.execute(
-                "UPDATE documents SET income_sources=? WHERE id=?",
-                (json.dumps(payers, ensure_ascii=False), row["id"]),
+                "UPDATE documents SET issue_date=?, amount=?, tax_amount=?, income_sources=? "
+                "WHERE id=?",
+                (d["issue_date"] or "", d["amount"], d["tax_amount"],
+                 d.get("income_sources") or "", row["id"]),
             )
         conn.commit()
     finally:
