@@ -175,18 +175,22 @@
     let html = "";
     for (const [docType, docs] of groups) {
       const isOpen = openDocTypeGroups.has(docType);
-      // 같은 연도(같은 라벨)로 묶이는 서류(부가세 1기/2기처럼 라벨 구분이
-      // 안 되는 경우 등)는 줄을 따로 쓰지 않고 한 줄에 같이 나오게 묶는다.
-      const labelOrder = [];
-      const byLabel = new Map();
+      // 같은 연도끼리는 기(1기/2기)가 갈려도 한 줄에 같이 나오게 묶는다
+      // - 라벨이 완전히 같을 때만 묶으면 1기/2기처럼 라벨이 다른 건
+      // 안 묶여서 요청과 어긋났다. 연도 단위로 묶되, 표시되는 라벨은
+      // 각자(1기/2기) 그대로 보여준다.
+      const yearOrder = [];
+      const byYear = new Map();
       for (const d of docs) {
-        const label = d.period_label || (d.year ? `${shortYear(d.year)}년` : d.name);
-        if (!byLabel.has(label)) { byLabel.set(label, []); labelOrder.push(label); }
-        byLabel.get(label).push(d);
+        const key = d.year != null ? String(d.year) : (d.period_label || d.name);
+        if (!byYear.has(key)) { byYear.set(key, []); yearOrder.push(key); }
+        byYear.get(key).push(d);
       }
-      const btns = labelOrder.map((label) => {
-        const groupDocs = byLabel.get(label);
-        const items = groupDocs.map((d) => `
+      const btns = yearOrder.map((key) => {
+        const groupDocs = byYear.get(key);
+        const items = groupDocs.map((d) => {
+          const label = d.period_label || (d.year ? `${shortYear(d.year)}년` : d.name);
+          return `
           <div class="period-item">
             ${d.file_name
               ? `<a class="period-btn" href="/api/documents/${d.id}/download" title="${escapeHtml(d.name)}">${escapeHtml(label)}</a>`
@@ -195,7 +199,8 @@
             <button class="icon-btn edit-doc" data-id="${d.id}" title="수정">✏️</button>
             <button class="icon-btn delete-doc" data-id="${d.id}" title="삭제">🗑️</button>
           </div>
-        `).join("");
+        `;
+        }).join("");
         return `
           <div class="period-btn-wrap">${items}</div>
           ${groupDocs.map((d) => incomeSourcesLine(d.income_sources)).join("")}
