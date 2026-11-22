@@ -64,14 +64,14 @@ body { padding-bottom: 40px; }
 .app-wordmark { height: 26px; width: auto; flex-shrink: 0; }
 .app-subtitle { font-size: 11px; color: var(--text-muted); }
 
-.header-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+.header-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
 .header-actions label { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; }
 .header-actions input[type="number"], .header-actions select {
   background: var(--surface-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
-  padding: 6px 8px;
+  padding: 5px 6px;
   font-size: 13px;
   font-family: var(--font);
 }
@@ -238,7 +238,7 @@ table.agg-table {
   font-size: 13px;
 }
 table.agg-table th, table.agg-table td {
-  padding: 8px 10px;
+  padding: 5px 8px;
   text-align: right;
   white-space: nowrap;
   border-bottom: 1px solid var(--border);
@@ -250,9 +250,10 @@ table.agg-table th { color: var(--text-muted); font-weight: 600; background: var
 table.agg-table tr:last-child td { border-bottom: none; }
 
 /* 액션 아이콘(📎✏️🗑️)이 있는 달과 없는 달("-"만 있는 빈 달)의 줄
-   높이가 달라 보이던 문제 - 내용이 있든 없든 항상 같은 높이를
-   차지하게 고정한다. */
-.salary-actions { min-height: 23px; display: flex; align-items: center; gap: 2px; }
+   높이가 달라 보이던 문제 - 높은 쪽(아이콘)에 맞춰 키우지 않고
+   아이콘 쪽을 줄여서 빈 달의 낮은 높이에 맞춘다. */
+.salary-actions { display: flex; align-items: center; gap: 0; line-height: 1; }
+.salary-actions .icon-btn { font-size: 12px; padding: 1px 2px; }
 
 /* 합계는 표 맨 위에 고정해서 보여주고, 구분되게 강조한다. */
 tr.salary-total-row td {

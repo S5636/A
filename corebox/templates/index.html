@@ -46,7 +46,7 @@
     <div id="salary-tab" style="display:none;">
       <div class="header-actions">
         <label>연도 <input type="number" id="salary-upload-year" step="1" style="width:68px;"></label>
-        <label>월 <select id="salary-upload-month"></select></label>
+        <select id="salary-upload-month"></select>
         <label class="btn small" for="salary-upload-file" style="margin:0;">📄 명세서 올리기</label>
         <input type="file" id="salary-upload-file" accept="image/*,application/pdf" multiple style="display:none;">
         <button class="btn secondary small" id="btn-add-salary">+ 직접 입력</button>
@@ -158,15 +158,6 @@
       </label>
       <label>야근수당
         <input type="number" id="salary-night-pay" step="1">
-      </label>
-      <label>철야수당
-        <input type="number" id="salary-overnight-pay" step="1">
-      </label>
-      <label>특근수당
-        <input type="number" id="salary-special-pay" step="1">
-      </label>
-      <label>에이밍수당
-        <input type="number" id="salary-aiming-pay" step="1">
       </label>
       <label>기타(지급)
         <input type="number" id="salary-other-pay" step="1">

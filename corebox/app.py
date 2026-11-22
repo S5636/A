@@ -373,8 +373,8 @@ def _salary_label_match(line, label):
 
 
 def _salary_parse_number(line):
-    """OCR이 숫자 "0"을 영문자 "O"로 잘못 읽는 경우가 있어 같이 바꿔준다."""
-    cleaned = line.strip().replace(",", "").replace("O", "0").replace("o", "0")
+    """OCR이 숫자 "0"을 영문자 "O"나 "C"로 잘못 읽는 경우가 있어 같이 바꿔준다."""
+    cleaned = line.strip().replace(",", "").replace("O", "0").replace("o", "0").replace("C", "0")
     if re.fullmatch(r"-?\d+", cleaned):
         return float(cleaned)
     return None
@@ -395,7 +395,7 @@ def _salary_collect_number(lines, start):
         i += 1
     digits = ""
     while i < len(lines):
-        cleaned = lines[i].strip().replace(",", "").replace("O", "0").replace("o", "0")
+        cleaned = lines[i].strip().replace(",", "").replace("O", "0").replace("o", "0").replace("C", "0")
         if not re.fullmatch(r"-?\d+", cleaned):
             break
         digits += cleaned
@@ -481,6 +481,16 @@ def _extract_salary_slip(text):
     # OCR로 읽은 실지급액 값 대신 계산으로 구한 값을 쓴다.
     if result.get("gross_pay") is not None and result.get("total_deduction") is not None:
         result["net_pay"] = result["gross_pay"] - result["total_deduction"]
+    # "기타"는 플러스/마이너스 조정용으로 쓰이는데, 마이너스 부호가 숫자
+    # 앞에 따로 떨어져 찍혀서(예: "기타  -  1,244,000") OCR이 그 "-"
+    # 자체를 통째로 놓치는 경우가 있다(글자가 너무 얇아서 인식 못 함) -
+    # 이건 글자만 봐서는 복구할 수가 없다. 대신 지급소계는 항상 정확하게
+    # 읽히므로, "기타" = 지급소계 - (기타를 뺀 나머지 지급 항목 합)으로
+    # 거꾸로 계산하면 부호까지 저절로 맞게 나온다.
+    if result.get("gross_pay") is not None:
+        other_pay_keys = [k for k, _ in _SALARY_PAY_FIELDS if k != "other_pay"]
+        known_sum = sum(result.get(k) or 0 for k in other_pay_keys)
+        result["other_pay"] = result["gross_pay"] - known_sum
     return result
 
 
@@ -1423,12 +1433,39 @@ def _backfill_salary_net_pay():
         conn.close()
 
 
+def _backfill_salary_other_pay():
+    """"기타"는 마이너스 조정용으로 쓰이는데, 마이너스 부호를 OCR이
+    통째로 놓치는 경우가 있어서(글자가 너무 얇음) 이미 부호 없이
+    저장된 기록이 있다. 지급소계 - (기타를 뺀 나머지 지급 항목 합)으로
+    다시 계산하면 부호까지 맞게 나오므로, 파일을 다시 읽을 필요 없이
+    계산만으로 바로잡는다."""
+    other_pay_keys = [k for k, _ in _SALARY_PAY_FIELDS if k != "other_pay"]
+    conn = models.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, gross_pay, other_pay, " + ", ".join(other_pay_keys) +
+            " FROM salary_records WHERE gross_pay IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            known_sum = sum(row[k] or 0 for k in other_pay_keys)
+            correct_other = row["gross_pay"] - known_sum
+            if row["other_pay"] != correct_other:
+                conn.execute(
+                    "UPDATE salary_records SET other_pay=? WHERE id=?",
+                    (correct_other, row["id"]),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 _reclassify_blank_documents()
 _backfill_income_breakdown()
 _backfill_wage_payers()
 _strip_year_from_single_page_docs()
 _backfill_salary_future_year()
 _backfill_salary_net_pay()
+_backfill_salary_other_pay()
 
 
 if __name__ == "__main__":
