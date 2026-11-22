@@ -2089,6 +2089,19 @@ def _ocr_pil_image(pil_img):
     return "\n".join(d[1] for d in detections)
 
 
+def _reraise_if_fatal(e):
+    """진짜 중단 신호(Ctrl+C, 인터프리터 종료)만 그대로 올리고 나머지는
+    여기서 처리한다. pypdf가 내부에서 쓰는 cryptography 패키지의 러스트
+    바인딩이 깨져 있으면(예: _cffi_backend 미설치) import만 해도 보통의
+    Exception이 아니라 BaseException만 상속한 pyo3_runtime.PanicException이
+    터진다 - 기존 "except Exception"으로는 하나도 못 잡혀서 "매칭 진단"
+    버튼까지 포함해 요청 전체가 그대로 500으로 죽는 걸 실제로 재현해서
+    확인함. 패키지 하나가 깨졌다고 전체 매칭/진단 기능이 죽으면 안 되니
+    이런 panic도 같이 잡아서 그 파일/패키지만 건너뛰게 한다."""
+    if isinstance(e, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+        raise e
+
+
 def _extract_text_from_loan_attachment(filename, file_bytes):
     """금융거래확인서 등 첨부파일에서 어느 대출인지 가려낼 글자를 뽑는다.
     PDF는 먼저 pypdf로 시도하고(실제 글자 정보가 있는 PDF), 글자가 하나도
@@ -2114,10 +2127,12 @@ def _extract_text_from_loan_attachment(filename, file_bytes):
             for page in reader.pages:
                 try:
                     parts.append(page.extract_text() or "")
-                except Exception:
+                except BaseException as e:
+                    _reraise_if_fatal(e)
                     continue
             text = "\n".join(parts)
-        except Exception:
+        except BaseException as e:
+            _reraise_if_fatal(e)
             text = ""
         if text.strip():
             return text
@@ -2130,16 +2145,19 @@ def _extract_text_from_loan_attachment(filename, file_bytes):
                     pix = page.get_pixmap(dpi=200)
                     pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
                     parts.append(_ocr_pil_image(pil_img))
-                except Exception:
+                except BaseException as e:
+                    _reraise_if_fatal(e)
                     continue
             return "\n".join(parts)
-        except Exception:
+        except BaseException as e:
+            _reraise_if_fatal(e)
             return ""
     if ext in _LOAN_ATTACHMENT_IMAGE_EXTS:
         try:
             pil_img = Image.open(BytesIO(file_bytes)).convert("RGB")
             return _ocr_pil_image(pil_img)
-        except Exception:
+        except BaseException as e:
+            _reraise_if_fatal(e)
             return ""
     return ""
 
@@ -3124,7 +3142,8 @@ def upload_loan_attachments_auto():
             try:
                 _save_and_match_one_loan_attachment(conn, loans, uploaded)
                 conn.commit()
-            except Exception as e:
+            except BaseException as e:
+                _reraise_if_fatal(e)
                 conn.rollback()
                 print(f"[증빙 자동매칭] {uploaded.filename} 처리 실패: {e}")
     finally:
@@ -4951,7 +4970,8 @@ def export_loan_diag():
             try:
                 __import__(pkg)
                 diag_lines.append(f"  {pkg}: 설치됨")
-            except Exception as e:
+            except BaseException as e:
+                _reraise_if_fatal(e)
                 diag_lines.append(f"  {pkg}: 설치 안 됨/실패 - {e}")
         loans = conn.execute("SELECT * FROM loans ORDER BY sort_order ASC, id ASC").fetchall()
         attachments = conn.execute(
@@ -4972,7 +4992,8 @@ def export_loan_diag():
                     matched = _match_loans_for_attachment_text(loans, text)
                     matched_names = ", ".join(l["name"] for l in matched) or "(없음)"
                     diag_lines.append(f"    -> 지금 기준으로 매칭되는 대출: {matched_names}")
-            except Exception as e:
+            except BaseException as e:
+                _reraise_if_fatal(e)
                 diag_lines.append(f"    -> 처리 중 오류: {e}")
         diag_lines.append("")
 
@@ -5865,11 +5886,12 @@ def _retry_unassigned_loan_attachments():
                         (loan["id"], item["id"]),
                     )
                 conn.commit()
-            except Exception as e:
+            except BaseException as e:
+                _reraise_if_fatal(e)
                 conn.rollback()
                 print(f"[증빙 재시도] {item['file_name']} 처리 실패: {e}")
-    except Exception:
-        pass
+    except BaseException as e:
+        _reraise_if_fatal(e)
     finally:
         conn.close()
 
@@ -5908,11 +5930,12 @@ def _revalidate_loan_attachments():
                         "UPDATE loan_attachments SET loan_id = NULL WHERE id = ?", (item["id"],)
                     )
                     conn.commit()
-            except Exception as e:
+            except BaseException as e:
+                _reraise_if_fatal(e)
                 conn.rollback()
                 print(f"[증빙 재검증] {item['file_name']} 처리 실패: {e}")
-    except Exception:
-        pass
+    except BaseException as e:
+        _reraise_if_fatal(e)
     finally:
         conn.close()
 
