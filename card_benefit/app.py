@@ -2150,7 +2150,10 @@ _LOAN_NAME_GENERIC_WORDS = {"대출", "신용", "개인", "담보", "신용대�
 
 
 def _loan_name_tokens(name):
-    words = re.findall(r"[가-힣A-Za-z0-9]{3,}", name or "")
+    # 3글자 단어는 우연히 다른 서류 글자와 겹치는 사고가 있었다(예:
+    # 케이뱅크 서류가 엉뚱한 IBK 대출에 붙음) - 4글자 이상만 매칭
+    # 신호로 쓴다.
+    words = re.findall(r"[가-힣A-Za-z0-9]{4,}", name or "")
     return [w for w in words if w not in _LOAN_NAME_GENERIC_WORDS]
 
 
@@ -5791,8 +5794,34 @@ def _retry_unassigned_loan_attachments():
         conn.close()
 
 
+def _unlink_known_wrong_loan_attachment():
+    """케이뱅크 금융거래확인서가 전혀 무관한 IBK "근로복지공단
+    체불근로자생계비대출"에 잘못 붙어있던 걸 실제로 확인함(사용자
+    캡처) - 글자 비교로는 왜 걸렸는지 재현이 안 되는데(텍스트 대조해도
+    겹치는 단어가 없음), 일단 이 특정 연결을 풀어서 미분류로 돌려
+    놓는다. 다음 재시도 때 (매칭 로직대로) 실제로 맞는 케이뱅크 대출로
+    다시 붙게 된다."""
+    conn = get_conn()
+    try:
+        bad = conn.execute(
+            """SELECT la.id FROM loan_attachments la
+               JOIN loans l ON l.id = la.loan_id
+               WHERE l.name = '근로복지공단 체불근로자생계비대출'
+                 AND la.original_name LIKE '%261122930005208%'"""
+        ).fetchall()
+        for row in bad:
+            conn.execute("UPDATE loan_attachments SET loan_id = NULL WHERE id = ?", (row["id"],))
+        if bad:
+            conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
 init_db()
 apply_startup_data_fixes()
+_unlink_known_wrong_loan_attachment()
 _retry_unassigned_loan_attachments()
 
 if __name__ == "__main__":
