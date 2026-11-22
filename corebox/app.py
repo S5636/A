@@ -209,6 +209,26 @@ def _extract_period(text):
     return None
 
 
+_VAT_RETURN_PERIOD_RE = re.compile(
+    r"신\s*고\s*기\s*간\s*(20\d{2})\s*년\s*제\s*[12]\s*기\s*\(\s*"
+    r"(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*~\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*\)"
+)
+
+
+def _extract_vat_return_period(text):
+    """부가가치세 신고서는 "과세기간"이 아니라 "신고기간 2025 년 제 2 기
+    (07 월 01 일 ~ 12 월 31 일)" 형식이라 _extract_period의 "과세기간/
+    귀속기간" 패턴으로는 못 잡는다 - 실제 서식(2025년 2기) 기준으로
+    따로 잡는다. 연도가 같은 줄에 있어서 그대로 기간을 만들 수 있다."""
+    m = _VAT_RETURN_PERIOD_RE.search(text)
+    if not m:
+        return None
+    year = int(m.group(1))
+    start = f"{year}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    end = f"{year}-{int(m.group(4)):02d}-{int(m.group(5)):02d}"
+    return year, f"{start}~{end}"
+
+
 def _extract_amount_near_label(text, label):
     """"수입금액 48,956,333원"처럼 라벨 뒤 15자 이내에 나오는 숫자를
     뽑는다(음수 소득금액 "-37,693,734"도 있어서 부호 포함). 콤마 위치가
@@ -592,6 +612,10 @@ def _classify_document(filename, text):
     else:
         year = _extract_year(text, filename)
         period = _extract_period(text)
+        if doc_type == "부가가치세 신고서" and not period:
+            vat_period = _extract_vat_return_period(text)
+            if vat_period:
+                year, period = vat_period
     if not issue_date and doc_type == "종합소득세 신고서":
         issue_date = _extract_signing_date(text)
     if not issue_date:
@@ -1472,6 +1496,45 @@ def _backfill_salary_other_pay():
         conn.close()
 
 
+def _backfill_vat_return_periods():
+    """부가가치세 신고서는 "신고기간 2025년 제2기(07월01일~12월31일)"
+    형식을 못 잡던 시절에 올라간 서류가 기간(period) 없이 연도만 붙어
+    있어서, 같은 연도에 1기/2기가 있어도 구분이 안 되고 합계도 하나로
+    뭉쳐 보였다. period가 비어있는 서류만 원본 파일로 다시 분류해서
+    year/period/period_label/name을 다시 채운다."""
+    conn = models.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, file_name, original_name FROM documents "
+            "WHERE doc_type = '부가가치세 신고서' AND file_name != '' "
+            "AND (period IS NULL OR period = '')"
+        ).fetchall()
+        for row in rows:
+            path = os.path.join(models.UPLOAD_DIR, row["file_name"])
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception:
+                continue
+            fname = row["original_name"] or row["file_name"]
+            text = _extract_text_from_file(fname, file_bytes)
+            if not text:
+                continue
+            detected_list = _classify_document(fname, text)
+            if not detected_list:
+                continue
+            d = detected_list[0]
+            if not d.get("period"):
+                continue
+            conn.execute(
+                "UPDATE documents SET year=?, period=?, period_label=?, name=? WHERE id=?",
+                (d["year"], d["period"], d["period_label"], d["name"], row["id"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 _reclassify_blank_documents()
 _backfill_income_breakdown()
 _backfill_wage_payers()
@@ -1479,6 +1542,7 @@ _strip_year_from_single_page_docs()
 _backfill_salary_future_year()
 _backfill_salary_net_pay()
 _backfill_salary_other_pay()
+_backfill_vat_return_periods()
 
 
 if __name__ == "__main__":
