@@ -1548,6 +1548,23 @@ def apply_startup_data_fixes():
             conn.execute("DELETE FROM insurances WHERE id = ?", (didimssi["id"],))
             print("'디딤씨앗 적립예금'(보험)을 '고양시청 납부'(고정지출)로 통합")
 
+        # 등록할 때 설명용으로 자동으로 적어넣었던 메모들이 그대로 계속
+        # 보여서 거슬린다는 지적 - 실제 메모 내용(사용자가 따로 적은 게
+        # 있으면 그건 보존)과 섞여 있어도 이 문구들만 제거한다. 발견되는
+        # 대로 이 목록에 추가하면 된다.
+        loan_placeholder_memos = [
+            "갚은 금액이 화면에 안 보여서 잔액을 원금과 같게 등록함 - 실제와 다르면 수정 필요",
+            "마이너스통장형이라 '원금'은 대출한도, '현재 잔액'은 지금 당겨쓴 금액. "
+            "이자는 매달 금액이 달라서(매월 실제로 내는 금액은 최근 이자 기준 추정치).",
+        ]
+        for placeholder_text in loan_placeholder_memos:
+            loans_with_placeholder = conn.execute(
+                "SELECT id, memo FROM loans WHERE memo LIKE ?", (f"%{placeholder_text}%",)
+            ).fetchall()
+            for loan_row in loans_with_placeholder:
+                cleaned_memo = loan_row["memo"].replace(placeholder_text, "").strip(" \n-")
+                conn.execute("UPDATE loans SET memo = ? WHERE id = ?", (cleaned_memo, loan_row["id"]))
+
         conn.commit()
     except Exception:
         pass
@@ -2113,6 +2130,18 @@ def _loan_match_tokens(withdrawal_account):
     return words, last4
 
 
+def _account_last4_candidates_in_text(text):
+    """글자 안에서 계좌번호처럼 보이는(6자리 이상 붙어있는 숫자, 중간에
+    "-" 등 구분기호 있어도 됨) 토큰들의 뒤 4자리를 전부 뽑는다. 대출
+    계좌번호를 "출금계좌" 칸이 아니라 메모에 적어둔 경우를 위함."""
+    candidates = set()
+    for run in re.findall(r"\d[\d\-]{5,}\d", text or ""):
+        digits = re.sub(r"\D", "", run)
+        if len(digits) >= 4:
+            candidates.add(digits[-4:])
+    return candidates
+
+
 # "대출"/"신용" 같은 말은 거의 모든 대출명에 들어있어서 매칭 신호로
 # 못 쓴다(이 단어만 겹쳐도 매칭됐다고 보면 전부 다 걸려버림).
 _LOAN_NAME_GENERIC_WORDS = {"대출", "신용", "개인", "담보", "신용대출", "담보대출", "은행"}
@@ -2125,18 +2154,22 @@ def _loan_name_tokens(name):
 
 def _match_loan_for_attachment_text(loans, text):
     """첨부파일 글자 안에서 등록된 대출을 찾는다 - (1)출금계좌 뒤 4자리
-    (+가능하면 은행명 등 글자까지)가 들어있거나, (2)대출명의 구체적인
-    단어(은행명/상품명 등, "대출"/"신용" 같은 흔한 말 제외)가 그대로
-    들어있으면 그 대출로 본다. 정확히 하나만 걸리면 매칭하고, 하나도
-    없거나 여럿이 걸리면(애매하면) 추측하지 않고 미분류로 남긴다."""
+    (+가능하면 은행명 등 글자까지)가 들어있거나, (2)대출 계좌번호를
+    "출금계좌" 칸이 아니라 메모에 적어둔 경우를 위해 메모 안의 계좌번호
+    뒤 4자리도 같이 보거나, (3)대출명의 구체적인 단어(은행명/상품명 등,
+    "대출"/"신용" 같은 흔한 말 제외)가 그대로 들어있으면 그 대출로 본다.
+    정확히 하나만 걸리면 매칭하고, 하나도 없거나 여럿이 걸리면(애매하면)
+    추측하지 않고 미분류로 남긴다."""
     compact_digits = re.sub(r"\D", "", text)
     candidates = []
     for loan in loans:
         words, last4 = _loan_match_tokens(loan["withdrawal_account"])
         account_match = bool(last4) and last4 in compact_digits and (not words or any(w in text for w in words))
+        memo_last4s = _account_last4_candidates_in_text(loan["memo"])
+        memo_match = bool(memo_last4s) and any(c in compact_digits for c in memo_last4s)
         name_words = _loan_name_tokens(loan["name"])
         name_match = bool(name_words) and any(w in text for w in name_words)
-        if account_match or name_match:
+        if account_match or memo_match or name_match:
             candidates.append(loan)
     return candidates[0] if len(candidates) == 1 else None
 
