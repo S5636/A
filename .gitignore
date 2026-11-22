@@ -7,6 +7,8 @@ ownerclan_profile/
 ownerclan_profile_whale/
 ownerclan_profile_chrome/
 .admin_browser_profile/
+.admin_browser_profile_whale/
+.admin_browser_profile_chrome/
 .setup_done
 .stock_recalc_v*_done
 Margin_Board.zip

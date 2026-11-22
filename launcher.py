@@ -34,7 +34,7 @@ _ZIP_URL = f"https://github.com/{_REPO_OWNER}/{_REPO_NAME}/archive/refs/heads/{_
 _UPDATE_PROTECTED_NAMES = {
     "shop_data.db", "fees_config.json", "settings.json",
     "ownerclan_profile", "ownerclan_profile_whale", "ownerclan_profile_chrome",
-    ".admin_browser_profile",
+    ".admin_browser_profile", ".admin_browser_profile_whale", ".admin_browser_profile_chrome",
     ".setup_done", ".git",
 }
 _UPDATE_PROTECTED_PATTERN = re.compile(r"^\.stock_recalc_v\d+_done$")
@@ -201,6 +201,8 @@ def _close_previous_instances():
 # 재시작(START.bat의 강제 taskkill)에서 일부러 안 닫는다 - 그래야 고아
 # 프로세스로 살아남아서 다음 실행이 CDP로 이어받을 수 있다.
 _ADMIN_CDP_PORT = 17392
+_ADMIN_WHALE_PROFILE_DIR = os.path.join(BASE_DIR, ".admin_browser_profile_whale")
+_ADMIN_CHROME_PROFILE_DIR = os.path.join(BASE_DIR, ".admin_browser_profile_chrome")
 _ADMIN_BROWSER_PROFILE_DIR = os.path.join(BASE_DIR, ".admin_browser_profile")
 
 
@@ -233,16 +235,36 @@ def _try_reconnect_admin_browser(url):
 
 
 def _launch_admin_browser(url):
+    """마진보드 전용 창을 새로 띄운다. Playwright 내장 크로미움을 그냥 쓰면
+    사용자가 평소 쓰던 브라우저(웨일)가 아니라 전혀 다른 크롬 창이 떠버린다
+    (사용자 지적: "왜 마진보드가 크롬으로 열리냐 웨일로 열리던 게") - 오너클랜
+    자동화 창을 고를 때 쓰는 것과 똑같은 순서(웨일 -> 실제 설치된 크롬 ->
+    그래도 없으면 내장 크로미움)로 실행파일을 찾아서 그걸로 띄운다."""
     try:
         from playwright.sync_api import sync_playwright
-        os.makedirs(_ADMIN_BROWSER_PROFILE_DIR, exist_ok=True)
+        exe_path = None
+        profile_dir = _ADMIN_BROWSER_PROFILE_DIR
+        try:
+            from ownerclan_auto import _find_whale_executable, _find_chrome_executable
+            whale_path = _find_whale_executable()
+            if whale_path:
+                exe_path, profile_dir = whale_path, _ADMIN_WHALE_PROFILE_DIR
+            else:
+                chrome_path = _find_chrome_executable()
+                if chrome_path:
+                    exe_path, profile_dir = chrome_path, _ADMIN_CHROME_PROFILE_DIR
+        except Exception:
+            exe_path, profile_dir = None, _ADMIN_BROWSER_PROFILE_DIR
+        os.makedirs(profile_dir, exist_ok=True)
         pw = sync_playwright().start()
-        context = pw.chromium.launch_persistent_context(
-            _ADMIN_BROWSER_PROFILE_DIR,
+        launch_kwargs = dict(
             headless=False,
             args=[f"--remote-debugging-port={_ADMIN_CDP_PORT}"],
             no_viewport=True,
         )
+        if exe_path:
+            launch_kwargs["executable_path"] = exe_path
+        context = pw.chromium.launch_persistent_context(profile_dir, **launch_kwargs)
         page = context.pages[0] if context.pages else context.new_page()
         page.goto(url, wait_until="domcontentloaded", timeout=15000)
         return True
