@@ -2059,28 +2059,45 @@ def serialize_unassigned_attachments(conn):
 _LOAN_ATTACHMENT_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
 
 
+def _ocr_pil_image(pil_img):
+    from PIL import Image
+    import numpy as np
+    target_width = 1600
+    if pil_img.width < target_width:
+        scale = target_width / pil_img.width
+        resample = getattr(Image, "Resampling", Image).LANCZOS
+        pil_img = pil_img.resize((target_width, round(pil_img.height * scale)), resample)
+    reader_ocr = _get_ocr_reader()
+    detections = reader_ocr.readtext(np.array(pil_img), paragraph=False)
+    return "\n".join(d[1] for d in detections)
+
+
 def _extract_text_from_loan_attachment(filename, file_bytes):
     """금융거래확인서 등 첨부파일에서 어느 대출인지 가려낼 글자를 뽑는다.
-    PDF는 pypdf로(실제 글자 정보가 있는 PDF만 가능), 사진은 기존
-    영수증 인식에 쓰는 easyocr 리더를 그대로 재사용한다."""
+    PDF는 먼저 pypdf로 시도하고(실제 글자 정보가 있는 PDF), 글자가 하나도
+    안 나오면(스캔해서 이미지로만 들어있는 PDF) 페이지를 그림으로
+    변환해서 OCR로 다시 읽는다. 사진은 처음부터 OCR(기존 영수증 인식에
+    쓰는 easyocr 리더를 그대로 재사용)."""
+    from PIL import Image
     ext = os.path.splitext(filename.lower())[1]
     try:
         if ext == ".pdf":
             from pypdf import PdfReader
             reader = PdfReader(BytesIO(file_bytes))
-            return "\n".join((page.extract_text() or "") for page in reader.pages)
+            text = "\n".join((page.extract_text() or "") for page in reader.pages)
+            if text.strip():
+                return text
+            import fitz
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            parts = []
+            for page in doc:
+                pix = page.get_pixmap(dpi=200)
+                pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                parts.append(_ocr_pil_image(pil_img))
+            return "\n".join(parts)
         if ext in _LOAN_ATTACHMENT_IMAGE_EXTS:
-            from PIL import Image
-            import numpy as np
             pil_img = Image.open(BytesIO(file_bytes)).convert("RGB")
-            target_width = 1600
-            if pil_img.width < target_width:
-                scale = target_width / pil_img.width
-                resample = getattr(Image, "Resampling", Image).LANCZOS
-                pil_img = pil_img.resize((target_width, round(pil_img.height * scale)), resample)
-            reader_ocr = _get_ocr_reader()
-            detections = reader_ocr.readtext(np.array(pil_img), paragraph=False)
-            return "\n".join(d[1] for d in detections)
+            return _ocr_pil_image(pil_img)
     except Exception:
         return ""
     return ""
@@ -2096,20 +2113,31 @@ def _loan_match_tokens(withdrawal_account):
     return words, last4
 
 
+# "대출"/"신용" 같은 말은 거의 모든 대출명에 들어있어서 매칭 신호로
+# 못 쓴다(이 단어만 겹쳐도 매칭됐다고 보면 전부 다 걸려버림).
+_LOAN_NAME_GENERIC_WORDS = {"대출", "신용", "개인", "담보", "신용대출", "담보대출", "은행"}
+
+
+def _loan_name_tokens(name):
+    words = re.findall(r"[가-힣A-Za-z0-9]{3,}", name or "")
+    return [w for w in words if w not in _LOAN_NAME_GENERIC_WORDS]
+
+
 def _match_loan_for_attachment_text(loans, text):
-    """첨부파일 글자 안에 등록된 대출의 출금계좌 뒤 4자리(+가능하면 은행명
-    등 글자까지)가 들어있으면 그 대출로 본다. 정확히 하나만 걸리면
-    매칭하고, 하나도 없거나 여럿이 걸리면(애매하면) 추측하지 않고
-    미분류로 남긴다."""
+    """첨부파일 글자 안에서 등록된 대출을 찾는다 - (1)출금계좌 뒤 4자리
+    (+가능하면 은행명 등 글자까지)가 들어있거나, (2)대출명의 구체적인
+    단어(은행명/상품명 등, "대출"/"신용" 같은 흔한 말 제외)가 그대로
+    들어있으면 그 대출로 본다. 정확히 하나만 걸리면 매칭하고, 하나도
+    없거나 여럿이 걸리면(애매하면) 추측하지 않고 미분류로 남긴다."""
     compact_digits = re.sub(r"\D", "", text)
     candidates = []
     for loan in loans:
         words, last4 = _loan_match_tokens(loan["withdrawal_account"])
-        if not last4 or last4 not in compact_digits:
-            continue
-        if words and not any(w in text for w in words):
-            continue
-        candidates.append(loan)
+        account_match = bool(last4) and last4 in compact_digits and (not words or any(w in text for w in words))
+        name_words = _loan_name_tokens(loan["name"])
+        name_match = bool(name_words) and any(w in text for w in name_words)
+        if account_match or name_match:
+            candidates.append(loan)
     return candidates[0] if len(candidates) == 1 else None
 
 
@@ -2969,7 +2997,7 @@ def upload_loan_attachments_auto():
         return jsonify({"error": "파일을 선택하세요."}), 400
     conn = get_conn()
     try:
-        loans = conn.execute("SELECT * FROM loans WHERE withdrawal_account != ''").fetchall()
+        loans = conn.execute("SELECT * FROM loans").fetchall()
         for uploaded in files:
             if not uploaded or not uploaded.filename:
                 continue
