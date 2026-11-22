@@ -115,31 +115,6 @@ def _force_foreground_hwnd(hwnd, maximize=False, log=None):
         return False
 
 
-_WM_GETOBJECT = 0x003D
-_OBJID_CLIENT = -4
-
-
-def _force_accessibility_mode(hwnd, log=None):
-    """다팔자(Electron/크로미움)가 접근성 트리를 아예 안 만드는 문제가 몇 주째
-    반복됐다 - SystemParametersInfo(SPI_SETSCREENREADER, 시스템 전체 알림)도,
-    FORCE_RENDERER_ACCESSIBILITY 환경변수(사용자가 직접 설정하고 다팔자를
-    트레이에서 완전 종료 후 재시작까지 함)도 둘 다 효과가 없었다(사용자
-    확인: 그래도 '하위 요소 11개'로 똑같이 막힘). 이 둘은 전부 "시스템
-    전체"나 "다음에 뜰 프로세스"를 향한 간접적인 신호였다 - 진짜 화면읽기
-    프로그램(내레이터/NVDA 등)이 크로미움에게 보내는 신호는 그게 아니라,
-    딱 그 창 하나를 지목해서 보내는 WM_GETOBJECT(+OBJID_CLIENT) 메시지다.
-    이 창에 직접 그 메시지를 보내서 "나 지금 네 접근성 정보가 필요해"라고
-    알려본다 - 간접 신호 두 개가 안 통했을 때 다음으로 시도해볼 만한,
-    더 직접적인 방법."""
-    try:
-        ctypes.windll.user32.SendMessageW(hwnd, _WM_GETOBJECT, 0, _OBJID_CLIENT)
-        return True
-    except Exception as e:
-        if log is not None:
-            log(f'접근성 정보 요청(WM_GETOBJECT) 전송 실패(무시하고 계속 진행): {type(e).__name__}: {e}')
-        return False
-
-
 def bring_marginboard_to_front(log=None):
     """DPJ 자동화가 끝난 뒤 다팔자 창이 화면 맨 앞에 그대로 남아있으면,
     사용자가 자동화가 끝났는지 아닌지 바로 알기 어렵다는 피드백을 받았다.
@@ -1219,7 +1194,6 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
             _force_foreground_hwnd(win.handle, maximize=True, log=L)
         except Exception as e:
             L(f'창 강제 포커스 시도 실패(무시하고 계속 진행): {type(e).__name__}: {e}')
-        _force_accessibility_mode(win.handle, log=L)
         L('다팔자 창을 찾았습니다.')
 
         # 실제로 반복 재현된 사고: 지난 실행이 수집을 끝내고 다팔자 자체
@@ -1285,7 +1259,6 @@ def _collect_and_upload_impl(save_folder=None, save_filename='다팔자_자동�
                     _force_foreground_hwnd(win.handle, maximize=True, log=None)
                 except Exception:
                     pass
-                _force_accessibility_mode(win.handle, log=None)
                 last_refocus = elapsed
             try:
                 initial_descendants = win.descendants()
