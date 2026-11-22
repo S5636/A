@@ -1,5 +1,5 @@
 (() => {
-  let state = { documents: [], aggregate: [] };
+  let state = { documents: [], aggregate: [], salary: [] };
   let editingId = null;
 
   function fmt(n) {
@@ -90,6 +90,7 @@
   function render() {
     renderAggregate();
     renderDocuments();
+    renderSalary();
   }
 
   function renderAggregate() {
@@ -139,10 +140,10 @@
       if (btn.disabled) return;
       const direction = btn.classList.contains("move-doctype-up") ? "up" : "down";
       btn.addEventListener("click", async () => {
-        state = await api(`/api/doc_type_order/${encodeURIComponent(btn.dataset.doctype)}`, {
+        state = { ...state, ...await api(`/api/doc_type_order/${encodeURIComponent(btn.dataset.doctype)}`, {
           method: "PUT", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ direction }),
-        });
+        }) };
         render();
       });
     });
@@ -211,7 +212,7 @@
     area.querySelectorAll(".delete-doc").forEach((btn) =>
       btn.addEventListener("click", async () => {
         if (!confirm("이 서류를 삭제할까요?")) return;
-        state = await api(`/api/documents/${btn.dataset.id}`, { method: "DELETE" });
+        state = { ...state, ...await api(`/api/documents/${btn.dataset.id}`, { method: "DELETE" }) };
         renderDocuments();
       })
     );
@@ -295,7 +296,7 @@
 
     const url = editingId ? `/api/documents/${editingId}` : "/api/documents";
     const method = editingId ? "PUT" : "POST";
-    state = await api(url, { method, body: formData });
+    state = { ...state, ...await api(url, { method, body: formData }) };
     modal.classList.remove("open");
     render();
   });
@@ -329,7 +330,7 @@
         continue;
       }
 
-      state = { documents: data.documents, aggregate: data.aggregate };
+      state = { ...state, documents: data.documents, aggregate: data.aggregate };
       render();
 
       const d = data.detected || {};
@@ -344,6 +345,192 @@
   }
   document.getElementById("auto-upload-image").addEventListener("change", (e) => handleAutoUpload(e.target));
   document.getElementById("auto-upload-pdf").addEventListener("change", (e) => handleAutoUpload(e.target));
+
+  // ---- 탭 전환(서류 / 월급여) ----
+  const tabBtnDocuments = document.getElementById("tab-btn-documents");
+  const tabBtnSalary = document.getElementById("tab-btn-salary");
+  const documentsTab = document.getElementById("documents-tab");
+  const salaryTab = document.getElementById("salary-tab");
+  function showTab(name) {
+    const isDocs = name === "documents";
+    documentsTab.style.display = isDocs ? "" : "none";
+    salaryTab.style.display = isDocs ? "none" : "";
+    tabBtnDocuments.classList.toggle("active", isDocs);
+    tabBtnSalary.classList.toggle("active", !isDocs);
+  }
+  tabBtnDocuments.addEventListener("click", () => showTab("documents"));
+  tabBtnSalary.addEventListener("click", () => showTab("salary"));
+
+  // ---- 월급여 탭 ----
+  const SALARY_COLUMNS = [
+    // 제일 중요한 실지급액/소계를 맨 앞에, 세부 지급·공제 항목은 뒤에
+    // (모바일에서 가로로 잘려도 중요한 숫자부터 보이게).
+    { key: "net_pay", label: "실지급액" },
+    { key: "gross_pay", label: "지급소계" },
+    { key: "total_deduction", label: "공제소계" },
+    { key: "base_pay", label: "기본급" },
+    { key: "overtime_pay", label: "연장수당" },
+    { key: "position_pay", label: "직책수당" },
+    { key: "night_pay", label: "야근수당" },
+    { key: "overnight_pay", label: "철야수당" },
+    { key: "special_pay", label: "특근수당" },
+    { key: "aiming_pay", label: "에이밍" },
+    { key: "other_pay", label: "기타" },
+    { key: "income_tax", label: "갑근세" },
+    { key: "local_tax", label: "주민세" },
+    { key: "national_pension", label: "국민연금" },
+    { key: "health_insurance", label: "건강보험" },
+    { key: "employment_insurance", label: "고용보험" },
+    { key: "loan_repayment", label: "학자금상환" },
+  ];
+  const MONTH_SELECT_IDS = ["salary-upload-month", "salary-month"];
+  for (const id of MONTH_SELECT_IDS) {
+    const sel = document.getElementById(id);
+    for (let m = 1; m <= 12; m++) {
+      const opt = document.createElement("option");
+      opt.value = String(m);
+      opt.textContent = `${m}월`;
+      sel.appendChild(opt);
+    }
+  }
+  const today = new Date();
+  document.getElementById("salary-upload-year").value = today.getFullYear();
+  document.getElementById("salary-upload-month").value = String(today.getMonth() + 1);
+
+  let salaryYear = null;
+  function renderSalary() {
+    const label = document.getElementById("salary-year-label");
+    const area = document.getElementById("salary-table-area");
+    if (!state.salary.length) {
+      if (salaryYear === null) salaryYear = today.getFullYear();
+      label.textContent = `${salaryYear}년 월급여`;
+      area.innerHTML = `<div class="empty-hint">아직 등록된 월급여 기록이 없습니다.</div>`;
+      return;
+    }
+    const years = [...new Set(state.salary.map((s) => s.year))];
+    if (salaryYear === null || !years.includes(salaryYear)) {
+      salaryYear = Math.max(...years);
+    }
+    label.textContent = `${salaryYear}년 월급여`;
+
+    const byMonth = new Map(state.salary.filter((s) => s.year === salaryYear).map((s) => [s.month, s]));
+    const rows = [];
+    for (let m = 1; m <= 12; m++) {
+      const s = byMonth.get(m);
+      rows.push(`
+        <tr>
+          <td>${m}월</td>
+          ${SALARY_COLUMNS.map((c) => `<td>${s && s[c.key] != null ? fmt(s[c.key]) : "-"}</td>`).join("")}
+          <td>${s ? `
+            ${s.file_name ? `<a class="icon-btn" href="/api/salary/${s.id}/download" title="파일 보기">📎</a>` : ""}
+            <button class="icon-btn edit-salary" data-id="${s.id}" title="수정">✏️</button>
+            <button class="icon-btn delete-salary" data-id="${s.id}" title="삭제">🗑️</button>
+          ` : ""}</td>
+        </tr>
+      `);
+    }
+    area.innerHTML = `
+      <div class="table-scroll">
+        <table class="agg-table">
+          <thead><tr><th>월</th>${SALARY_COLUMNS.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}<th></th></tr></thead>
+          <tbody>${rows.join("")}</tbody>
+        </table>
+      </div>
+    `;
+    area.querySelectorAll(".edit-salary").forEach((btn) =>
+      btn.addEventListener("click", () => openSalaryModal(state.salary.find((s) => s.id === Number(btn.dataset.id))))
+    );
+    area.querySelectorAll(".delete-salary").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("이 월급여 기록을 삭제할까요?")) return;
+        state = { ...state, ...await api(`/api/salary/${btn.dataset.id}`, { method: "DELETE" }) };
+        renderSalary();
+      })
+    );
+  }
+  document.getElementById("salary-year-prev").addEventListener("click", () => {
+    salaryYear = (salaryYear ?? today.getFullYear()) - 1;
+    renderSalary();
+  });
+  document.getElementById("salary-year-next").addEventListener("click", () => {
+    salaryYear = (salaryYear ?? today.getFullYear()) + 1;
+    renderSalary();
+  });
+
+  const SALARY_FIELD_IDS = [
+    ["net_pay", "salary-net-pay"], ["gross_pay", "salary-gross-pay"],
+    ["total_deduction", "salary-total-deduction"], ["base_pay", "salary-base-pay"],
+    ["overtime_pay", "salary-overtime-pay"], ["position_pay", "salary-position-pay"],
+    ["night_pay", "salary-night-pay"], ["overnight_pay", "salary-overnight-pay"],
+    ["special_pay", "salary-special-pay"], ["aiming_pay", "salary-aiming-pay"],
+    ["other_pay", "salary-other-pay"], ["income_tax", "salary-income-tax"],
+    ["local_tax", "salary-local-tax"], ["national_pension", "salary-national-pension"],
+    ["health_insurance", "salary-health-insurance"], ["employment_insurance", "salary-employment-insurance"],
+    ["loan_repayment", "salary-loan-repayment"],
+  ];
+  const salaryModal = document.getElementById("salary-modal");
+  let editingSalaryId = null;
+  function openSalaryModal(item) {
+    editingSalaryId = item ? item.id : null;
+    document.getElementById("salary-modal-title").textContent = item ? "월급여 수정" : "월급여 추가";
+    document.getElementById("salary-year").value = item ? item.year : (salaryYear ?? today.getFullYear());
+    document.getElementById("salary-month").value = item ? item.month : (today.getMonth() + 1);
+    for (const [key, id] of SALARY_FIELD_IDS) {
+      document.getElementById(id).value = item && item[key] != null ? item[key] : "";
+    }
+    document.getElementById("salary-file").value = "";
+    document.getElementById("salary-memo").value = item ? (item.memo || "") : "";
+    salaryModal.classList.add("open");
+  }
+  document.getElementById("btn-add-salary").addEventListener("click", () => openSalaryModal(null));
+  document.getElementById("salary-cancel").addEventListener("click", () => salaryModal.classList.remove("open"));
+  document.getElementById("salary-save").addEventListener("click", async () => {
+    const formData = new FormData();
+    formData.append("year", document.getElementById("salary-year").value);
+    formData.append("month", document.getElementById("salary-month").value);
+    for (const [key, id] of SALARY_FIELD_IDS) {
+      formData.append(key, document.getElementById(id).value);
+    }
+    formData.append("memo", document.getElementById("salary-memo").value.trim());
+    const file = document.getElementById("salary-file").files[0];
+    if (file) formData.append("file", file);
+
+    const url = editingSalaryId ? `/api/salary/${editingSalaryId}` : "/api/salary";
+    const method = editingSalaryId ? "PUT" : "POST";
+    state = { ...state, ...await api(url, { method, body: formData }) };
+    salaryModal.classList.remove("open");
+    renderSalary();
+  });
+
+  const salaryUploadLog = document.getElementById("salary-upload-log");
+  document.getElementById("salary-upload-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const year = document.getElementById("salary-upload-year").value;
+    const month = document.getElementById("salary-upload-month").value;
+    salaryUploadLog.innerHTML = `<div class="upload-log-item">${escapeHtml(file.name)} - 읽는 중... (처음 한 번은 오래 걸릴 수 있음)</div>`;
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("year", year);
+    formData.append("month", month);
+    let data;
+    try {
+      const res = await fetch("/api/salary/auto", { method: "POST", body: formData });
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || "등록 실패");
+    } catch (err) {
+      salaryUploadLog.innerHTML = `<div class="upload-log-item err">${escapeHtml(file.name)} - ${escapeHtml(err.message)}</div>`;
+      e.target.value = "";
+      return;
+    }
+    state = { ...state, salary: data.salary };
+    salaryYear = Number(year);
+    renderSalary();
+    const summary = data.text_found ? `${year}년 ${month}월로 등록됨 - 읽은 금액 확인해줘` : "글자를 못 읽음 - 직접 수정 필요";
+    salaryUploadLog.innerHTML = `<div class="upload-log-item">${escapeHtml(file.name)} - ${summary}</div>`;
+    e.target.value = "";
+  });
 
   loadFull();
 })();

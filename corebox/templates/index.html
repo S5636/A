@@ -19,6 +19,14 @@
         <img src="{{ url_for('static', filename='img/wordmark.png') }}?v={{ asset_version }}" class="app-wordmark" alt="COREBOX">
         <span class="app-subtitle">서류 보관함</span>
       </div>
+    </div>
+
+    <div class="main-tabs">
+      <button class="main-tab active" id="tab-btn-documents" type="button">서류</button>
+      <button class="main-tab" id="tab-btn-salary" type="button">월급여</button>
+    </div>
+
+    <div id="documents-tab">
       <div class="header-actions">
         <label class="btn small" for="auto-upload-image" style="margin:0;">📷 사진 올리기</label>
         <input type="file" id="auto-upload-image" accept="image/*" multiple style="display:none;">
@@ -26,14 +34,32 @@
         <input type="file" id="auto-upload-pdf" accept="application/pdf" multiple style="display:none;">
         <button class="btn secondary small" id="btn-add-doc">+ 직접 입력</button>
       </div>
+      <div id="auto-upload-log"></div>
+
+      <div class="section-title">연도별 집계</div>
+      <div id="aggregate-area"></div>
+
+      <div class="section-title">서류 목록</div>
+      <div id="documents-area"></div>
     </div>
-    <div id="auto-upload-log"></div>
 
-    <div class="section-title">연도별 집계</div>
-    <div id="aggregate-area"></div>
+    <div id="salary-tab" style="display:none;">
+      <div class="header-actions">
+        <label>연도 <input type="number" id="salary-upload-year" step="1" style="width:68px;"></label>
+        <label>월 <select id="salary-upload-month"></select></label>
+        <label class="btn small" for="salary-upload-file" style="margin:0;">📄 명세서 올리기</label>
+        <input type="file" id="salary-upload-file" accept="image/*,application/pdf" style="display:none;">
+        <button class="btn secondary small" id="btn-add-salary">+ 직접 입력</button>
+      </div>
+      <div id="salary-upload-log"></div>
 
-    <div class="section-title">서류 목록</div>
-    <div id="documents-area"></div>
+      <div class="section-title">
+        <button class="icon-btn" id="salary-year-prev" title="이전 연도">◀</button>
+        <span id="salary-year-label">월급여</span>
+        <button class="icon-btn" id="salary-year-next" title="다음 연도">▶</button>
+      </div>
+      <div id="salary-table-area"></div>
+    </div>
   </div>
 
   <div class="modal-backdrop" id="doc-modal">
@@ -99,6 +125,79 @@
       <div class="modal-actions">
         <button class="btn secondary" id="doc-cancel">취소</button>
         <button class="btn primary" id="doc-save">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="salary-modal">
+    <div class="modal">
+      <h3 id="salary-modal-title">월급여 추가</h3>
+      <label>연도
+        <input type="number" id="salary-year" step="1">
+      </label>
+      <label>월
+        <select id="salary-month"></select>
+      </label>
+      <label>실지급액
+        <input type="number" id="salary-net-pay" step="1" placeholder="예: 3442780">
+      </label>
+      <label>지급 소계
+        <input type="number" id="salary-gross-pay" step="1" placeholder="예: 4000000">
+      </label>
+      <label>공제 소계
+        <input type="number" id="salary-total-deduction" step="1" placeholder="예: 557220">
+      </label>
+      <label>기본급
+        <input type="number" id="salary-base-pay" step="1">
+      </label>
+      <label>연장수당
+        <input type="number" id="salary-overtime-pay" step="1">
+      </label>
+      <label>직책수당
+        <input type="number" id="salary-position-pay" step="1">
+      </label>
+      <label>야근수당
+        <input type="number" id="salary-night-pay" step="1">
+      </label>
+      <label>철야수당
+        <input type="number" id="salary-overnight-pay" step="1">
+      </label>
+      <label>특근수당
+        <input type="number" id="salary-special-pay" step="1">
+      </label>
+      <label>에이밍수당
+        <input type="number" id="salary-aiming-pay" step="1">
+      </label>
+      <label>기타(지급)
+        <input type="number" id="salary-other-pay" step="1">
+      </label>
+      <label>갑근세
+        <input type="number" id="salary-income-tax" step="1">
+      </label>
+      <label>주민세
+        <input type="number" id="salary-local-tax" step="1">
+      </label>
+      <label>국민연금
+        <input type="number" id="salary-national-pension" step="1">
+      </label>
+      <label>건강보험
+        <input type="number" id="salary-health-insurance" step="1">
+      </label>
+      <label>고용보험
+        <input type="number" id="salary-employment-insurance" step="1">
+      </label>
+      <label>학자금대출상환
+        <input type="number" id="salary-loan-repayment" step="1">
+      </label>
+      <label>파일 (선택 - 비워두면 기존 파일 유지)
+        <input type="file" id="salary-file">
+      </label>
+      <label>메모 (선택)
+        <input type="text" id="salary-memo">
+      </label>
+      <div class="modal-actions">
+        <button class="btn secondary" id="salary-cancel">취소</button>
+        <button class="btn primary" id="salary-save">저장</button>
       </div>
     </div>
   </div>

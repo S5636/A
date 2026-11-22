@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """COREBOX - 자주 쓰는 서류를 한 곳에 모아두는 보관함. 연도/문서종류별로
 숫자가 있는 서류(소득금액증명 등)는 자동으로 연도별 집계표를 보여준다."""
+import difflib
 import hashlib
 import json
 import os
@@ -344,6 +345,82 @@ def _extract_wage_payers(text):
     return payers
 
 
+# 월급여명세서 항목 순서(지급/공제 각각 명세서에 찍힌 순서 그대로) -
+# DB 칼럼명과 매칭된다. "몇 월 분"인지는 명세서 서식마다 발급일/서명일만
+# 있고 제각각이라 믿을 수 없어서, 업로드할 때 사람이 직접 연/월을 고른다.
+_SALARY_PAY_FIELDS = [
+    ("base_pay", "기본급"), ("overtime_pay", "연장수당"), ("position_pay", "직책수당"),
+    ("night_pay", "야근수당"), ("overnight_pay", "철야수당"), ("special_pay", "특근수당"),
+    ("aiming_pay", "에이밍"), ("other_pay", "기타"),
+]
+_SALARY_DEDUCT_FIELDS = [
+    ("income_tax", "갑근세"), ("local_tax", "주민세"), ("national_pension", "국민연금"),
+    ("health_insurance", "건강보험"), ("employment_insurance", "고용보험"),
+    ("loan_repayment", "학자금대출상환"),
+]
+
+
+def _salary_label_match(line, label):
+    """OCR이 "연장"을 "면장", "건강"을 "건감"처럼 한 글자씩 틀리게
+    읽는 경우가 많아서, 글자가 정확히 같은지 대신 비슷한 정도(문자열
+    유사도)로 판단한다."""
+    cleaned = re.sub(r"[()\s]", "", line)
+    if not cleaned:
+        return False
+    ratio = difflib.SequenceMatcher(None, cleaned[: len(label) + 2], label).ratio()
+    return ratio > 0.55
+
+
+def _salary_parse_number(line):
+    """OCR이 숫자 "0"을 영문자 "O"로 잘못 읽는 경우가 있어 같이 바꿔준다."""
+    cleaned = line.strip().replace(",", "").replace("O", "0").replace("o", "0")
+    if re.fullmatch(r"-?\d+", cleaned):
+        return float(cleaned)
+    return None
+
+
+def _extract_salary_slip(text):
+    """월급여명세서는 "항목명" 줄 다음에 "숫자" 줄이 오는 걸 반복하는
+    표인데, 지급 항목과 공제 항목이 나란히 두 칸으로 인쇄돼 있어서 OCR이
+    왼쪽 한 줄, 오른쪽 한 줄 순서로 번갈아 읽어온다. 값이 없는 항목(예:
+    이번 달에 야근수당이 없으면 "야근수당()" 바로 다음 줄이 숫자가
+    아니라 다음 항목명)은 건너뛴다. 항목 순서는 고정이라고 보고
+    (_SALARY_PAY_FIELDS/_SALARY_DEDUCT_FIELDS), 그 순서대로 하나씩
+    맞춰나간다."""
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    result = {}
+    pay_fields = list(_SALARY_PAY_FIELDS)
+    deduct_fields = list(_SALARY_DEDUCT_FIELDS)
+    subtotal_seen = 0
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        matched = False
+        next_val = _salary_parse_number(lines[i + 1]) if i + 1 < len(lines) else None
+        if pay_fields and _salary_label_match(line, pay_fields[0][1]):
+            key, _ = pay_fields.pop(0)
+            matched = True
+        elif deduct_fields and _salary_label_match(line, deduct_fields[0][1]):
+            key, _ = deduct_fields.pop(0)
+            matched = True
+        elif _salary_label_match(line, "소계"):
+            key = "gross_pay" if subtotal_seen == 0 else "total_deduction"
+            subtotal_seen += 1
+            matched = True
+        elif _salary_label_match(line, "실지급액"):
+            key = "net_pay"
+            matched = True
+        if matched:
+            if next_val is not None:
+                result[key] = next_val
+                i += 2
+            else:
+                i += 1
+        else:
+            i += 1
+    return result
+
+
 def _period_label_from_date(start_date):
     """날짜 하나(기간 시작일)로 짧은 표시용 이름을 만든다 - "25년 1기"처럼
     연도는 뒷 2자리만, 반기(1~6월=1기, 7~12월=2기)로 끊는다."""
@@ -580,6 +657,13 @@ def serialize_aggregate(conn):
     return [dict(r) for r in rows]
 
 
+def serialize_salary(conn):
+    rows = conn.execute(
+        "SELECT * FROM salary_records ORDER BY year DESC, month DESC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 @app.route("/")
 def index():
     """css/js 파일 수정시각을 쿼리스트링(?v=)에 붙여서, 폰 브라우저가 코드
@@ -610,6 +694,7 @@ def api_full():
         return jsonify({
             "documents": serialize_documents(conn),
             "aggregate": serialize_aggregate(conn),
+            "salary": serialize_salary(conn),
         })
     finally:
         conn.close()
@@ -883,6 +968,178 @@ def download_document(doc_id):
         # http 주소에서는 "안전하게 받을 수 없음"이라고 막아버린다.
         # inline으로 그냥 보여주면(브라우저 내장 PDF 뷰어 등) 다운로드로
         # 안 잡혀서 안 막힌다 - 필요하면 거기서 직접 길게 눌러 저장하면 됨.
+        return send_from_directory(
+            models.UPLOAD_DIR, item["file_name"],
+            as_attachment=False, download_name=item["original_name"] or item["file_name"],
+        )
+    finally:
+        conn.close()
+
+
+_SALARY_FIELD_NAMES = [
+    "base_pay", "overtime_pay", "position_pay", "night_pay", "overnight_pay",
+    "special_pay", "aiming_pay", "other_pay", "gross_pay", "income_tax", "local_tax",
+    "national_pension", "health_insurance", "employment_insurance", "loan_repayment",
+    "total_deduction", "net_pay",
+]
+
+
+@app.route("/api/salary/auto", methods=["POST"])
+def create_salary_auto():
+    """월급여명세서 파일을 올리면 항목별 금액을 읽어서 채운다. "몇 월
+    분"인지는 서식마다 제각각이라(발급일/서명일만 있고 귀속월이 명확히
+    안 찍힘) 자동으로 못 정하므로 연/월은 반드시 같이 받는다."""
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"error": "파일을 선택하세요."}), 400
+    year = _parse_year(request.form.get("year"))
+    month = _parse_year(request.form.get("month"))
+    if not year or not month or not (1 <= month <= 12):
+        return jsonify({"error": "연도와 월을 선택하세요."}), 400
+
+    file_bytes = uploaded.read()
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
+
+    conn = models.get_conn()
+    try:
+        dup = conn.execute(
+            "SELECT year, month FROM salary_records WHERE file_hash = ? LIMIT 1", (file_hash,)
+        ).fetchone()
+        if dup:
+            return jsonify({
+                "error": f"이미 등록된 파일입니다 ({dup['year']}년 {dup['month']}월)."
+            }), 409
+
+        text = _extract_text_from_file(uploaded.filename, file_bytes)
+        parsed = _extract_salary_slip(text) if text else {}
+
+        ext = os.path.splitext(secure_filename(uploaded.filename))[1]
+        file_name = f"{uuid.uuid4().hex}{ext}"
+        with open(os.path.join(models.UPLOAD_DIR, file_name), "wb") as f:
+            f.write(file_bytes)
+
+        columns = ", ".join(_SALARY_FIELD_NAMES)
+        placeholders = ", ".join("?" for _ in _SALARY_FIELD_NAMES)
+        cur = conn.execute(
+            f"""INSERT INTO salary_records (year, month, {columns}, file_name, original_name,
+               file_hash) VALUES (?, ?, {placeholders}, ?, ?, ?)""",
+            (
+                year, month,
+                *[parsed.get(f) for f in _SALARY_FIELD_NAMES],
+                file_name, uploaded.filename, file_hash,
+            ),
+        )
+        conn.commit()
+        return jsonify({
+            "salary": serialize_salary(conn),
+            "id": cur.lastrowid,
+            "text_found": bool(text),
+        })
+    finally:
+        conn.close()
+
+
+@app.route("/api/salary", methods=["POST"])
+def create_salary_manual():
+    year = _parse_year(request.form.get("year"))
+    month = _parse_year(request.form.get("month"))
+    if not year or not month or not (1 <= month <= 12):
+        return jsonify({"error": "연도와 월을 선택하세요."}), 400
+
+    file_name = ""
+    original_name = ""
+    uploaded = request.files.get("file")
+    if uploaded and uploaded.filename:
+        ext = os.path.splitext(secure_filename(uploaded.filename))[1]
+        file_name = f"{uuid.uuid4().hex}{ext}"
+        original_name = uploaded.filename
+        uploaded.save(os.path.join(models.UPLOAD_DIR, file_name))
+
+    conn = models.get_conn()
+    try:
+        columns = ", ".join(_SALARY_FIELD_NAMES)
+        placeholders = ", ".join("?" for _ in _SALARY_FIELD_NAMES)
+        conn.execute(
+            f"""INSERT INTO salary_records (year, month, {columns}, file_name, original_name,
+               memo) VALUES (?, ?, {placeholders}, ?, ?, ?)""",
+            (
+                year, month,
+                *[_parse_float(request.form.get(f)) for f in _SALARY_FIELD_NAMES],
+                file_name, original_name,
+                (request.form.get("memo") or "").strip(),
+            ),
+        )
+        conn.commit()
+        return jsonify({"salary": serialize_salary(conn)})
+    finally:
+        conn.close()
+
+
+@app.route("/api/salary/<int:record_id>", methods=["PUT"])
+def update_salary(record_id):
+    conn = models.get_conn()
+    try:
+        item = conn.execute("SELECT * FROM salary_records WHERE id = ?", (record_id,)).fetchone()
+        if not item:
+            return jsonify({"error": "기록을 찾을 수 없습니다."}), 404
+
+        file_name = item["file_name"]
+        original_name = item["original_name"]
+        uploaded = request.files.get("file")
+        if uploaded and uploaded.filename:
+            if item["file_name"]:
+                old_path = os.path.join(models.UPLOAD_DIR, item["file_name"])
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+            original_name = uploaded.filename
+            ext = os.path.splitext(secure_filename(uploaded.filename))[1]
+            file_name = f"{uuid.uuid4().hex}{ext}"
+            uploaded.save(os.path.join(models.UPLOAD_DIR, file_name))
+
+        set_clause = ", ".join(f"{f}=?" for f in _SALARY_FIELD_NAMES)
+        conn.execute(
+            f"""UPDATE salary_records SET year=?, month=?, {set_clause}, file_name=?,
+               original_name=?, memo=? WHERE id=?""",
+            (
+                _parse_year(request.form.get("year", item["year"])),
+                _parse_year(request.form.get("month", item["month"])),
+                *[_parse_float(request.form.get(f, item[f])) for f in _SALARY_FIELD_NAMES],
+                file_name, original_name,
+                (request.form.get("memo", item["memo"]) or "").strip(),
+                record_id,
+            ),
+        )
+        conn.commit()
+        return jsonify({"salary": serialize_salary(conn)})
+    finally:
+        conn.close()
+
+
+@app.route("/api/salary/<int:record_id>", methods=["DELETE"])
+def delete_salary(record_id):
+    conn = models.get_conn()
+    try:
+        item = conn.execute("SELECT file_name FROM salary_records WHERE id = ?", (record_id,)).fetchone()
+        if item and item["file_name"]:
+            path = os.path.join(models.UPLOAD_DIR, item["file_name"])
+            if os.path.exists(path):
+                os.remove(path)
+        conn.execute("DELETE FROM salary_records WHERE id = ?", (record_id,))
+        conn.commit()
+        return jsonify({"salary": serialize_salary(conn)})
+    finally:
+        conn.close()
+
+
+@app.route("/api/salary/<int:record_id>/download")
+def download_salary(record_id):
+    conn = models.get_conn()
+    try:
+        item = conn.execute(
+            "SELECT file_name, original_name FROM salary_records WHERE id = ?", (record_id,)
+        ).fetchone()
+        if not item or not item["file_name"]:
+            return jsonify({"error": "파일이 없습니다."}), 404
         return send_from_directory(
             models.UPLOAD_DIR, item["file_name"],
             as_attachment=False, download_name=item["original_name"] or item["file_name"],

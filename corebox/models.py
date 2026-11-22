@@ -17,6 +17,38 @@ CREATE TABLE IF NOT EXISTS doc_type_order (
     sort_order INTEGER NOT NULL DEFAULT 0
 );
 
+-- 서류 보관함과 별개 탭: 매달 급여명세서를 올리면 항목별로 기록해서
+-- 1월~12월 표로 보여준다. year/month가 어느 명세서인지는 서류 내용만
+-- 보고는 확실히 알 수 없어서(발급/서명일만 있고 "몇 월分"인지가 서식에
+-- 따라 다름) 업로드할 때 사람이 직접 고른다.
+CREATE TABLE IF NOT EXISTS salary_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    year INTEGER NOT NULL,
+    month INTEGER NOT NULL,          -- 1~12
+    base_pay REAL,                   -- 기본급
+    overtime_pay REAL,               -- 연장수당
+    position_pay REAL,               -- 직책수당
+    night_pay REAL,                  -- 야근수당
+    overnight_pay REAL,              -- 철야수당
+    special_pay REAL,                -- 특근수당
+    aiming_pay REAL,                 -- 에이밍수당(회사 고유 항목명)
+    other_pay REAL,                  -- 기타
+    gross_pay REAL,                  -- 소계(지급)
+    income_tax REAL,                 -- 갑근세
+    local_tax REAL,                  -- 주민세
+    national_pension REAL,           -- 국민연금
+    health_insurance REAL,           -- 건강보험
+    employment_insurance REAL,       -- 고용보험
+    loan_repayment REAL,             -- 학자금대출상환
+    total_deduction REAL,            -- 소계(공제)
+    net_pay REAL,                    -- 실지급액
+    file_name TEXT DEFAULT '',
+    original_name TEXT DEFAULT '',
+    file_hash TEXT DEFAULT '',       -- 같은 파일 중복 업로드 감지용
+    memo TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,              -- 서류명(예: "사업자 등록증", "2020 소득금액증명")
