@@ -2130,17 +2130,32 @@ def _loan_match_tokens(withdrawal_account):
     return words, last4
 
 
+_DATE_LIKE_IN_MEMO_RE = re.compile(r"\d{4}[.\-]\s*\d{1,2}[.\-]\s*\d{1,2}")
+
+
 def _account_last4_candidates_in_text(text):
     """글자 안에서 계좌번호처럼 보이는 숫자 토큰(중간에 "-" 있어도 됨)의
     뒤 4자리를 전부 뽑는다. 메모에 전체 계좌번호를 적어둔 경우("계좌
     310-107-277677")와, 뒤 4자리만 따로 적어둔 경우("7677") 둘 다
     된다 - 대출 계좌번호를 "출금계좌" 칸이 아니라 메모에 적어둔 경우를
-    위함."""
+    위함. 메모 속 "2026.11.17" 같은 날짜나 "2302026S51139"(보증번호)
+    처럼 끝 4자리가 우연히 연도("2026")와 같은 긴 숫자를 그대로 계좌
+    후보로 뽑으면, 그해에 쓴 아무 서류나 다 걸려버린다(실제로 이
+    버그로 엉뚱한 서류 여러 개가 특정 대출에 잘못 붙었음) - 날짜
+    모양은 먼저 지우고, 4자리보다 긴 숫자에서 뽑은 끝 4자리가
+    연도처럼 보이면(1990~2099) 후보에서 뺀다. 메모에 뒤 4자리만 딱
+    적어둔 경우("7677")는 길이가 정확히 4자리라 이 제외 대상이 아니라
+    그대로 쓴다."""
+    text = _DATE_LIKE_IN_MEMO_RE.sub(" ", text or "")
     candidates = set()
-    for run in re.findall(r"[\d\-]{4,}", text or ""):
+    for run in re.findall(r"[\d\-]{4,}", text):
         digits = re.sub(r"\D", "", run)
-        if len(digits) >= 4:
-            candidates.add(digits[-4:])
+        if len(digits) < 4:
+            continue
+        last4 = digits[-4:]
+        if len(digits) > 4 and 1990 <= int(last4) <= 2099:
+            continue
+        candidates.add(last4)
     return candidates
 
 
@@ -5794,25 +5809,43 @@ def _retry_unassigned_loan_attachments():
         conn.close()
 
 
-def _unlink_known_wrong_loan_attachment():
-    """케이뱅크 금융거래확인서가 전혀 무관한 IBK "근로복지공단
-    체불근로자생계비대출"에 잘못 붙어있던 걸 실제로 확인함(사용자
-    캡처) - 글자 비교로는 왜 걸렸는지 재현이 안 되는데(텍스트 대조해도
-    겹치는 단어가 없음), 일단 이 특정 연결을 풀어서 미분류로 돌려
-    놓는다. 다음 재시도 때 (매칭 로직대로) 실제로 맞는 케이뱅크 대출로
-    다시 붙게 된다."""
+def _revalidate_loan_attachments():
+    """이미 배정된 증빙파일도 최신 매칭 기준으로 다시 검증한다 - 메모 속
+    날짜("2026.11.17")를 계좌번호로 오인하던 버그(수정함) 때문에 그
+    연도가 적힌 대출마다 그해 아무 서류나 잘못 붙는 사고가 실제로
+    있었다(한 대출에 전혀 무관한 파일이 여러 개 쌓임). 지금 기준으로
+    다시 검증해서 더 이상 근거가 없는 연결은 풀어 미분류로 돌려놓고,
+    다음 재시도 때 실제로 맞는 대출이 있으면 거기로 다시 붙는다."""
     conn = get_conn()
     try:
-        bad = conn.execute(
-            """SELECT la.id FROM loan_attachments la
-               JOIN loans l ON l.id = la.loan_id
-               WHERE l.name = '근로복지공단 체불근로자생계비대출'
-                 AND la.original_name LIKE '%261122930005208%'"""
+        assigned = conn.execute(
+            "SELECT id, loan_id, file_name, original_name FROM loan_attachments "
+            "WHERE loan_id IS NOT NULL"
         ).fetchall()
-        for row in bad:
-            conn.execute("UPDATE loan_attachments SET loan_id = NULL WHERE id = ?", (row["id"],))
-        if bad:
-            conn.commit()
+        if not assigned:
+            return
+        loans = conn.execute("SELECT * FROM loans").fetchall()
+        loans_by_id = {l["id"]: l for l in loans}
+        for item in assigned:
+            try:
+                path = os.path.join(UPLOAD_DIR, item["file_name"])
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+                fname = item["original_name"] or item["file_name"]
+                text = _extract_text_from_loan_attachment(fname, file_bytes)
+                if not text:
+                    continue
+                matched_loans = _match_loans_for_attachment_text(loans, text)
+                matched_ids = {l["id"] for l in matched_loans}
+                current_loan = loans_by_id.get(item["loan_id"])
+                if current_loan and item["loan_id"] not in matched_ids:
+                    conn.execute(
+                        "UPDATE loan_attachments SET loan_id = NULL WHERE id = ?", (item["id"],)
+                    )
+                    conn.commit()
+            except Exception as e:
+                conn.rollback()
+                print(f"[증빙 재검증] {item['file_name']} 처리 실패: {e}")
     except Exception:
         pass
     finally:
@@ -5821,7 +5854,7 @@ def _unlink_known_wrong_loan_attachment():
 
 init_db()
 apply_startup_data_fixes()
-_unlink_known_wrong_loan_attachment()
+_revalidate_loan_attachments()
 _retry_unassigned_loan_attachments()
 
 if __name__ == "__main__":
