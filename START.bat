@@ -41,6 +41,23 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem launcher.py checks GitHub every 2 minutes while running and exits with
+rem code 42 the moment it finds a newer version, instead of applying the
+rem update live inside a running process (so every running thread, pywinauto
+rem window handle, etc. just restarts clean from scratch, and we don't need
+rem anything fragile like os.execv just to swap the running code - exec does
+rem not preserve the process on Windows the way it does on Unix and caused a
+rem total silent lockup when tried before). This loop just restarts python
+rem whenever that exact exit code comes back, so the server effectively never
+rem needs a manual START.bat press again. Any other exit code (0, a crash,
+rem ctrl+c) falls through to the final pause below and stops the loop.
+:run_server
 python launcher.py
+if %errorlevel% equ 42 (
+    echo.
+    echo New version found - restarting automatically...
+    echo.
+    goto run_server
+)
 
 pause

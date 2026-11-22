@@ -314,6 +314,45 @@ def open_browser_later():
         pass
 
 
+_AUTO_RESTART_EXIT_CODE = 42
+_UPDATE_POLL_INTERVAL_SECONDS = 120
+
+
+def _periodic_update_check_loop():
+    """서버가 떠 있는 동안에도 2분마다 최신 버전인지 계속 확인한다(사용자
+    요청: "서버 켜져 있는 동안 2분마다 반복해서 확인" - 매번 START.bat을
+    직접 눌러줘야 했던 걸 없애기 위함). 여기서는 실제로 받아서 적용하지
+    않는다 - 버전이 다르다는 것만 확인되면 바로 종료코드 42로 끝내고,
+    START.bat이 그 종료코드를 보고 launcher.py를 다시 실행한다. 다시
+    실행된 launcher.py가 시작할 때 원래 하던 _check_and_apply_update()가
+    실제 다운로드/적용을 그대로 수행하므로 로직을 두 번 만들 필요가 없다.
+
+    os.execv로 "그 자리에서" 교체하는 방법은 일부러 안 쓴다 - 윈도우에서는
+    진짜 유닉스 exec처럼 PID를 유지하며 교체되는 게 아니라 새 프로세스를
+    spawn하고 원래 프로세스를 죽이는 방식으로 흉내만 내는 것으로 보이고,
+    예전에 이 방식(DPJ 연속 실패 시 자동재시작)을 썼다가 알 수 없는 이유로
+    전체가 조용히 멈춰버린 사고가 있어서 그 기능 자체를 꺼둔 전례가 있다
+    (app.py의 _self_restart 참고). 완전히 새 프로세스를 .bat이 새로
+    띄우게 하면 그런 위험이 없다. 스레드에서 프로세스 전체를 확실히 끝내려면
+    sys.exit()가 아니라 os._exit()를 써야 한다(sys.exit은 그 스레드만
+    끝내고 프로세스 전체는 안 끝난다)."""
+    while True:
+        time.sleep(_UPDATE_POLL_INTERVAL_SECONDS)
+        try:
+            import urllib.request
+            remote_version = urllib.request.urlopen(_VERSION_URL, timeout=10).read().decode("utf-8").strip()
+        except Exception as e:
+            print(f"[자동업데이트] 확인 실패(무시하고 계속 돕니다): {type(e).__name__}: {e}")
+            continue
+        local_version = _local_version()
+        if not remote_version or remote_version == local_version:
+            print(f"[자동업데이트] 확인함 - 변경 없음 (현재 버전: {local_version or '(없음)'})")
+            continue
+        print(f"[자동업데이트] 새 버전 발견 (현재: {local_version or '(없음)'} -> 최신: {remote_version}) - "
+              f"서버를 재시작해서 적용합니다...")
+        os._exit(_AUTO_RESTART_EXIT_CODE)
+
+
 def _requirements_hash():
     try:
         with open(os.path.join(BASE_DIR, "requirements.txt"), "rb") as f:
@@ -405,6 +444,8 @@ def main():
 
     if not is_self_restart:
         threading.Thread(target=open_browser_later, daemon=True).start()
+
+    threading.Thread(target=_periodic_update_check_loop, daemon=True).start()
 
     import app  # requirements 설치가 끝난 뒤에 import (미리 하면 설치 전에 실패함)
     # threaded=True가 꼭 필요하다 - DPJ 자동화 요청 하나가 몇 분씩 걸릴 수
