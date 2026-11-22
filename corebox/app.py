@@ -175,6 +175,19 @@ def _extract_issue_date_fallback(text, exclude_dates=()):
     return last
 
 
+def _extract_signing_date(text):
+    """종합소득세 신고서는 서류 끝의 "2026년 05월 24일 신고인 OOO
+    (서명 또는 인)"에 실제로 신고한 날짜가 찍힌다. 11페이지짜리 서류라
+    뒤쪽 첨부서식에 양식 개정일("<개정 2018.3.21.>" 같은, 신고일과
+    전혀 상관없는 날짜)이 섞여 있어서, "문서 전체에서 제일 마지막 날짜"
+    방식(_extract_issue_date_fallback)을 쓰면 그 개정일을 잘못 집는다.
+    "신고인" 바로 앞 날짜만 정확히 찍어서 피한다."""
+    m = re.search(_DATE_RE + r"\s*신고인", text)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return None
+
+
 def _extract_period(text):
     """"과세기간 2022.01.01 ~ 2022.06.30"처럼 기간 전체(시작~끝)가 있으면
     그대로 "YYYY-MM-DD~YYYY-MM-DD"로 돌려준다. 날짜가 하나만 걸리면(기간이
@@ -216,13 +229,19 @@ def _extract_income_row(text, label):
     공백으로 멀리 떨어져 있어 라벨 바로 뒤가 아니라 같은 줄 전체에서
     숫자를 찾는다. 숫자가 없는 줄(용어설명 등)은 건너뛰고 다음 줄을 본다."""
     for line in text.split("\n"):
-        if label not in line:
+        label_pos = line.find(label)
+        if label_pos < 0:
             continue
+        # pypdf로 뽑으면 "소득금액" 줄 앞에 결정세액(다른 칸, 두 행에
+        # 걸친 병합 셀)이 줄바꿈 없이 그대로 붙어 나올 때가 있다
+        # ("418,790소득금액 0 0 ..."). 라벨보다 앞쪽 숫자는 그 다른 칸
+        # 값이니 무시하고, 라벨 뒤쪽만 본다.
+        after_label = line[label_pos + len(label):]
         # 사업/근로 등 칸이 0원이면 그냥 "0" 한 글자로만 찍혀서, 자릿수가
         # 많은 숫자만 잡던 기존 패턴({4,})으로는 그 칸 자체가 안 잡혀
         # 7칸이 안 맞는다 - 이 줄 안에서는 이미 라벨로 맞는 행인 게
         # 확실하니 짧은 숫자도 다 잡는다.
-        numbers = re.findall(r"-?[\d,]+", line)
+        numbers = re.findall(r"-?[\d,]+", after_label)
         numbers = [n for n in numbers if n.strip(",")]
         if not numbers:
             continue
@@ -278,33 +297,43 @@ def _extract_jongso_amounts(text):
 
 def _extract_wage_payers(text):
     """종합소득세 신고서의 "❽ 근로소득ㆍ연금소득ㆍ기타소득명세서" 표에서
-    급여를 준 회사 이름과 금액을 회사별로 뽑는다. 표가 "회사명" 줄 다음에
-    "51 <일련번호> <총수입금액> <필요경비> <소득금액> ..." 줄이 오고
-    그 다음 줄에 사업자등록번호가 오는 구조로 반복돼서(51은 근로소득
-    코드), 그 숫자 줄을 기준으로 바로 위의 회사명 줄을 찾는다. 연금/
-    기타소득(다른 코드)은 아직 안 보여달라고 한 적이 없어서 근로소득만."""
+    급여를 준 회사 이름과 금액을 회사별로 뽑는다(51은 근로소득 코드).
+    실제 운영에선 pypdf로 글자를 뽑는데, 이게 표 한 칸을 한 줄씩
+    따로따로 내놓는다 - "51 1" 줄, 그 다음 회사명 줄, 그 다음 숫자
+    5개(총수입금액/필요경비/소득금액/소득세/농특세) 줄, 그 다음
+    사업자등록번호 줄, 이렇게 순서대로 분리된 줄들이 이어진다(처음엔
+    테스트에 pdftotext를 써서 한 줄에 다 붙어나오는 걸로 착각하고
+    만들었다가 실제 pypdf 결과로 다시 뽑아보고 틀린 걸 발견함). 그래서
+    "51 <일련번호>"만 있는 줄을 기준점으로 잡고, 그 아래 몇 줄 안에서
+    숫자 없는 줄(회사명)과 숫자 3개 이상인 줄(금액들)을 순서 상관없이
+    찾는다. 연금/기타소득(다른 코드)은 아직 안 보여달라고 한 적이 없어서
+    근로소득만."""
     start = text.find("근로소득")
     if start < 0:
         return []
     end = text.find("종합소득금액 및 결손금", start)
     section = text[start:end] if end > start else text[start:start + 3000]
-    lines = section.split("\n")
+    lines = [l.strip() for l in section.split("\n") if l.strip()]
     payers = []
     for i, line in enumerate(lines):
-        m = re.match(r"\s*51\s+\d+\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)", line)
-        if not m:
+        if not re.match(r"^51\s+\d+$", line):
             continue
         name = ""
-        for j in range(i - 1, max(i - 4, -1), -1):
-            candidate = lines[j].strip()
-            if candidate and not re.match(r"^[\d\-() ]+$", candidate):
-                name = candidate
+        numbers = []
+        for look in lines[i + 1:i + 6]:
+            nums_here = re.findall(r"-?[\d,]+", look)
+            is_reg_no = re.match(r"^\d{3}-\d{2}-\d{5}$", look)
+            if not name and not nums_here and not is_reg_no:
+                name = look
+            elif not numbers and len(nums_here) >= 3 and not is_reg_no:
+                numbers = nums_here
+            if name and numbers:
                 break
-        if not name:
+        if not name or len(numbers) < 3:
             continue
         try:
-            total = float(m.group(1).replace(",", ""))
-            taxable = float(m.group(3).replace(",", ""))
+            total = float(numbers[0].replace(",", ""))
+            taxable = float(numbers[2].replace(",", ""))
         except ValueError:
             continue
         payers.append({"name": name, "income": total, "taxable": taxable})
@@ -409,6 +438,8 @@ def _classify_document(filename, text):
     else:
         year = _extract_year(text, filename)
         period = _extract_period(text)
+    if not issue_date and doc_type == "종합소득세 신고서":
+        issue_date = _extract_signing_date(text)
     if not issue_date:
         used_dates = set(period.split("~")) if period else set()
         issue_date = _extract_issue_date_fallback(text, used_dates)
