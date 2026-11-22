@@ -206,7 +206,7 @@ body { padding-bottom: 40px; }
 .summary-rate { --accent: #ff2bd6; background: rgba(255, 43, 214, 0.2); }
 .summary-label { font-size: 11.5px; color: var(--text-muted); margin-bottom: 4px; }
 .summary-value {
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--accent);
   white-space: nowrap;

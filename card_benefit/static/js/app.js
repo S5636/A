@@ -379,8 +379,8 @@
     const monthLabel = `${Number(activeMonth.split("-")[1])}월`;
     document.getElementById("summary-earn-label").textContent = `${monthLabel} 적립`;
     document.getElementById("summary-cashback-label").textContent = `${monthLabel} 할인·캐시백`;
-    document.getElementById("summary-earn-value").textContent = `₩${fmt(earn)}`;
-    document.getElementById("summary-cashback-value").textContent = `₩${fmt(cashback)}`;
+    document.getElementById("summary-earn-value").textContent = fmt(earn);
+    document.getElementById("summary-cashback-value").textContent = fmt(cashback);
     document.getElementById("summary-rate-value").textContent = `${rate.toFixed(1)}%`;
 
     const jumpRow = document.getElementById("summary-jump-row");
@@ -1084,11 +1084,11 @@
     emptyLoanHint.style.display = state.loans.length ? "none" : "block";
 
     document.getElementById("loan-total-balance-value").textContent =
-      `₩${fmt(sumBy(state.loans, () => true, "current_balance"))}`;
+      fmt(sumBy(state.loans, () => true, "current_balance"));
     document.getElementById("loan-total-monthly-value").textContent =
-      `₩${fmt(sumBy(state.loans, (l) => l.due_this_month, "due_amount"))}`;
+      fmt(sumBy(state.loans, (l) => l.due_this_month, "due_amount"));
     document.getElementById("loan-unpaid-total").textContent =
-      `₩${fmt(sumBy(state.loans, (l) => l.due_this_month && !l.paid_this_month, "due_amount"))}`;
+      fmt(sumBy(state.loans, (l) => l.due_this_month && !l.paid_this_month, "due_amount"));
 
     const loans = sortedLoans();
     loans.forEach((loan, idx) => {
@@ -1475,11 +1475,11 @@
 
     const total = sumBy(state.recurring_payments, (r) => r.active, "amount");
     const loanTotal = sumBy(state.loans, (l) => l.due_this_month, "due_amount");
-    document.getElementById("recurring-total-value").textContent = `₩${fmt(total)}`;
-    document.getElementById("recurring-grand-total-value").textContent = `₩${fmt(total + loanTotal)}`;
+    document.getElementById("recurring-total-value").textContent = fmt(total);
+    document.getElementById("recurring-grand-total-value").textContent = fmt(total + loanTotal);
 
     document.getElementById("recurring-unmatched-total").textContent =
-      `₩${fmt(sumBy(state.recurring_payments, (r) => r.active && !r.matched_this_month, "amount"))}`;
+      fmt(sumBy(state.recurring_payments, (r) => r.active && !r.matched_this_month, "amount"));
 
     renderRecurringCardSummary();
 
@@ -1845,7 +1845,7 @@
     emptyHint.style.display = state.insurances.length ? "none" : "block";
 
     const total = sumBy(state.insurances, (r) => r.active, "monthly_premium");
-    document.getElementById("insurance-total-value").textContent = `₩${fmt(total)}`;
+    document.getElementById("insurance-total-value").textContent = fmt(total);
 
     document.getElementById("insurance-unmatched-total").textContent =
       `미확인 ₩${fmt(sumBy(state.insurances, (r) => r.active && !r.matched_this_month, "monthly_premium"))}`;
@@ -2041,7 +2041,7 @@
     emptyHint.style.display = state.stocks.length ? "none" : "block";
 
     const total = sumBy(state.stocks, (s) => s.active && s.profit != null, "profit");
-    document.getElementById("stock-total-value").textContent = `${total >= 0 ? "+" : ""}₩${fmt(total)}`;
+    document.getElementById("stock-total-value").textContent = `${total >= 0 ? "+" : ""}${fmt(total)}`;
 
     sortedStocks().forEach((s) => {
       const el = document.createElement("div");
