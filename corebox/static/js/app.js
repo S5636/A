@@ -114,7 +114,7 @@
       const cols = columnsForType(docType);
       const trs = rows.map((r) => `
         <tr>
-          <td>${shortYear(r.year)}년</td>
+          <td>${shortYear(r.year)}년${r.half ? ` ${r.half}기` : ""}</td>
           ${cols.map((c) => `<td>${r[c.key] !== null ? fmt(r[c.key]) : "-"}</td>`).join("")}
         </tr>
       `).join("");

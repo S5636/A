@@ -708,8 +708,12 @@ def serialize_aggregate(conn):
     의미가 없는 서류)는 여기 안 잡힌다. 문서종류(섹션) 순서는 사용자가
     위/아래 버튼으로 바꿔둔 순서(doc_type_order)를 따른다."""
     _ensure_doc_type_order(conn)
+    # 부가가치세는 1년에 두 번(1기/2기) 신고하는 서류라 연도만으로 묶으면
+    # 반기 두 건이 하나로 합쳐져 버린다 - 이 두 서류 종류만 기간(period)의
+    # 시작월로 반기를 가려서 따로 묶는다. 다른 서류(연 1회)는 그대로
+    # 연도로만 묶는다.
     rows = conn.execute(
-        """SELECT d.year, d.doc_type,
+        """SELECT d.year, d.doc_type, half,
                   SUM(d.income_amount) AS income_total,
                   SUM(d.taxable_income_amount) AS taxable_total,
                   SUM(d.income_business) AS income_business_total,
@@ -721,11 +725,20 @@ def serialize_aggregate(conn):
                   SUM(d.amount) AS amount_total,
                   SUM(d.tax_amount) AS tax_total,
                   COUNT(*) AS doc_count
-           FROM documents d
+           FROM (
+               SELECT *,
+                      CASE
+                          WHEN doc_type IN ('부가가치세 신고서', '부가가치세 과세표준증명')
+                               AND period IS NOT NULL AND period != ''
+                          THEN CASE WHEN CAST(substr(period, 6, 2) AS INTEGER) <= 6 THEN 1 ELSE 2 END
+                          ELSE NULL
+                      END AS half
+               FROM documents
+           ) d
            LEFT JOIN doc_type_order o ON o.doc_type = d.doc_type
            WHERE d.doc_type != '' AND d.year IS NOT NULL
-           GROUP BY d.year, d.doc_type
-           ORDER BY COALESCE(o.sort_order, 999999), d.doc_type, d.year DESC"""
+           GROUP BY d.year, d.doc_type, half
+           ORDER BY COALESCE(o.sort_order, 999999), d.doc_type, d.year DESC, half"""
     ).fetchall()
     return [dict(r) for r in rows]
 
