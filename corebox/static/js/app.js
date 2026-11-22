@@ -187,12 +187,14 @@
       const btns = labelOrder.map((label) => {
         const groupDocs = byLabel.get(label);
         const items = groupDocs.map((d) => `
-          ${d.file_name
-            ? `<a class="period-btn" href="/api/documents/${d.id}/download" title="${escapeHtml(d.name)}">${escapeHtml(label)}</a>`
-            : `<span class="period-btn" style="opacity:.6;" title="파일 없음">${escapeHtml(label)}</span>`}
-          ${issueDateBadge(d.issue_date)}
-          <button class="icon-btn edit-doc" data-id="${d.id}" title="수정">✏️</button>
-          <button class="icon-btn delete-doc" data-id="${d.id}" title="삭제">🗑️</button>
+          <div class="period-item">
+            ${d.file_name
+              ? `<a class="period-btn" href="/api/documents/${d.id}/download" title="${escapeHtml(d.name)}">${escapeHtml(label)}</a>`
+              : `<span class="period-btn" style="opacity:.6;" title="파일 없음">${escapeHtml(label)}</span>`}
+            ${issueDateBadge(d.issue_date)}
+            <button class="icon-btn edit-doc" data-id="${d.id}" title="수정">✏️</button>
+            <button class="icon-btn delete-doc" data-id="${d.id}" title="삭제">🗑️</button>
+          </div>
         `).join("");
         return `
           <div class="period-btn-wrap">${items}</div>

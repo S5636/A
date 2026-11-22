@@ -191,22 +191,25 @@ body { padding-bottom: 40px; }
   gap: 6px;
   padding: 8px 2px 4px;
 }
-.period-btn-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; }
+.period-btn-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; width: 100%; }
+/* 같은 줄에 여러 건(1기/2기 등)이 올 수 있어서, 라벨+날짜+아이콘 한
+   묶음이 줄바꿈 중간에 쪼개지지 않고 통째로 다음 줄로 넘어가게 한다. */
+.period-item { display: flex; align-items: center; gap: 2px; flex-wrap: nowrap; }
 .period-btn {
   display: inline-block;
-  padding: 8px 14px;
+  padding: 4px 9px;
   border-radius: var(--radius-md);
   background: var(--surface-2);
   border: 1px solid var(--border-strong);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   text-decoration: none;
-  min-width: 90px;
   text-align: center;
 }
 .period-btn:hover { background: var(--surface-3); }
 .issue-date-tag { color: var(--text-muted); font-size: 11px; margin: 0 2px; }
+.period-item .icon-btn { font-size: 12px; padding: 1px 2px; }
 .income-sources {
   color: var(--text-secondary);
   font-size: 11px;
