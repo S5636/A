@@ -1153,8 +1153,10 @@
       : "";
 
     const attachKey = `loan-attach-${loan.id}`;
-    const attachOpen = openLogPanels.has(attachKey);
     const attachments = loan.attachments || [];
+    // 파일이 1개뿐이면 접었다 펼 필요 없이 그냥 항상 보여준다(삭제
+    // 버튼 누르려고 토글까지 할 필요 없게).
+    const attachOpen = openLogPanels.has(attachKey) || attachments.length === 1;
     const attachmentsHtml = attachments.length
       ? attachments.map((a) => `
           <div class="log-item">
@@ -1204,7 +1206,10 @@
           ${amortRows.length ? `<button class="btn small toggle-loan-amort" data-id="${loan.id}">예상 상환표</button>` : ""}
         </div>
         <div class="benefit-buttons">
-          <button class="icon-btn toggle-loan-attachments" data-id="${loan.id}" title="첨부파일${attachments.length ? ` (${attachments.length})` : ""}">📎</button>
+          ${attachments.length === 1
+            ? `<a class="icon-btn" href="/api/loan-attachments/${attachments[0].id}/download" target="_blank" title="첨부파일 보기">📎</a>`
+            : `<button class="icon-btn toggle-loan-attachments" data-id="${loan.id}" title="첨부파일${attachments.length ? ` (${attachments.length})` : ""}">📎</button>`
+          }
           <button class="icon-btn edit-loan" data-id="${loan.id}" title="대출 수정">✏️</button>
           <button class="icon-btn delete-loan" data-id="${loan.id}" title="대출 삭제">🗑️</button>
         </div>
@@ -1256,12 +1261,15 @@
         render();
       });
     }
-    el.querySelector(".toggle-loan-attachments").addEventListener("click", () => {
-      const key = `loan-attach-${loan.id}`;
-      if (openLogPanels.has(key)) openLogPanels.delete(key);
-      else openLogPanels.add(key);
-      render();
-    });
+    const toggleAttachBtn = el.querySelector(".toggle-loan-attachments");
+    if (toggleAttachBtn) {
+      toggleAttachBtn.addEventListener("click", () => {
+        const key = `loan-attach-${loan.id}`;
+        if (openLogPanels.has(key)) openLogPanels.delete(key);
+        else openLogPanels.add(key);
+        render();
+      });
+    }
     el.querySelectorAll(".delete-loan-attachment").forEach((btn) =>
       btn.addEventListener("click", async () => {
         if (!confirm("이 첨부파일을 삭제할까요?")) return;
