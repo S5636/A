@@ -75,7 +75,6 @@
       <div class="header-actions" style="margin-bottom:12px;">
         <a class="btn secondary small" href="/api/export/usage.xlsx">전체 내역 다운로드</a>
         <a class="btn secondary small" href="/api/export/all-cards-diag.txt" download>전체 카드 실적 진단 파일</a>
-        <a class="btn secondary small" href="/api/export/loan-diag.txt" download>대출 매칭 진단 파일</a>
       </div>
       <label class="dropzone" id="import-dropzone">
         <strong>엑셀 업로드</strong>
@@ -118,6 +117,7 @@
       <button class="btn small" id="btn-loan-automatch">자동 매칭</button>
       <label class="btn small" for="loan-attach-auto-input" style="margin:0;">📎 증빙 한번에 올리기</label>
       <input type="file" id="loan-attach-auto-input" multiple style="display:none;">
+      <a class="btn secondary small" href="/api/export/loan-diag.txt" download>매칭 진단 파일</a>
       <span id="loan-unpaid-total" style="margin-left:auto; font-weight:700; color:var(--accent-purple);"></span>
     </div>
     <div id="loan-attach-auto-log"></div>
