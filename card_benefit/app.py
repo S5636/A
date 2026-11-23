@@ -5032,7 +5032,7 @@ def _card_diag_lines(conn, card):
         lines.append("")
 
     benefits = conn.execute(
-        "SELECT id, name FROM benefits WHERE card_id = ? ORDER BY sort_order ASC, id ASC", (card_id,)
+        "SELECT * FROM benefits WHERE card_id = ? ORDER BY sort_order ASC, id ASC", (card_id,)
     ).fetchall()
     lines.append("=== 혜택별 목록(화면에 보이는 '결제금액')에 잡히는 사이클 기준 사용내역 합계 ===")
     for b in benefits:
@@ -5042,6 +5042,37 @@ def _card_diag_lines(conn, card):
             (b["id"], cyc_start.isoformat(), cyc_end.isoformat()),
         ).fetchone()["total"]
         lines.append(f"  {b['name']}: {used:,.0f}원")
+    lines.append("")
+
+    # "설명 보기"에 적힌 안내 문구(예: "육아 5%: 학원·서점·병원·의원·약국")는
+    # 그냥 사람이 따로 써둔 memo 글자라서, 실제 rate_table JSON에 등록된
+    # 업종별 키워드와 다를 수 있다 - 둘이 안 맞으면 설명과 다르게 매칭돼서
+    # "왜 분명 적혀있는데 저 퍼센트로 안 잡히냐"는 혼란이 생긴다. 실제로
+    # 매칭에 쓰이는 원본 키워드를 그대로 보여주고, 샘플 가맹점명 하나를
+    # 돌려서 실제로 몇 %/어느 업종으로 잡히는지까지 바로 확인시킨다.
+    lines.append("=== 업종별(rate_table) 혜택의 실제 등록 키워드 ===")
+    percent_benefits = [b for b in benefits if b["calc_mode"] == "percent_discount" and b["rate_table"]]
+    if not percent_benefits:
+        lines.append("  (업종별 혜택 없음)")
+    for b in percent_benefits:
+        lines.append(f"  혜택: {b['name']}")
+        try:
+            rows = json.loads(b["rate_table"] or "[]")
+        except (ValueError, TypeError):
+            rows = []
+        if not isinstance(rows, list) or not rows:
+            lines.append("    (rate_table이 비어있거나 형식이 깨짐)")
+            continue
+        for entry in rows:
+            if not isinstance(entry, (list, tuple)) or not entry:
+                continue
+            lines.append(f"    {entry}")
+        sample_merchant = "의료법인일산복음의료"
+        result = match_rate_table(sample_merchant, b["rate_table"])
+        lines.append(
+            f"    -> 샘플 가맹점명 \"{sample_merchant}\"로 테스트: "
+            f"퍼센트={result[0]}, 업종라벨={result[5] or '(매칭 안 됨 - 기본값 적용)'}"
+        )
 
     return lines
 
