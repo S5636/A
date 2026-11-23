@@ -5039,7 +5039,11 @@ def export_loan_diag():
 
     resp = make_response(text)
     resp.headers["Content-Type"] = "text/plain; charset=utf-8"
-    resp.headers["Content-Disposition"] = 'attachment; filename="loan_diag.txt"'
+    # 예전엔 Content-Disposition: attachment로 내려줬는데, 일부 임베디드
+    # 브라우저(원격접속 앱 내장 브라우저 등)가 이 헤더를 보고 fetch() 요청까지
+    # 통째로 다운로드 매니저로 가로채버려서 "매칭 진단" 모달의 fetch가
+    # "TypeError: Failed to fetch"로 그대로 실패하는 게 실제로 재현됨.
+    # 지금은 화면 안 fetch로만 쓰므로 attachment 헤더를 아예 안 붙인다.
     return resp
 
 
