@@ -2335,6 +2335,19 @@ def _loan_name_tokens(name):
     return words[:1]
 
 
+def _normalize_ocr_bank_suffix(text):
+    """OCR이 "뱅크"의 "뱅"을 생김새가 비슷한 "방"/"빵"으로 잘못 읽는 걸
+    실제 카카오뱅크 스캔 서류에서 확인함("카카오방크", "카카오빵크"로
+    인식됨 - 정작 은행명 매칭에 쓰는 글자가 단 한 번도 정확히 안
+    나와서 전혀 매칭이 안 됐었음). 카카오뱅크/케이뱅크/토스뱅크처럼
+    등록된 대출명이 전부 "~뱅크"로 끝나는 경우가 많아, 이 OCR 오인식은
+    카카오뱅크에만 국한된 문제가 아니라 "뱅크"가 들어간 모든 대출명에
+    같은 식으로 나타날 수 있다 - 매칭용으로만 "방크"/"빵크"를 전부
+    "뱅크"로 바꿔서 비교한다(원본 글자는 미리보기 등에 그대로 남겨서
+    디버깅엔 지장 없음)."""
+    return text.replace("방크", "뱅크").replace("빵크", "뱅크")
+
+
 def _match_loans_for_attachment_text(loans, text):
     """첨부파일 글자 안에서 등록된 대출을 전부 찾는다 - (1)출금계좌 뒤
     4자리(+가능하면 은행명 등 글자까지)가 들어있거나, (2)대출 계좌번호를
@@ -2346,6 +2359,7 @@ def _match_loans_for_attachment_text(loans, text):
     전부 돌려준다 - 그 파일이 실제로 그 대출들 전부에 대한 증빙이기
     때문에 하나만 추측해서 고르는 게 아니라 전부 다 첨부한다. 하나도
     안 걸리면 빈 리스트(미분류로 남김)."""
+    text = _normalize_ocr_bank_suffix(text)
     compact_digits = re.sub(r"\D", "", text)
     candidates = []
     for loan in loans:
