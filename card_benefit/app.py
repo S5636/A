@@ -804,44 +804,89 @@ def serialize_trash(conn):
     ]
 
 
-def _auto_resolve_medical_inbox_items(conn):
-    """병원/약국 등 의료기관 결제는 카드 혜택 대상인 경우가 거의 없고,
-    이미 별도 "의료비(실손 청구)" 탭에서 가맹점명으로 따로 추적하고
-    있다(serialize_medical_expenses는 status와 상관없이 다 보여줌) -
-    그런데 "어떤 혜택에 쓴 결제인가요" 수동 분류 큐에는 그대로 남아있어서,
-    병원 갈 때마다 매번 "해당없음"을 손으로 눌러줘야 했다. 가맹점명으로
-    병원/약국이 확실하면 자동으로 "해당없음" 처리해서 그 큐에서 아예
-    뺀다(의료비 탭 추적은 그대로 유지됨)."""
-    rows = conn.execute(
-        "SELECT id, merchant, last4 FROM inbox_items "
-        "WHERE status = 'pending' AND deleted_at IS NULL AND merchant != ''"
-    ).fetchall()
-    if not rows:
-        return
-    medical_rows = [r for r in rows if is_medical_merchant(r["merchant"])]
-    if not medical_rows:
-        return
-    cards_with_code = conn.execute(
-        "SELECT id, last4 FROM cards WHERE last4 != '' AND closed = 0"
-    ).fetchall()
-    for r in medical_rows:
-        card_id = None
-        if r["last4"]:
-            for c in cards_with_code:
-                if card_codes_match(c["last4"], r["last4"]):
-                    card_id = c["id"]
-                    break
-        conn.execute(
-            "UPDATE inbox_items SET status = 'no_benefit', card_id = ?, benefit_id = NULL WHERE id = ?",
-            (card_id, r["id"]),
-        )
-    conn.commit()
+def _match_card_and_benefit_for_item(r, cards_with_code, all_open_cards, benefits_by_card):
+    """serialize_inbox의 카드/혜택 자동매칭 로직을 재사용할 수 있게 뺐다 -
+    병원 결제를 무조건 "해당없음"으로 밀어버렸던 지난 실수(실제로 "의료
+    할인" 혜택을 카드에 등록해둔 사용자가 있어서, 그 혜택이 매칭될
+    기회조차 없이 전부 해당없음으로 가로채버렸음)를 되돌리면서, 이미
+    잘못 "해당없음" 처리된 건들을 이 똑같은 로직으로 다시 매칭 시도하기
+    위함."""
+    card = None
+    if r["last4"]:
+        for c in cards_with_code:
+            if card_codes_match(c["last4"], r["last4"]):
+                card = c
+                break
+    matched_benefit = None
+    matched_doubled = False
+    if card and r["merchant"]:
+        for b in benefits_by_card.get(card["id"], []):
+            if match_benefit_keyword(r["merchant"], b["merchant_keywords"]):
+                matched_benefit = b
+                matched_doubled = b["calc_mode"] == "change_under_1000"
+                break
+    if not card and r["issuer"] and r["merchant"]:
+        candidates = [
+            (c, b)
+            for c in cards_with_code if c["issuer"] == r["issuer"]
+            for b in benefits_by_card.get(c["id"], [])
+            if match_benefit_keyword(r["merchant"], b["merchant_keywords"])
+        ]
+        if len(candidates) == 1:
+            card, matched_benefit = candidates[0]
+            matched_doubled = matched_benefit["calc_mode"] == "change_under_1000"
+    if not card and r["issuer"]:
+        issuer_cards = [c for c in all_open_cards if c["issuer"] == r["issuer"]]
+        if len(issuer_cards) == 1:
+            card = issuer_cards[0]
+    return card, matched_benefit, matched_doubled
+
+
+def _retry_medical_no_benefit_items():
+    """지난 실수로 병원/약국 결제를 전부 "해당없음"으로 자동 처리해버린
+    적이 있어서(의료 할인 혜택이 등록돼 있었는데 그 혜택이 매칭될
+    기회조차 없었음), 그렇게 잘못 처리된 것으로 보이는 건(해당없음 +
+    혜택 미배정 + 의료기관 가맹점)들을 서버 시작할 때 지금 등록된 혜택
+    키워드로 다시 매칭 시도한다. 이미 사람이 직접 "해당없음"으로 확정한
+    건과 구분이 안 되지만, 실제로 맞는 혜택이 있으면 다시 걸리고 없으면
+    그대로 해당없음에 남으니 해는 없다."""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM inbox_items WHERE status = 'no_benefit' AND benefit_id IS NULL "
+            "AND deleted_at IS NULL AND merchant != ''"
+        ).fetchall()
+        medical_rows = [r for r in rows if is_medical_merchant(r["merchant"])]
+        if not medical_rows:
+            return
+        cards_with_code = conn.execute(
+            "SELECT id, name, issuer, last4 FROM cards WHERE last4 != '' AND closed = 0"
+        ).fetchall()
+        all_open_cards = conn.execute("SELECT id, name, issuer FROM cards WHERE closed = 0").fetchall()
+        benefits_by_card = {}
+        for b in conn.execute(
+            "SELECT id, card_id, name, merchant_keywords, calc_mode, always_doubled, rate_table FROM benefits"
+        ):
+            benefits_by_card.setdefault(b["card_id"], []).append(b)
+        for r in medical_rows:
+            card, matched_benefit, _ = _match_card_and_benefit_for_item(
+                r, cards_with_code, all_open_cards, benefits_by_card
+            )
+            if matched_benefit:
+                conn.execute(
+                    "UPDATE inbox_items SET status = 'pending', card_id = ?, benefit_id = NULL WHERE id = ?",
+                    (card["id"] if card else None, r["id"]),
+                )
+        conn.commit()
+    except BaseException as e:
+        _reraise_if_fatal(e)
+    finally:
+        conn.close()
 
 
 def serialize_full():
     conn = get_conn()
     try:
-        _auto_resolve_medical_inbox_items(conn)
         return {
             "cards": _serialize_cards(conn),
             "inbox": serialize_inbox(conn),
@@ -6038,6 +6083,7 @@ init_db()
 apply_startup_data_fixes()
 _revalidate_loan_attachments()
 _retry_unassigned_loan_attachments()
+_retry_medical_no_benefit_items()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
