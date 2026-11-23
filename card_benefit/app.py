@@ -4326,14 +4326,16 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
                 if time_blocked:
                     block_reason = block_reason or "시간외 결제"
             # "잡화:다이소"처럼 매장 할인 키워드가 온라인몰 결제명에도 그대로
-            # 걸리는데, 실제론 매장 결제만 그 할인 대상이고 온라인은 대상이
-            # 아닌 카드가 있다(사용자 확인: 신한 Discount Plan+의 "잡화"
-            # 10%는 오프라인 전용, 온라인은 해당없음). 알림 원문에 "온라인"이
-            # 찍혀 있으면 "잡화" 매칭을 취소하고 기본 할인율로 되돌린다.
+            # 걸리는데, 실제론 매장 결제만 그 할인 대상이고 온라인은 완전히
+            # 해당없음인 카드가 있다(사용자 확인: 신한 Discount Plan+의
+            # "잡화" 10%는 오프라인 전용, 온라인은 0%). 다른 미매칭 가맹점이
+            # 기본 할인율(effective_discount_percent)로 떨어지는 것과 달리,
+            # 여기는 "그 어떤 업종에도 해당 안 됨"이 맞으므로 기본 할인율이
+            # 아니라 완전히 0으로 보내야 한다(effective_discount_percent를
+            # 썼더니 "잡화 10%" 대신 혜택의 기본 5%로 잘못 떨어진 걸 실제
+            # 화면에서 확인함 - 사용자가 원한 건 0%였음).
             if category == "잡화" and is_online:
-                percent, cap, daily_limit, monthly_limit, monthly_point_cap = (
-                    effective_discount_percent, benefit["per_txn_cap"], 0, 0, 0
-                )
+                percent, cap, daily_limit, monthly_limit, monthly_point_cap = 0, 0, 0, 0, 0
                 category = ""
         capped_note = ""
         if category and used_at and not block_reason:
