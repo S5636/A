@@ -3130,6 +3130,7 @@ def upload_loan_attachments_auto():
     files = request.files.getlist("file")
     if not files:
         return jsonify({"error": "파일을 선택하세요."}), 400
+    failures = []
     conn = get_conn()
     try:
         loans = conn.execute("SELECT * FROM loans").fetchall()
@@ -3138,7 +3139,10 @@ def upload_loan_attachments_auto():
                 continue
             # 파일 하나 처리하다 예외가 나도(글자 인식 실패 등) 나머지
             # 파일이나 이미 처리된 파일까지 같이 날아가면 안 되니, 파일
-            # 마다 따로 커밋한다.
+            # 마다 따로 커밋한다. 예전엔 실패 사유를 서버 콘솔에만
+            # print해서, 사용자 눈엔 그 파일이 아무 흔적도 없이 그냥
+            # 사라진 것처럼 보였다(업로드 성공 메시지까지 떴음) - 응답에
+            # 실패 목록을 실어서 화면에 그대로 보여준다.
             try:
                 _save_and_match_one_loan_attachment(conn, loans, uploaded)
                 conn.commit()
@@ -3146,9 +3150,12 @@ def upload_loan_attachments_auto():
                 _reraise_if_fatal(e)
                 conn.rollback()
                 print(f"[증빙 자동매칭] {uploaded.filename} 처리 실패: {e}")
+                failures.append({"filename": uploaded.filename, "reason": str(e) or type(e).__name__})
     finally:
         conn.close()
-    return jsonify(serialize_full())
+    result = serialize_full()
+    result["upload_failures"] = failures
+    return jsonify(result)
 
 
 @app.route("/api/loan-attachments/<int:attachment_id>/assign", methods=["PUT"])

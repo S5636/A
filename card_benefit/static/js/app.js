@@ -1611,10 +1611,17 @@
     state = await api("/api/loans/attachments/auto", { method: "POST", body: formData });
     input.value = "";
     const newUnassigned = (state.unassigned_attachments || []).filter((a) => !before.has(a.id)).length;
+    const failures = state.upload_failures || [];
+    const matchedCount = n - newUnassigned - failures.length;
     const logEl = document.getElementById("loan-attach-auto-log");
-    logEl.innerHTML = `<div class="upload-log-item">${n}장 올림 - ${
-      newUnassigned ? `${newUnassigned}장은 어느 대출인지 못 가렸습니다. 아래에서 직접 배정해주세요.` : "전부 자동으로 대출에 들어갔습니다."
-    }</div>`;
+    const parts = [`${n}장 중 ${matchedCount}장 자동으로 대출에 들어갔습니다.`];
+    if (newUnassigned) parts.push(`${newUnassigned}장은 어느 대출인지 못 가렸습니다. 아래에서 직접 배정해주세요.`);
+    if (failures.length) {
+      parts.push(`${failures.length}장은 처리 중 오류로 아예 저장되지 않았습니다: ${failures
+        .map((f) => `${escapeHtml(f.filename)}(${escapeHtml(f.reason)})`)
+        .join(", ")}`);
+    }
+    logEl.innerHTML = `<div class="upload-log-item">${parts.join(" ")}</div>`;
     render();
   });
 
