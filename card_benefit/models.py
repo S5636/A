@@ -890,7 +890,17 @@ def match_benefit_keyword(merchant: str, merchant_keywords: str) -> bool:
         (negative if k.startswith("-") else positive).append(k[1:] if k.startswith("-") else k)
     if any(k in merchant_lower for k in negative):
         return False
-    return any(k in merchant_lower for k in positive)
+    if any(k in merchant_lower for k in positive):
+        return True
+    # "병원"/"의료"/"약국"처럼 포괄적인 키워드를 등록해둔 경우, 가맹점명이
+    # 그 글자를 문자 그대로 포함 안 해도("의료법인일산복음의료"처럼 법인
+    # 형태로만 찍히는 경우) 병원/약국으로 보이면 매칭되게 한다 - 이미
+    # 만들어둔 is_medical_merchant의 더 넓은 병원과·약국 이름 목록을
+    # 재사용(실제로 이 좁은 substring 매칭 때문에 "의료법인일산복음의료"
+    # 결제가 등록된 의료 할인 혜택에 안 걸리는 문제가 있었음).
+    if any(k in _MEDICAL_TRIGGER_KEYWORDS for k in positive) and is_medical_merchant(merchant):
+        return True
+    return False
 
 
 _MEDICAL_KEYWORDS = [
@@ -899,6 +909,12 @@ _MEDICAL_KEYWORDS = [
     "비뇨기과", "정신건강의학과", "신경과", "재활의학과", "성형외과",
     "의료법인", "의료재단",
 ]
+
+# 혜택/업종별 가맹점 키워드에 이 중 하나라도 등록돼 있으면("병원" 등),
+# 문자 그대로의 substring 매칭 대신 is_medical_merchant의 더 넓은 목록을
+# 같이 써서 "의료법인일산복음의료"처럼 고유명사 없이 법인 형태로만 찍힌
+# 가맹점명도 잡히게 한다(match_benefit_keyword/match_rate_table에서 사용).
+_MEDICAL_TRIGGER_KEYWORDS = {"병원", "의료", "약국"}
 
 
 def is_medical_merchant(merchant: str) -> bool:
@@ -961,7 +977,13 @@ def match_rate_table(merchant: str, rate_table_json: str, default_percent: float
                     (neg_kws if kw.startswith("-") else pos_kws).append(kw[1:] if kw.startswith("-") else kw)
                 if any(kw in merchant_lower for kw in neg_kws):
                     continue
-                if any(kw in merchant_lower for kw in pos_kws):
+                # "병원"/"의료"/"약국"처럼 포괄적인 업종 키워드가 들어있으면,
+                # 문자 그대로의 substring 매칭 대신 is_medical_merchant의 더
+                # 넓은 목록도 같이 써서 법인 형태로만 찍힌 가맹점명도 잡는다
+                # (match_benefit_keyword와 같은 이유 - 실제로 "생활" 카테고리에
+                # "병원" 키워드가 있어도 "의료법인일산복음의료"는 안 걸렸음).
+                medical_fallback = any(kw in _MEDICAL_TRIGGER_KEYWORDS for kw in pos_kws) and is_medical_merchant(merchant)
+                if any(kw in merchant_lower for kw in pos_kws) or medical_fallback:
                     if start_hour is not None and end_hour is not None and hour is not None:
                         if not (start_hour <= hour < end_hour):
                             return 0, 0, 0, 0, 0, TIME_BLOCKED_LABEL
