@@ -144,6 +144,11 @@ CREATE TABLE IF NOT EXISTS loan_attachments (
     file_name TEXT DEFAULT '',
     original_name TEXT DEFAULT '',
     file_hash TEXT DEFAULT '',
+    extracted_text TEXT,  -- pypdf/OCR로 뽑은 글자 캐시(NULL=아직 한 번도 추출 안 함).
+                          -- OCR이 파일마다 몇 초~몇십 초씩 걸려서, 매칭
+                          -- 진단/재검증/재시도 때마다 매번 다시 돌리면
+                          -- 느려서 fetch가 타임아웃나는 원인이 됐다 - 한 번
+                          -- 추출한 결과는 저장해두고 재사용한다.
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -250,6 +255,7 @@ def init_db():
                     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
                 )"""
             )
+        _ensure_column(conn, "loan_attachments", "extracted_text", "extracted_text TEXT")
         _ensure_column(conn, "cards", "short_name", "short_name TEXT DEFAULT ''")
         _ensure_column(conn, "cards", "last4", "last4 TEXT DEFAULT ''")
         _ensure_column(conn, "cards", "perf_threshold", "perf_threshold REAL NOT NULL DEFAULT 0")

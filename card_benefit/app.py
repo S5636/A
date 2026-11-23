@@ -2206,6 +2206,26 @@ def _extract_text_from_loan_attachment(filename, file_bytes):
     return ""
 
 
+def _get_or_extract_attachment_text(conn, attachment_id, cached_text, filename, file_bytes):
+    """이미 뽑아둔 글자가 있으면 그걸 그대로 쓰고, 없을 때만 실제로
+    추출한다(OCR은 파일 하나당 몇 초~몇십 초씩 걸릴 수 있어서, 매칭
+    진단/재검증/재시도가 호출될 때마다 등록된 모든 첨부파일을 매번
+    다시 OCR 돌리면 응답이 느려져서 브라우저 쪽 fetch가 타임아웃나는
+    원인이 된다 - 실제로 "매칭 진단"이 "Failed to fetch"로 재현된 것도
+    이 때문으로 보임). 추출 결과가 비어있으면(실패) 캐시에 저장하지
+    않고 매번 다시 시도한다 - 그래야 나중에 pypdf/OCR 설치 문제를
+    고치면 다음 호출에서 바로 다시 시도됨."""
+    if cached_text:
+        return cached_text
+    text = _extract_text_from_loan_attachment(filename, file_bytes)
+    if text:
+        conn.execute(
+            "UPDATE loan_attachments SET extracted_text = ? WHERE id = ?", (text, attachment_id)
+        )
+        conn.commit()
+    return text
+
+
 def _loan_match_tokens(withdrawal_account):
     """대출의 '출금계좌' 표기(예: "카카오뱅크 1234")에서 은행명 등
     글자 토큰과 계좌 뒤 4자리를 따로 뽑는다."""
@@ -3137,15 +3157,15 @@ def _save_and_match_one_loan_attachment(conn, loans, uploaded):
         new_loans = [l for l in matched_loans if l["id"] not in already_loan_ids]
         if unassigned_row and new_loans:
             conn.execute(
-                "UPDATE loan_attachments SET loan_id = ? WHERE id = ?",
-                (new_loans[0]["id"], unassigned_row["id"]),
+                "UPDATE loan_attachments SET loan_id = ?, extracted_text = COALESCE(extracted_text, ?) WHERE id = ?",
+                (new_loans[0]["id"], text or None, unassigned_row["id"]),
             )
             new_loans = new_loans[1:]
         for loan in new_loans:
             conn.execute(
-                "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash) "
-                "VALUES (?, ?, ?, ?)",
-                (loan["id"], shared_file_name, uploaded.filename, file_hash),
+                "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash, extracted_text) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (loan["id"], shared_file_name, uploaded.filename, file_hash, text or None),
             )
         return
     ext = os.path.splitext(secure_filename(uploaded.filename))[1]
@@ -3155,15 +3175,15 @@ def _save_and_match_one_loan_attachment(conn, loans, uploaded):
     if matched_loans:
         for loan in matched_loans:
             conn.execute(
-                "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash) "
-                "VALUES (?, ?, ?, ?)",
-                (loan["id"], file_name, uploaded.filename, file_hash),
+                "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash, extracted_text) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (loan["id"], file_name, uploaded.filename, file_hash, text or None),
             )
     else:
         conn.execute(
-            "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash) "
-            "VALUES (?, ?, ?, ?)",
-            (None, file_name, uploaded.filename, file_hash),
+            "INSERT INTO loan_attachments (loan_id, file_name, original_name, file_hash, extracted_text) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (None, file_name, uploaded.filename, file_hash, text or None),
         )
 
 
@@ -5025,7 +5045,7 @@ def _build_loan_diag_text():
                 diag_lines.append(f"  {pkg}: 설치 안 됨/실패 - {e}")
         loans = conn.execute("SELECT * FROM loans ORDER BY sort_order ASC, id ASC").fetchall()
         attachments = conn.execute(
-            "SELECT id, loan_id, file_name, original_name FROM loan_attachments ORDER BY id"
+            "SELECT id, loan_id, file_name, original_name, extracted_text FROM loan_attachments ORDER BY id"
         ).fetchall()
         for a in attachments:
             path = os.path.join(UPLOAD_DIR, a["file_name"])
@@ -5033,7 +5053,9 @@ def _build_loan_diag_text():
             try:
                 with open(path, "rb") as f:
                     file_bytes = f.read()
-                text = _extract_text_from_loan_attachment(a["original_name"] or a["file_name"], file_bytes)
+                text = _get_or_extract_attachment_text(
+                    conn, a["id"], a["extracted_text"], a["original_name"] or a["file_name"], file_bytes
+                )
                 if not text:
                     diag_lines.append("    -> 글자를 하나도 못 뽑음(추출 실패)")
                 else:
@@ -5923,7 +5945,7 @@ def _retry_unassigned_loan_attachments():
     conn = get_conn()
     try:
         unassigned = conn.execute(
-            "SELECT id, file_name, original_name FROM loan_attachments WHERE loan_id IS NULL"
+            "SELECT id, file_name, original_name, extracted_text FROM loan_attachments WHERE loan_id IS NULL"
         ).fetchall()
         if not unassigned:
             return
@@ -5937,7 +5959,9 @@ def _retry_unassigned_loan_attachments():
                 with open(path, "rb") as f:
                     file_bytes = f.read()
                 fname = item["original_name"] or item["file_name"]
-                text = _extract_text_from_loan_attachment(fname, file_bytes)
+                text = _get_or_extract_attachment_text(
+                    conn, item["id"], item["extracted_text"], fname, file_bytes
+                )
                 if not text:
                     continue
                 matched_loans = _match_loans_for_attachment_text(loans, text)
@@ -5974,7 +5998,7 @@ def _revalidate_loan_attachments():
     conn = get_conn()
     try:
         assigned = conn.execute(
-            "SELECT id, loan_id, file_name, original_name FROM loan_attachments "
+            "SELECT id, loan_id, file_name, original_name, extracted_text FROM loan_attachments "
             "WHERE loan_id IS NOT NULL"
         ).fetchall()
         if not assigned:
@@ -5987,7 +6011,9 @@ def _revalidate_loan_attachments():
                 with open(path, "rb") as f:
                     file_bytes = f.read()
                 fname = item["original_name"] or item["file_name"]
-                text = _extract_text_from_loan_attachment(fname, file_bytes)
+                text = _get_or_extract_attachment_text(
+                    conn, item["id"], item["extracted_text"], fname, file_bytes
+                )
                 if not text:
                     continue
                 matched_loans = _match_loans_for_attachment_text(loans, text)
