@@ -121,7 +121,7 @@
       <button class="btn small" id="btn-loan-automatch">자동 매칭</button>
       <label class="btn small" for="loan-attach-auto-input" style="margin:0;">📎 업로드</label>
       <input type="file" id="loan-attach-auto-input" multiple style="display:none;">
-      <a class="btn secondary small" href="/api/export/loan-diag.txt" download>매칭 진단</a>
+      <button class="btn secondary small" id="btn-loan-diag">매칭 진단</button>
     </div>
     <div id="loan-attach-auto-log"></div>
     <div id="loan-unassigned-attachments"></div>
@@ -474,6 +474,19 @@
     </div>
     <div class="modal-actions">
       <button class="btn" id="alerts-close">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 매칭 진단 모달 -->
+<div class="modal-backdrop" id="loan-diag-modal">
+  <div class="modal">
+    <h2>매칭 진단</h2>
+    <p id="loan-diag-status" class="hint"></p>
+    <textarea id="loan-diag-text" readonly style="width:100%; height:55vh; font-size:12px; white-space:pre;"></textarea>
+    <div class="modal-actions">
+      <button class="btn secondary" id="loan-diag-copy">전체 복사</button>
+      <button class="btn" id="loan-diag-close">닫기</button>
     </div>
   </div>
 </div>

@@ -1625,6 +1625,40 @@
     render();
   });
 
+  // 기존엔 <a href=... download> 링크였는데, 일부 임베디드 브라우저(예:
+  // 원격접속 앱 안의 간이 브라우저)가 download 속성을 무시해서 눌러도
+  // 아무 반응이 없었다 - 파일 다운로드에 기대지 않고 fetch로 직접
+  // 받아서 화면 안 텍스트 영역에 그대로 보여주는 방식으로 바꿈(어떤
+  // 브라우저에서도 동작).
+  const loanDiagModal = document.getElementById("loan-diag-modal");
+  const loanDiagStatus = document.getElementById("loan-diag-status");
+  const loanDiagText = document.getElementById("loan-diag-text");
+  document.getElementById("btn-loan-diag").addEventListener("click", async () => {
+    loanDiagText.value = "";
+    loanDiagStatus.textContent = "불러오는 중...";
+    loanDiagModal.classList.add("open");
+    try {
+      const resp = await fetch("/api/export/loan-diag.txt");
+      const text = await resp.text();
+      loanDiagText.value = text;
+      loanDiagStatus.textContent = resp.ok ? "" : `불러오기 실패 (status ${resp.status})`;
+    } catch (e) {
+      loanDiagStatus.textContent = `불러오기 실패: ${e}`;
+    }
+  });
+  document.getElementById("loan-diag-close").addEventListener("click", () => {
+    loanDiagModal.classList.remove("open");
+  });
+  document.getElementById("loan-diag-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(loanDiagText.value);
+      loanDiagStatus.textContent = "복사했습니다.";
+    } catch (e) {
+      loanDiagText.select();
+      loanDiagStatus.textContent = "자동 복사가 안 돼서 텍스트를 선택해뒀습니다 - 직접 복사해주세요.";
+    }
+  });
+
   const matchConfirmBtn = document.getElementById("match-modal-confirm-selected");
   async function openMatchModal(entityType, item, label) {
     document.getElementById("match-modal-title").textContent = `"${label}" 결제 확인`;
