@@ -6181,11 +6181,46 @@ def _revalidate_loan_attachments():
         conn.close()
 
 
+def _fix_online_japhwa_overcredit():
+    """다이소 온라인 결제를 "잡화"로 과대 적립했던 과거 기록을 서버 시작 시
+    한 번 바로잡는다 - "온라인은 잡화 할인 대상 아님"으로 코드만 고치고
+    이미 저장된 usage_logs는 손 안 대면, 고치기 전에 기록된 과거 건들은
+    계속 틀린 금액(10%)으로 남아있게 된다(알림 목록 추천 배지만 고치고
+    이미 쌓인 데이터는 안 고치는 식으로 또 놓칠 뻔한 부분)."""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """SELECT usage_logs.id, usage_logs.raw_value, inbox_items.raw_text
+               FROM usage_logs
+               LEFT JOIN inbox_items ON inbox_items.id = usage_logs.source_inbox_id
+               WHERE usage_logs.rate_category = '잡화'"""
+        ).fetchall()
+        fixed = 0
+        for r in rows:
+            if not (r["raw_text"] and "온라인" in r["raw_text"]):
+                continue
+            raw_value = r["raw_value"] if r["raw_value"] is not None else 0
+            new_memo = f"결제 {raw_value:,.0f}원 → 할인 0원(0% - 온라인 구매는 잡화 할인 대상 아님, 자동 정정)"
+            conn.execute(
+                "UPDATE usage_logs SET used_value = 0, memo = ?, rate_category = '' WHERE id = ?",
+                (new_memo, r["id"]),
+            )
+            fixed += 1
+        if fixed:
+            conn.commit()
+            print(f"[온라인 잡화 정정] {fixed}건 바로잡음")
+    except BaseException as e:
+        _reraise_if_fatal(e)
+    finally:
+        conn.close()
+
+
 init_db()
 apply_startup_data_fixes()
 _revalidate_loan_attachments()
 _retry_unassigned_loan_attachments()
 _retry_medical_no_benefit_items()
+_fix_online_japhwa_overcredit()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
