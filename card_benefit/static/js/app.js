@@ -2499,6 +2499,26 @@
     return Math.floor((base * percent) / 100);
   }
 
+  // models.py의 is_medical_merchant/match_rate_table과 반드시 같이 맞춰야
+  // 한다 - 이 혜택-사용-기록 모달의 "할인 예상" 미리보기는 서버를 안 거치고
+  // 이 JS 복사본으로 직접 계산해서 보여주는데, 서버 쪽만 "병원"/"의료"/
+  // "약국" 키워드를 폭넓게 잡도록 고치고 여기를 안 고치면 미리보기와
+  // 실제 저장 결과(서버가 계산)가 서로 달라져 보인다(실제로 이 문제로
+  // "아직도 3%로 뜬다"는 혼선이 있었음 - 서버는 이미 5%로 고쳐졌는데
+  // 화면 미리보기만 옛날 로직 그대로였음).
+  const MEDICAL_KEYWORDS_JS = [
+    "병원", "의원", "클리닉", "한의원", "한방", "치과", "약국", "정형외과",
+    "피부과", "이비인후과", "소아과", "산부인과", "안과", "내과", "외과",
+    "비뇨기과", "정신건강의학과", "신경과", "재활의학과", "성형외과",
+    "의료법인", "의료재단",
+  ];
+  const MEDICAL_TRIGGER_KEYWORDS_JS = new Set(["병원", "의료", "약국"]);
+  function isMedicalMerchantJs(merchant) {
+    if (!merchant) return false;
+    const lower = merchant.toLowerCase();
+    return MEDICAL_KEYWORDS_JS.some((k) => merchant.includes(k)) || lower.includes("pharmacy");
+  }
+
   function matchRateTable(merchant, rateTableJson, defaultPercent, defaultCap, hour) {
     if (!rateTableJson || !merchant) return [defaultPercent, defaultCap, "", false];
     let rows;
@@ -2527,7 +2547,8 @@
         (k.startsWith("-") ? negKws : posKws).push(k.startsWith("-") ? k.slice(1) : k);
       }
       if (negKws.some((k) => merchantLower.includes(k))) continue;
-      if (posKws.some((k) => merchantLower.includes(k))) {
+      const medicalFallback = posKws.some((k) => MEDICAL_TRIGGER_KEYWORDS_JS.has(k)) && isMedicalMerchantJs(merchant);
+      if (posKws.some((k) => merchantLower.includes(k)) || medicalFallback) {
         if (startHour != null && endHour != null && hour != null && !(hour >= startHour && hour < endHour)) {
           return [0, 0, label, true];
         }
