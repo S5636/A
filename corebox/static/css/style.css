@@ -220,16 +220,20 @@ body { padding-bottom: 40px; }
 
 /* 칸 수가 많아지면(소득금액증명 세부 항목 등) 줄바꿈으로 찌그러뜨리지
    말고 가로 스크롤로 보여준다 - 숫자가 줄바꿈되면 표가 알아보기 힘들다.
-   스크롤바는 지저분해 보여서 숨기고(스와이프는 그대로 됨), 넘기는 건
-   화살표 없이 손가락으로 직접 한다. */
+   예전엔 스크롤바를 아예 숨겼는데(모바일 스와이프만 염두에 둔 디자인),
+   마우스로 쓰는 데스크톱 브라우저에선 스크롤 가능하다는 표시가 전혀
+   없어서 표가 그냥 "잘려서 안 보인다"고 오해하게 만들었다(실제로
+   지적받음) - 가늘게라도 항상 보이게 바꿔서 더 볼 내용이 있다는 걸
+   알 수 있게 한다.*/
 .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border-radius: var(--radius-lg);
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  scrollbar-width: thin;
 }
-.table-scroll::-webkit-scrollbar { display: none; }
+.table-scroll::-webkit-scrollbar { height: 8px; }
+.table-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+.table-scroll::-webkit-scrollbar-track { background: transparent; }
 table.agg-table {
   width: 100%;
   min-width: max-content;
