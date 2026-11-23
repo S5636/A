@@ -63,6 +63,7 @@ body { padding-bottom: 40px; }
 .app-logo { height: 26px; width: auto; flex-shrink: 0; }
 .app-wordmark { height: 26px; width: auto; flex-shrink: 0; }
 .app-subtitle { font-size: 11px; color: var(--text-muted); }
+.app-updated-at { font-size: 10px; color: var(--text-muted); opacity: 0.7; }
 
 .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 

@@ -310,9 +310,20 @@
     return m;
   }
 
+  function renderLastUpdatedAt() {
+    const el = document.getElementById("last-updated-at");
+    if (!el) return;
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mm = String(now.getMinutes()).padStart(2, "0");
+    const ss = String(now.getSeconds()).padStart(2, "0");
+    el.textContent = `업데이트 ${hh}:${mm}:${ss}`;
+  }
+
   function render() {
     const scrollX = window.scrollX;
     const scrollY = window.scrollY;
+    renderLastUpdatedAt();
     renderMonthBar();
     renderInbox();
     renderNoBenefit();
