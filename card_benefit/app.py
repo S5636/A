@@ -804,9 +804,44 @@ def serialize_trash(conn):
     ]
 
 
+def _auto_resolve_medical_inbox_items(conn):
+    """병원/약국 등 의료기관 결제는 카드 혜택 대상인 경우가 거의 없고,
+    이미 별도 "의료비(실손 청구)" 탭에서 가맹점명으로 따로 추적하고
+    있다(serialize_medical_expenses는 status와 상관없이 다 보여줌) -
+    그런데 "어떤 혜택에 쓴 결제인가요" 수동 분류 큐에는 그대로 남아있어서,
+    병원 갈 때마다 매번 "해당없음"을 손으로 눌러줘야 했다. 가맹점명으로
+    병원/약국이 확실하면 자동으로 "해당없음" 처리해서 그 큐에서 아예
+    뺀다(의료비 탭 추적은 그대로 유지됨)."""
+    rows = conn.execute(
+        "SELECT id, merchant, last4 FROM inbox_items "
+        "WHERE status = 'pending' AND deleted_at IS NULL AND merchant != ''"
+    ).fetchall()
+    if not rows:
+        return
+    medical_rows = [r for r in rows if is_medical_merchant(r["merchant"])]
+    if not medical_rows:
+        return
+    cards_with_code = conn.execute(
+        "SELECT id, last4 FROM cards WHERE last4 != '' AND closed = 0"
+    ).fetchall()
+    for r in medical_rows:
+        card_id = None
+        if r["last4"]:
+            for c in cards_with_code:
+                if card_codes_match(c["last4"], r["last4"]):
+                    card_id = c["id"]
+                    break
+        conn.execute(
+            "UPDATE inbox_items SET status = 'no_benefit', card_id = ?, benefit_id = NULL WHERE id = ?",
+            (card_id, r["id"]),
+        )
+    conn.commit()
+
+
 def serialize_full():
     conn = get_conn()
     try:
+        _auto_resolve_medical_inbox_items(conn)
         return {
             "cards": _serialize_cards(conn),
             "inbox": serialize_inbox(conn),
