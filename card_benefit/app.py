@@ -1221,6 +1221,17 @@ def _attach_match_info(conn, rows, fk_column):
     for r in rows:
         item = dict(r)
         item["payment_method"] = _resolve_payment_method(conn, r["card_id"], r["payment_method"])
+        # "내역"에 보이는 결제가 전월실적 합계에서 빠지는지(실적 제외
+        # 키워드에 걸리는지)를 같이 보여주기 위함 - card_diag 파일에서만
+        # 보이던 걸 화면에서도 바로 보이게. 연결된 카드가 없으면(결제수단
+        # 미등록 등) 실적 계산 자체가 그 카드 기준이 아니라서 표시 안 함.
+        perf_excluded_keywords = None
+        if r["card_id"]:
+            card_row = conn.execute(
+                "SELECT perf_excluded_keywords FROM cards WHERE id = ?", (r["card_id"],)
+            ).fetchone()
+            if card_row:
+                perf_excluded_keywords = card_row["perf_excluded_keywords"]
         history = conn.execute(
             f"""SELECT id, amount, merchant, occurred_at, last4, matched_card_label
                FROM inbox_items WHERE {fk_column} = ? ORDER BY occurred_at DESC""",
@@ -1237,6 +1248,9 @@ def _attach_match_info(conn, rows, fk_column):
                 # 실제 last4로 지금 바로 조회 - 등록된 카드가 아니라 알림에
                 # 실제로 찍힌 뒷자리라 안전함. 둘 다 없으면 빈칸(추측 금지).
                 "card_label": h["matched_card_label"] or card_label_for(h["last4"]) or None,
+                "is_perf_excluded": (
+                    bool(r["card_id"]) and is_performance_excluded(h["merchant"], perf_excluded_keywords)
+                ),
             }
             for h in history
         ]

@@ -429,7 +429,10 @@
       ? history.map((h) => `
           <div class="log-item">
             <span>${shortDate(h.occurred_at)} · ${h.merchant ? escapeHtml(h.merchant) + " " : ""}${fmt(h.amount)}원${h.card_label ? " · " + escapeHtml(h.card_label) : ""}</span>
-            <button class="unlink-match" data-inbox-id="${h.id}">해제</button>
+            <span class="log-item-right">
+              ${h.is_perf_excluded ? '<span class="perf-excluded-tag">실적 제외</span>' : ""}
+              <button class="unlink-match" data-inbox-id="${h.id}">해제</button>
+            </span>
           </div>
         `).join("")
       : `<div class="log-item"><span>매칭된 결제 내역 없음</span></div>`;

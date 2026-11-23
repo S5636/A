@@ -402,6 +402,8 @@ body { padding-bottom: 40px; }
 .log-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; font-size: 11.5px; color: var(--text-secondary); }
 .log-item span { min-width: 0; }
 .log-item button { border: none; background: none; color: var(--critical); cursor: pointer; font-size: 11.5px; white-space: nowrap; flex-shrink: 0; }
+.log-item-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.perf-excluded-tag { color: var(--critical); font-size: 10.5px; font-weight: 700; white-space: nowrap; }
 
 /* ---------- 받은 결제 알림 ---------- */
 .inbox-section { margin-bottom: 5px; }
