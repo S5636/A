@@ -560,7 +560,8 @@ def serialize_inbox(conn):
     ).fetchall()
     benefits_by_card = {}
     for b in conn.execute(
-        "SELECT id, card_id, name, merchant_keywords, calc_mode, always_doubled, rate_table FROM benefits"
+        "SELECT id, card_id, name, merchant_keywords, calc_mode, always_doubled, rate_table, "
+        "discount_percent, per_txn_cap FROM benefits"
     ):
         benefits_by_card.setdefault(b["card_id"], []).append(b)
 
@@ -676,6 +677,8 @@ def serialize_inbox(conn):
                 # 키워드가 아예 없는(=구분할 필요 없이 통째로 2배인) 혜택에만 쓴다.
                 matched_doubled = bool(matched_benefit["always_doubled"]) and not matched_benefit["merchant_keywords"]
 
+        is_online = bool(r["raw_text"] and "온라인" in r["raw_text"])
+
         if not matched_benefit and card:
             # 더모아형(change_under_1000)이 아니라, "기본적립"처럼 특정 업종
             # 구분 없이 전체 결제에 그냥 적용되는 percent_discount 혜택도 있다
@@ -688,8 +691,23 @@ def serialize_inbox(conn):
                 if b["calc_mode"] == "percent_discount" and not b["merchant_keywords"]
             ]
             if percent_catch_all:
-                matched_benefit = percent_catch_all[0]
-                matched_doubled = False
+                candidate = percent_catch_all[0]
+                # "잡화:다이소" 온라인 결제처럼, 실제 저장 땐 _apply_calc_mode가
+                # 0%로 억제하는데도 여기(알림 목록 추천 배지)는 그 사정을 몰라서
+                # "🎯 Daily Plan"이 마치 확정된 혜택인 것처럼 계속 떴다(사용자
+                # 지적: "다이소 혜택 안 빠졌잖아"). 추천 배지도 똑같은 온라인
+                # 억제를 먼저 확인해서, 실제로 0%가 될 게 뻔하면 아예 추천하지
+                # 않는다(배지 없이 "해당없음" 그대로 두는 게 덜 헷갈림).
+                suppressed = False
+                if candidate["rate_table"]:
+                    _, _, _, _, _, rt_category = match_rate_table(
+                        r["merchant"], candidate["rate_table"], candidate["discount_percent"], candidate["per_txn_cap"]
+                    )
+                    if rt_category == "잡화" and is_online:
+                        suppressed = True
+                if not suppressed:
+                    matched_benefit = candidate
+                    matched_doubled = False
 
         # 카드사 엑셀의 "이용구분"에 해외/할부라고 명시돼 있으면, 가맹점명으로
         # 유추할 필요 없이 그 자체로 확실한 신호이므로 더모아형(잔돈 적립) 혜택은
@@ -721,7 +739,7 @@ def serialize_inbox(conn):
             # Plan+의 "잡화" 10%는 오프라인 전용) - 알림 원문에 "온라인"이
             # 찍혀 있으면 이 결제가 온라인임을 화면 미리보기/저장 양쪽에서
             # 알 수 있게 표시만 해둔다(실제 억제는 _apply_calc_mode에서).
-            "is_online": bool(r["raw_text"] and "온라인" in r["raw_text"]),
+            "is_online": is_online,
         })
     return items
 
