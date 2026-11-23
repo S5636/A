@@ -317,7 +317,12 @@
     const hh = String(now.getHours()).padStart(2, "0");
     const mm = String(now.getMinutes()).padStart(2, "0");
     const ss = String(now.getSeconds()).padStart(2, "0");
-    el.textContent = `업데이트 ${hh}:${mm}:${ss}`;
+    // "화면 갱신"은 브라우저가 서버 데이터를 다시 받아온 시각이고,
+    // "서버 코드"는 지금 돌고 있는 서버 프로세스가 그 코드로 언제
+    // 떴는지(=자동 업데이트로 재시작된 마지막 시각)다. 수정해서 올린 게
+    // 실제로 반영됐는지 캡처 없이 바로 확인할 수 있게 같이 보여준다.
+    const serverAt = state.server_started_at ? ` · 서버 코드 ${state.server_started_at}` : "";
+    el.textContent = `화면 갱신 ${hh}:${mm}:${ss}${serverAt}`;
   }
 
   function render() {

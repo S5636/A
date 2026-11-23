@@ -56,6 +56,14 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 app = Flask(__name__)
 
+# 서버 프로세스가 이 코드로 떠서 돌기 시작한 시각 - launcher.py의
+# self_update가 새 코드를 받으면 서버를 재시작시키므로, 사실상 "지금
+# 실행 중인 코드가 언제 적용됐는지"를 보여준다. 코드를 고쳐서 올려도
+# 자동 업데이트가 몇 분 주기로만 확인해서 반영까지 시차가 있는데,
+# 화면에서 이 시각을 보면 "내가 보낸 수정이 실제로 반영됐는지"를 매번
+# 캡처 주고받지 않고 바로 확인할 수 있다.
+_SERVER_STARTED_AT = datetime.now()
+
 
 def _log_stock_fetch_error(code, source, error, raw=""):
     """시세 가져오기 실패 원인을 앱 폴더의 stock_fetch_error.log에 남긴다.
@@ -811,6 +819,7 @@ def serialize_full():
             "stocks": serialize_stocks(conn),
             "trash": serialize_trash(conn),
             "unassigned_attachments": serialize_unassigned_attachments(conn),
+            "server_started_at": _SERVER_STARTED_AT.strftime("%m/%d %H:%M:%S"),
         }
     finally:
         conn.close()
