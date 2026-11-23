@@ -715,6 +715,13 @@ def serialize_inbox(conn):
             "matched_benefit_name": matched_benefit["name"] if matched_benefit else None,
             "matched_benefit_doubled": matched_doubled,
             "is_foreign": is_foreign,
+            # "잡화:다이소"처럼 매장 할인 키워드가 온라인몰 결제에도 그대로
+            # 걸리는 경우가 있는데, 실제로는 매장 결제만 그 할인 대상이고
+            # 온라인은 대상이 아닌 카드가 있다(사용자 확인: 신한 Discount
+            # Plan+의 "잡화" 10%는 오프라인 전용) - 알림 원문에 "온라인"이
+            # 찍혀 있으면 이 결제가 온라인임을 화면 미리보기/저장 양쪽에서
+            # 알 수 있게 표시만 해둔다(실제 억제는 _apply_calc_mode에서).
+            "is_online": bool(r["raw_text"] and "온라인" in r["raw_text"]),
         })
     return items
 
@@ -4225,7 +4232,7 @@ def _perf_spend_for_card(conn, card, ref_date=None):
     )
 
 
-def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, merchant="", used_at="", category_override="", occurred_at="", exclude_log_id=None):
+def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, merchant="", used_at="", category_override="", occurred_at="", exclude_log_id=None, is_online=False):
     """혜택의 calc_mode에 따라 입력값(결제금액 등)을 실제 한도 소진값으로 변환한다.
 
     "raw"는 입력값을 그대로 쓰고, 나머지는 결제금액을 자동으로 실제
@@ -4318,6 +4325,16 @@ def _apply_calc_mode(conn, benefit_id, benefit, raw_value, doubled, memo, mercha
                 category = "해외"
                 if time_blocked:
                     block_reason = block_reason or "시간외 결제"
+            # "잡화:다이소"처럼 매장 할인 키워드가 온라인몰 결제명에도 그대로
+            # 걸리는데, 실제론 매장 결제만 그 할인 대상이고 온라인은 대상이
+            # 아닌 카드가 있다(사용자 확인: 신한 Discount Plan+의 "잡화"
+            # 10%는 오프라인 전용, 온라인은 해당없음). 알림 원문에 "온라인"이
+            # 찍혀 있으면 "잡화" 매칭을 취소하고 기본 할인율로 되돌린다.
+            if category == "잡화" and is_online:
+                percent, cap, daily_limit, monthly_limit, monthly_point_cap = (
+                    effective_discount_percent, benefit["per_txn_cap"], 0, 0, 0
+                )
+                category = ""
         capped_note = ""
         if category and used_at and not block_reason:
             if daily_limit and _category_usage_count(conn, benefit_id, category, used_at, before_log_id=exclude_log_id) >= daily_limit:
@@ -4718,7 +4735,7 @@ def assign_inbox_item(item_id):
 
         used_value, memo, rate_category, error = _apply_calc_mode(
             conn, benefit_id, benefit, raw_value, bool(data.get("doubled")), memo, merchant, used_at, category_override,
-            item["occurred_at"] or ""
+            item["occurred_at"] or "", is_online=bool(item["raw_text"] and "온라인" in item["raw_text"])
         )
         if error:
             return jsonify({"error": error}), 400

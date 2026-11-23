@@ -2818,6 +2818,17 @@
           label = "해외";
           timeBlocked = ft;
         }
+        // "잡화:다이소"처럼 매장 할인 키워드가 온라인몰 결제에도 그대로
+        // 걸리는데, 신한 Discount Plan+의 "잡화" 10%는 오프라인 전용이라
+        // 온라인은 해당없음(사용자 확인) - 서버와 같은 로직으로 알림 원문에
+        // "온라인"이 있으면 미리보기도 기본 할인율로 되돌린다(저장 시
+        // 서버도 똑같이 처리하므로 미리보기와 실제 결과가 어긋나지 않음).
+        if (label === "잡화" && assigningItem && assigningItem.is_online) {
+          percent = benefit.discount_percent;
+          cap = benefit.per_txn_cap;
+          label = "";
+          timeBlocked = false;
+        }
       }
       if (timeBlocked) {
         preview.style.display = "block";
