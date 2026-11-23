@@ -691,23 +691,30 @@ def serialize_inbox(conn):
                 if b["calc_mode"] == "percent_discount" and not b["merchant_keywords"]
             ]
             if percent_catch_all:
-                candidate = percent_catch_all[0]
-                # "잡화:다이소" 온라인 결제처럼, 실제 저장 땐 _apply_calc_mode가
-                # 0%로 억제하는데도 여기(알림 목록 추천 배지)는 그 사정을 몰라서
-                # "🎯 Daily Plan"이 마치 확정된 혜택인 것처럼 계속 떴다(사용자
-                # 지적: "다이소 혜택 안 빠졌잖아"). 추천 배지도 똑같은 온라인
-                # 억제를 먼저 확인해서, 실제로 0%가 될 게 뻔하면 아예 추천하지
-                # 않는다(배지 없이 "해당없음" 그대로 두는 게 덜 헷갈림).
-                suppressed = False
-                if candidate["rate_table"]:
-                    _, _, _, _, _, rt_category = match_rate_table(
-                        r["merchant"], candidate["rate_table"], candidate["discount_percent"], candidate["per_txn_cap"]
-                    )
-                    if rt_category == "잡화" and is_online:
-                        suppressed = True
-                if not suppressed:
-                    matched_benefit = candidate
-                    matched_doubled = False
+                matched_benefit = percent_catch_all[0]
+                matched_doubled = False
+
+        # "잡화:다이소" 온라인 결제처럼, 실제 저장 땐 _apply_calc_mode가 0%로
+        # 억제하는데도 알림 목록 추천 배지는 그 사정을 몰라서 "🎯 Daily
+        # Plan"이 마치 확정된 혜택인 것처럼 계속 떴다(사용자 지적: "다이소
+        # 혜택 안 빠졌잖아"). 처음엔 catch-all(키워드 없는 혜택) 분기
+        # 안에만 이 확인을 넣었는데, matched_benefit이 그보다 앞선 분기
+        # (merchant_keywords 직접 매칭 등)에서 이미 정해지는 경우엔 전혀
+        # 안 타서 똑같은 문제가 또 재현됐다 - matched_benefit이 최종적으로
+        # 뭘로 정해지든 상관없이, percent_discount+rate_table이면 여기서
+        # 한 번 더 확인해서 억제한다.
+        if (
+            matched_benefit
+            and matched_benefit["calc_mode"] == "percent_discount"
+            and matched_benefit["rate_table"]
+        ):
+            _, _, _, _, _, rt_category = match_rate_table(
+                r["merchant"], matched_benefit["rate_table"],
+                matched_benefit["discount_percent"], matched_benefit["per_txn_cap"],
+            )
+            if rt_category == "잡화" and is_online:
+                matched_benefit = None
+                matched_doubled = False
 
         # 카드사 엑셀의 "이용구분"에 해외/할부라고 명시돼 있으면, 가맹점명으로
         # 유추할 필요 없이 그 자체로 확실한 신호이므로 더모아형(잔돈 적립) 혜택은
