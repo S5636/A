@@ -2611,7 +2611,10 @@ def _serialize_cards(conn):
                 "remaining": remaining,
                 "percent": percent,
                 "over_limit": (not unlimited) and remaining < 0,
-                "logs": [dict(l) for l in logs],
+                "logs": [
+                    {**dict(l), "is_perf_excluded": is_performance_excluded(l["merchant"], card["perf_excluded_keywords"])}
+                    for l in logs
+                ],
             })
 
         result.append({

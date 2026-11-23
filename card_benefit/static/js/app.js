@@ -808,7 +808,10 @@
           return `
           <div class="log-item">
             <span>${dateLabel} · ${merchantLabel}${valuePart}</span>
-            <button class="delete-log" data-id="${l.id}">배정 취소</button>
+            <span class="log-item-right">
+              ${l.is_perf_excluded ? '<span class="perf-excluded-tag">실적 제외</span>' : ""}
+              <button class="delete-log" data-id="${l.id}">배정 취소</button>
+            </span>
           </div>`;
         }).join("")
       : `<div class="log-item"><span>이번 기간 사용 기록 없음</span></div>`;
