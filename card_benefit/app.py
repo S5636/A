@@ -5104,7 +5104,10 @@ def _build_loan_diag_text():
                 if not text:
                     diag_lines.append("    -> 글자를 하나도 못 뽑음(추출 실패)")
                 else:
-                    preview = text.replace("\n", " / ")[:150]
+                    # 150자였을 땐 "대출과목 계좌번호 이율..." 표 헤더
+                    # 직후, 실제 계좌번호 숫자가 나오기도 전에 잘려서
+                    # 왜 매칭이 안 되는지 미리보기만으론 알 수가 없었다.
+                    preview = text.replace("\n", " / ")[:1000]
                     diag_lines.append(f"    -> 뽑은 글자 미리보기: {preview}")
                     matched = _match_loans_for_attachment_text(loans, text)
                     matched_names = ", ".join(l["name"] for l in matched) or "(없음)"
