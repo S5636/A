@@ -1649,9 +1649,13 @@
     loanDiagStatus.textContent = "불러오는 중...";
     loanDiagModal.classList.add("open");
     try {
-      const resp = await fetch("/api/export/loan-diag.txt");
-      const text = await resp.text();
-      loanDiagText.value = text;
+      // .txt로 끝나는 경로는 일부 브라우저(특히 Tailscale의 암호화 안 된
+      // http://100.x.x.x 주소)가 파일 다운로드로 보고 fetch 단계에서부터
+      // 막아버리는 게 실제로 재현됨(Content-Disposition을 떼어내도 그대로
+      // 실패) - 확장자 없는 JSON API로 바꿔서 이 문제를 피한다.
+      const resp = await fetch("/api/loans/diag");
+      const data = await resp.json();
+      loanDiagText.value = data.text || "";
       loanDiagStatus.textContent = resp.ok ? "" : `불러오기 실패 (status ${resp.status})`;
     } catch (e) {
       loanDiagStatus.textContent = `불러오기 실패: ${e}`;

@@ -4961,8 +4961,7 @@ def export_all_cards_diag():
     return resp
 
 
-@app.route("/api/export/loan-diag.txt")
-def export_loan_diag():
+def _build_loan_diag_text():
     """"왜 이 금액이 이 대출로 잡혔냐"를 캡처 주고받으며 하나씩 확인하는
     대신, 버튼 한 번으로 등록된 대출 전부의 매칭 조건(월상환액/결제일/
     출금계좌)이랑 최근 상환 내역을 한 파일로 바로 받게 한다. loan_payments
@@ -5036,15 +5035,29 @@ def export_loan_diag():
         text = "\n".join(diag_lines) + "\n" + ("\n" + "=" * 60 + "\n\n").join(blocks)
     finally:
         conn.close()
+    return text
 
-    resp = make_response(text)
+
+@app.route("/api/export/loan-diag.txt")
+def export_loan_diag():
+    resp = make_response(_build_loan_diag_text())
     resp.headers["Content-Type"] = "text/plain; charset=utf-8"
-    # 예전엔 Content-Disposition: attachment로 내려줬는데, 일부 임베디드
-    # 브라우저(원격접속 앱 내장 브라우저 등)가 이 헤더를 보고 fetch() 요청까지
-    # 통째로 다운로드 매니저로 가로채버려서 "매칭 진단" 모달의 fetch가
-    # "TypeError: Failed to fetch"로 그대로 실패하는 게 실제로 재현됨.
-    # 지금은 화면 안 fetch로만 쓰므로 attachment 헤더를 아예 안 붙인다.
+    resp.headers["Content-Disposition"] = 'attachment; filename="loan_diag.txt"'
     return resp
+
+
+@app.route("/api/loans/diag")
+def loan_diag_json():
+    """위와 같은 내용을 JSON으로 돌려준다 - 화면 안 "매칭 진단" 모달이 이걸
+    쓴다. launcher.py의 _ensure_tailscale_https 주석에 이미 적혀있듯, 일부
+    브라우저(특히 Tailscale의 http://100.x.x.x 같은 암호화 안 된 주소)는
+    .txt 확장자나 파일 다운로드로 보이는 응답 자체를 fetch 단계에서부터
+    차단해버린다(실제로 "TypeError: Failed to fetch"로 재현됨, 위
+    export_loan_diag의 Content-Disposition을 떼어내도 여전히 실패했음 -
+    .txt 확장자가 붙은 경로 자체를 보고 차단하는 것으로 보임). 확장자도
+    없고 attachment 헤더도 없는 평범한 JSON API로 내려주면 이 차단을
+    피할 수 있다."""
+    return jsonify({"text": _build_loan_diag_text()})
 
 
 @app.route("/api/export/usage.xlsx")
