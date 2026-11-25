@@ -249,18 +249,19 @@ def _find_smallest_text_match(win, title, log=None, descendants=None):
 
 
 def _find_real_confirm_button(win, descendants=None, log=None):
-    """'확인' 버튼만 정확히 찾는다 - 몇 주째 반복된 "다팔자가 바쁜 상태"
-    사고의 진짜 원인이 바로 이 검색의 예전 버전이었다(사용자가 콘솔 로그로
-    실제 확인). '확인'을 "포함하는" 아무 글자나 찾다 보니, 사이드바의 깨진
-    이미지 아이콘에 달린 접근성 설명 "누락된 이미지 설명을 확인하려면
-    컨텍스트 메뉴를 여세요."까지 걸려버렸다(위치 18,227 / 크기 24x25 -
-    진짜 팝업이 아니라 전혀 상관없는 작은 아이콘). 이 아이콘은 절대 안
-    사라지는 고정 UI라서, 완료 팝업을 기다리는 루프가 매번 이것만
-    "발견"하고 클릭하길 반복하며 300초를 통째로 날렸다 - 다팔자가 바쁜 게
-    아니라 우리가 엉뚱한 아이콘을 계속 잘못 누르고 있었던 것이다. 그래서
-    '확인'을 "포함"하는 건 받아주되, 실제 완료/실패 팝업의 '확인' 버튼은
-    지금까지 전부 정확히 '확인' 두 글자뿐이었으니, 긴 문장(설명/안내
-    텍스트)은 제외한다."""
+    """완료/실패 팝업의 '확인' 버튼만 정확히 찾는다 - 반드시 텍스트가 정확히
+    '확인' 두 글자인 것만 받는다(부분/포함 일치는 전혀 허용하지 않음).
+
+    예전엔 '확인'을 "포함하는" 글자를 허용했는데, 실제로 두 가지 사고가
+    있었다: (1) 사이드바 깨진 이미지 아이콘의 설명 "누락된 이미지 설명을
+    확인하려면 컨텍스트 메뉴를 여세요." (2) 그 다음엔 길이 제한(6자 이하)을
+    추가했는데도 '주문관리' 탭의 진짜 툴바 버튼 "주문확인"(4글자, 주문을
+    실제로 확인 처리하는 기능 버튼)이 걸려서, 완료 팝업도 아닌 그 버튼을
+    몇 분간 계속 눌러댔다(사용자가 콘솔 로그로 실제 확인 - 주문 데이터에
+    실제 영향을 줬을 수 있는 심각한 오동작). 부분 일치는 매번 예상 못한
+    실제 UI 요소를 걸러낼 길이/문구 기준을 또 찾아야 하는 악순환이라,
+    아예 정확히 '확인'인 것만 받는 걸로 확정한다 - 지금까지 확인된 모든
+    진짜 완료/실패 팝업의 버튼은 전부 정확히 '확인' 두 글자였다."""
     try:
         if descendants is None:
             descendants = win.descendants()
@@ -270,10 +271,7 @@ def _find_real_confirm_button(win, descendants=None, log=None):
                 t = (c.window_text() or '').strip()
             except Exception:
                 continue
-            if not t or '확인' not in t:
-                continue
-            if t != '확인' and len(t) > 6:
-                # "...확인하려면..." 같은 긴 설명 문장 - 버튼이 아니라서 제외.
+            if t != '확인':
                 continue
             try:
                 if not c.is_visible():
@@ -284,11 +282,11 @@ def _find_real_confirm_button(win, descendants=None, log=None):
                 continue
             if area <= 0:
                 continue
-            candidates.append((0 if t == '확인' else 1, area, c))
+            candidates.append((area, c))
         if not candidates:
             return None
-        candidates.sort(key=lambda x: (x[0], x[1]))
-        return candidates[0][2]
+        candidates.sort(key=lambda x: x[0])
+        return candidates[0][1]
     except Exception as e:
         if log is not None:
             log(f"'확인' 버튼 탐색 중 오류(무시하고 계속 진행): {type(e).__name__}: {e}")
