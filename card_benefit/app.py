@@ -1900,15 +1900,32 @@ def _try_auto_match_loan_account_text(conn, inbox_id):
     return True
 
 
+def _loan_amount_matches(loan, amount):
+    """월상환액이 고정인 원리금균등/원금균등 대출은 등록값과 1원까지
+    맞아야 진짜 그 결제가 맞는다고 본다. 반대로 만기일시상환(이자만
+    내는 대출)은 매달 실제 이자가 일수·잔액 변동에 따라 조금씩 달라져서,
+    등록해둔 월상환액은 처음 등록할 때의 추정치일 뿐이다 - 1원까지
+    맞아야 한다면 사실상 영원히 자동매칭이 안 되는 걸 실제로 확인함
+    (메리츠화재 보험계약대출: 등록값 7,000원인데 실제 알림은 7,326원).
+    등록값의 20%까지는 같은 결제로 본다(그 이상 벌어지면 다른 대출과
+    헷갈릴 위험이 커서 더는 안 봐줌)."""
+    if not loan["monthly_payment"]:
+        return False
+    diff = abs(loan["monthly_payment"] - amount)
+    if (loan["repayment_type"] or "") == "만기일시상환":
+        return diff <= max(1, loan["monthly_payment"] * 0.2)
+    return diff < 1
+
+
 def _try_auto_match_loan_amount_date(conn, inbox_id):
     """출금계좌 텍스트로 특정이 안 될 때 쓰는, 좀 더 느슨한 매칭이다.
-    금액이 그 대출 월 상환액과 똑같고(1원 오차 없이), 알림 발생일이 그
-    대출 상환일 근처(상환일이 주말이면 은행이 앞뒤로 날짜를 당기거나
-    미룰 수 있다고 보고 최대 3일까지)인 대출이 정확히 하나뿐이면 매칭.
-    이건 보험료 등 다른 계좌 자동이체랑 금액이 우연히 겹칠 위험이 있어서,
-    호출하는 쪽에서 반드시 고정지출/보험 매칭을 먼저 시도해 실패한
-    경우에만(더 구체적인 가맹점명 매칭이 없을 때만) 마지막 수단으로
-    불러야 한다."""
+    금액이 그 대출 월 상환액과 (거의) 같고(_loan_amount_matches), 알림
+    발생일이 그 대출 상환일 근처(상환일이 주말이면 은행이 앞뒤로 날짜를
+    당기거나 미룰 수 있다고 보고 최대 3일까지)인 대출이 정확히 하나뿐이면
+    매칭. 이건 보험료 등 다른 계좌 자동이체랑 금액이 우연히 겹칠 위험이
+    있어서, 호출하는 쪽에서 반드시 고정지출/보험 매칭을 먼저 시도해
+    실패한 경우에만(더 구체적인 가맹점명 매칭이 없을 때만) 마지막
+    수단으로 불러야 한다."""
     item = conn.execute(
         "SELECT * FROM inbox_items WHERE id = ? AND status = 'pending'", (inbox_id,)
     ).fetchone()
@@ -1926,7 +1943,7 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
     loans = conn.execute("SELECT * FROM loans").fetchall()
     matches = [
         l for l in loans
-        if l["monthly_payment"] and abs(l["monthly_payment"] - item["amount"]) < 1
+        if _loan_amount_matches(l, item["amount"])
         and _nearest_payment_day_gap(l["payment_day"], occurred_date) <= 3
     ]
     if len(matches) != 1:
