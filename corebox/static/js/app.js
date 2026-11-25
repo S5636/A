@@ -15,6 +15,41 @@
     }[c]));
   }
 
+  // "사업자등록증명원이 사업자등록증으로 잘못 분류되는 거 아직도 안
+  // 고쳐졌냐"는 지적에, 캡처만으론 어느 서류가 실제로 증명원인지 구분이
+  // 안 돼서(둘 다 그냥 "사업자등록증"으로만 보임) 직접 확인할 수 있게
+  // 만든 진단 버튼 - fetch로 받아서 화면 안 모달에 바로 보여준다(파일
+  // 다운로드 방식은 일부 브라우저가 막는 걸 card_benefit 쪽에서 이미
+  // 겪어서 처음부터 이 방식으로 만듦).
+  const bizCertDiagModal = document.getElementById("biz-cert-diag-modal");
+  const bizCertDiagStatus = document.getElementById("biz-cert-diag-status");
+  const bizCertDiagText = document.getElementById("biz-cert-diag-text");
+  document.getElementById("btn-biz-cert-diag").addEventListener("click", async () => {
+    bizCertDiagText.value = "";
+    bizCertDiagStatus.textContent = "불러오는 중...";
+    bizCertDiagModal.classList.add("open");
+    try {
+      const resp = await fetch("/api/diag/business-cert");
+      const data = await resp.json();
+      bizCertDiagText.value = data.text || "";
+      bizCertDiagStatus.textContent = resp.ok ? "" : `불러오기 실패 (status ${resp.status})`;
+    } catch (e) {
+      bizCertDiagStatus.textContent = `불러오기 실패: ${e}`;
+    }
+  });
+  document.getElementById("biz-cert-diag-close").addEventListener("click", () => {
+    bizCertDiagModal.classList.remove("open");
+  });
+  document.getElementById("biz-cert-diag-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(bizCertDiagText.value);
+      bizCertDiagStatus.textContent = "복사했습니다.";
+    } catch (e) {
+      bizCertDiagText.select();
+      bizCertDiagStatus.textContent = "자동 복사가 안 돼서 텍스트를 선택해뒀습니다 - 직접 복사해주세요.";
+    }
+  });
+
   // 문서 종류마다 실제로 있는 항목만 표/목록에 보여준다 - 부가세에는
   // 수입금액/소득금액 자체가 없고, 소득금액증명에는 "과세표준액" 같은
   // 게 없다. 목록에 없는 종류는 기본값(금액 하나)으로 처리.
