@@ -717,6 +717,12 @@ _ISSUER_HINTS = [
 ]
 _NOISE_KEYWORDS = ["승인", "일시불", "할부", "카드", "누적", "이용", "잔액", "한도", "포인트"]
 _MERCHANT_LABEL_RE = re.compile(r"^가맹점(?:명)?\s*[:：]\s*(.+)$")
+# 폰 알림 문구에 승인번호가 찍혀 있으면(카드사/알림 형식에 따라 있을 수도
+# 없을 수도 있음) 뽑아둔다 - 승인번호가 있으면 나중에 "매출취소" 알림이
+# 왔을 때 금액+카드 뒷자리만으로 추측하는 대신(후보가 둘 이상이면 아예
+# 못 잡음) 정확히 그 결제 하나만 확실하게 취소 처리할 수 있다(엑셀
+# 업로드 때 쓰는 _resolve_cancellation과 같은 방식).
+_APPROVAL_NO_RE = re.compile(r"승인\s*번호\s*[:：]?\s*(\d{4,})")
 # 카카오톡 "알림톡 도착" 캡쳐를 OCR로 읽으면, 실제 알림 내용 밑에 카톡
 # 자체의 메시지 전송시각("오후 11:05")까지 한 줄로 같이 찍혀서 들어오는
 # 경우가 있다. 이게 알림 본문 중 제일 마지막 줄이 되면 "마지막 줄 = 가맹점"
@@ -784,7 +790,13 @@ def parse_notification(text: str) -> dict:
             merchant = line
             break
 
-    return {"amount": amount, "last4": last4, "issuer": issuer, "merchant": annotate_merchant(merchant)}
+    approval_match = _APPROVAL_NO_RE.search(text)
+    approval_no = approval_match.group(1) if approval_match else ""
+
+    return {
+        "amount": amount, "last4": last4, "issuer": issuer,
+        "merchant": annotate_merchant(merchant), "approval_no": approval_no,
+    }
 
 
 # 카드 이용내역서의 "가맹점명"은 실제 서비스명이 아니라 결제대행(PG)/운영사

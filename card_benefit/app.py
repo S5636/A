@@ -4620,23 +4620,60 @@ def regenerate_inbox_token():
     return jsonify({"token": token, "webhook_path": "/api/inbox"})
 
 
-def _try_cancel_matching_notification(conn, last4, amount, exclude_id=None):
-    """폰 알림으로 "매출취소" 같은 문구가 그대로 들어온 경우, 승인번호가 없어서
-    엑셀 업로드 때 쓰는 _resolve_cancellation(승인번호 매칭)을 못 쓴다. 대신
-    카드+금액이 똑같은, 아직 취소 처리 안 된 알림이 딱 하나뿐일 때만 그걸
-    취소 처리한다(후보가 여러 개면 어느 걸 취소해야 할지 애매해서 손대지
-    않고 사용자가 직접 판단하게 둔다 - 엉뚱한 결제를 잘못 취소시키는 것보다
-    안전).
+def _cancel_inbox_item(conn, target_id):
+    """알림 하나를 실제로 취소 처리한다(공용) - 이미 혜택이 배정돼 적립
+    기록(usage_logs)까지 있었다면 그 기록도 같이 지운다(안 지우면 취소된
+    결제로 받은 적립이 그대로 남아있게 됨). 지운 뒤에는 그 혜택의 다른
+    기록들이 그동안 이 기록 때문에 월 한도 계산이 왜곡됐을 수 있어서(예:
+    이 기록이 한도를 먼저 차지해서 뒤에 들어온 멀쩡한 결제가 "한도초과"로
+    깎였을 수 있음) 다시 계산까지 돌린다."""
+    affected_benefit_ids = {
+        row["benefit_id"] for row in
+        conn.execute("SELECT benefit_id FROM usage_logs WHERE source_inbox_id = ?", (target_id,)).fetchall()
+    }
+    conn.execute("DELETE FROM usage_logs WHERE source_inbox_id = ?", (target_id,))
+    conn.execute(
+        "UPDATE inbox_items SET status = 'cancelled', recurring_id = NULL, insurance_id = NULL, "
+        "card_id = NULL, benefit_id = NULL WHERE id = ?",
+        (target_id,),
+    )
+    for benefit_id in affected_benefit_ids:
+        _recalculate_benefit_logs(conn, benefit_id)
+
+
+def _try_cancel_by_approval_no(conn, approval_no, exclude_id=None):
+    """엑셀 업로드 때 쓰는 _resolve_cancellation과 같은 방식 - 승인번호가
+    똑같은(아직 취소 처리 안 된) 알림을 정확히 찾아서 취소 처리한다.
+    승인번호가 있으면 이 방법이 금액+카드 뒷자리 추측보다 훨씬 확실하다
+    (후보가 여러 개라 추측으로는 아예 못 잡는 경우도 승인번호면 바로
+    잡힘)."""
+    if not approval_no:
+        return False
+    target = conn.execute(
+        "SELECT id FROM inbox_items WHERE approval_no = ? AND status != 'cancelled' AND deleted_at IS NULL",
+        (approval_no,),
+    ).fetchone()
+    if not target or target["id"] == exclude_id:
+        return False
+    _cancel_inbox_item(conn, target["id"])
+    return True
+
+
+def _try_cancel_matching_notification(conn, last4, amount, exclude_id=None, approval_no=""):
+    """폰 알림으로 "매출취소" 같은 문구가 그대로 들어온 경우, 승인번호가
+    있으면(카드사 알림 형식에 따라 찍혀 있을 수 있음) 그걸로 정확히
+    매칭하고(_try_cancel_by_approval_no), 승인번호가 없거나 그걸로 못
+    찾으면 카드+금액이 똑같은, 아직 취소 처리 안 된 알림이 딱 하나뿐일
+    때만 그걸 취소 처리한다(후보가 여러 개면 어느 걸 취소해야 할지
+    애매해서 손대지 않고 사용자가 직접 판단하게 둔다 - 엉뚱한 결제를
+    잘못 취소시키는 것보다 안전).
 
     취소는 당일이 아니라 보름/한달 뒤에 들어오는 경우가 흔해서(그 사이에
     이미 혜택 배정까지 끝났을 가능성이 높음), "아직 미처리(pending)"인
     것만 찾으면 거의 못 찾는다. 그래서 상태 상관없이(배정 완료/혜택없음
-    처리된 것 포함) 찾되, 이미 혜택이 배정돼 적립 기록(usage_logs)까지
-    있었다면 그 기록도 같이 지운다 - 안 지우면 취소된 결제로 받은 적립이
-    그대로 남아있게 된다. 지운 뒤에는 그 혜택의 다른 기록들이 그동안 이
-    기록 때문에 월 한도 계산이 왜곡됐을 수 있어서(예: 이 기록이 한도를
-    먼저 차지해서 뒤에 들어온 멀쩡한 결제가 "한도초과"로 깎였을 수 있음)
-    다시 계산까지 돌린다."""
+    처리된 것 포함) 찾는다."""
+    if _try_cancel_by_approval_no(conn, approval_no, exclude_id=exclude_id):
+        return True
     if not amount:
         return False
     candidates = conn.execute(
@@ -4650,19 +4687,7 @@ def _try_cancel_matching_notification(conn, last4, amount, exclude_id=None):
     ]
     if len(matches) != 1:
         return False
-    target = matches[0]
-    affected_benefit_ids = {
-        row["benefit_id"] for row in
-        conn.execute("SELECT benefit_id FROM usage_logs WHERE source_inbox_id = ?", (target["id"],)).fetchall()
-    }
-    conn.execute("DELETE FROM usage_logs WHERE source_inbox_id = ?", (target["id"],))
-    conn.execute(
-        "UPDATE inbox_items SET status = 'cancelled', recurring_id = NULL, insurance_id = NULL, "
-        "card_id = NULL, benefit_id = NULL WHERE id = ?",
-        (target["id"],),
-    )
-    for benefit_id in affected_benefit_ids:
-        _recalculate_benefit_logs(conn, benefit_id)
+    _cancel_inbox_item(conn, matches[0]["id"])
     return True
 
 
@@ -4698,17 +4723,21 @@ def create_inbox_item():
         ).fetchone()
         if not recent_dup:
             # "매출취소"/"승인취소"처럼 취소 자체를 알리는 문자는 혜택배정
-            # 큐에 멀쩡한 결제인 것처럼 쌓이면 안 된다. 승인번호가 없는
-            # 폰 알림이라 엑셀 업로드 때처럼 승인번호로는 못 엮고, 카드+금액이
-            # 똑같은 미처리 알림이 하나뿐이면 그걸 취소 처리한다.
+            # 큐에 멀쩡한 결제인 것처럼 쌓이면 안 된다. 알림 문구에 승인번호가
+            # 찍혀 있으면(카드사 알림 형식에 따라 다름) 그걸로 정확히 매칭하고,
+            # 없으면 카드+금액이 똑같은 미처리 알림이 하나뿐일 때만 그걸
+            # 취소 처리한다.
             is_cancel = is_cancelled_status(text)
             if is_cancel:
-                _try_cancel_matching_notification(conn, parsed["last4"], parsed["amount"])
+                _try_cancel_matching_notification(
+                    conn, parsed["last4"], parsed["amount"], approval_no=parsed["approval_no"]
+                )
             cur = conn.execute(
-                """INSERT INTO inbox_items (raw_text, amount, last4, issuer, merchant, occurred_at, source, status)
-                   VALUES (?, ?, ?, ?, ?, ?, 'notification', ?)""",
+                """INSERT INTO inbox_items
+                   (raw_text, amount, last4, issuer, merchant, occurred_at, approval_no, source, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'notification', ?)""",
                 (text, parsed["amount"], parsed["last4"], parsed["issuer"], parsed["merchant"], occurred_at,
-                 "cancelled" if is_cancel else "pending"),
+                 parsed["approval_no"], "cancelled" if is_cancel else "pending"),
             )
             if not is_cancel:
                 _try_auto_match_all(conn, cur.lastrowid)
@@ -4862,7 +4891,9 @@ def resolve_cancellation_notice(item_id):
         item = conn.execute("SELECT * FROM inbox_items WHERE id = ?", (item_id,)).fetchone()
         if not item:
             return jsonify({"error": "알림을 찾을 수 없습니다."}), 404
-        matched = _try_cancel_matching_notification(conn, item["last4"], item["amount"], exclude_id=item_id)
+        matched = _try_cancel_matching_notification(
+            conn, item["last4"], item["amount"], exclude_id=item_id, approval_no=item["approval_no"]
+        )
         conn.execute(
             "UPDATE inbox_items SET status = 'cancelled', recurring_id = NULL, insurance_id = NULL, "
             "card_id = NULL, benefit_id = NULL WHERE id = ?",
