@@ -285,6 +285,22 @@ def _extract_signing_date(text):
     return None
 
 
+def _extract_date_before_tax_office(text):
+    """납세증명서는 스캔본이 아니라 pypdf로 바로 글자가 뽑히는 PDF인데도
+    (실제 파일로 확인함), 발급일(세무서장 직인 옆 "2026년 11월 22일")이
+    본문보다 PDF 내부 텍스트 순서상 먼저 추출되고 "증명서의 유효기간"
+    (2026년 12월 22일, 발급일과 다른 날짜)이 그 뒤에 나온다 - 그래서
+    "문서에서 제일 마지막 날짜"로 찾는 _extract_issue_date_fallback을
+    쓰면 유효기간을 발급일로 잘못 집는다(실제로 재현됨: 등록일이
+    261222로 찍힘). "세무서장" 글자 바로 앞 날짜만 찾아서 피한다 -
+    이 서류는 어느 세무서가 발급하든 끝에 항상 "OO세무서장"으로
+    끝나는 서명란이 있다."""
+    m = re.search(_DATE_RE + r"[^0-9]{0,20}세\s*무\s*서\s*장", text)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return None
+
+
 def _extract_period(text):
     """"과세기간 2022.01.01 ~ 2022.06.30"처럼 기간 전체(시작~끝)가 있으면
     그대로 "YYYY-MM-DD~YYYY-MM-DD"로 돌려준다. 날짜가 하나만 걸리면(기간이
@@ -709,6 +725,8 @@ def _classify_document(filename, text):
                 year, period = vat_period
     if not issue_date and doc_type == "종합소득세 신고서":
         issue_date = _extract_signing_date(text)
+    if not issue_date and doc_type == "납세증명서":
+        issue_date = _extract_date_before_tax_office(text)
     if not issue_date:
         used_dates = set(period.split("~")) if period else set()
         issue_date = _extract_issue_date_fallback(text, used_dates)
@@ -740,10 +758,18 @@ def _classify_document(filename, text):
     else:
         amount = _extract_generic_amount(doc_type, text)
     period_label = _period_label_from_date(period.split("~")[0]) if period else (f"{str(year)[2:]}년" if year else "")
+    display_doc_type = doc_type
+    if doc_type == "납세증명서":
+        # doc_type/category는 지방세·국세 구분 없이 "납세증명서"로
+        # 통일했지만(요청대로 같은 집계/그룹으로 묶임), 목록에서 두 개가
+        # 같은 이름으로 보이면 뭐가 뭔지 구분이 안 된다 - 서류명에만
+        # "지방세"/"국세"를 구분해서 붙인다.
+        compact = re.sub(r"\s+", "", text)
+        display_doc_type = "지방세 납세증명서" if ("지방세납세증명" in compact or "지방세남세증명" in compact) else "국세 납세증명서"
     if doc_type and year:
-        name = f"{year} {doc_type}"
+        name = f"{year} {display_doc_type}"
     elif doc_type:
-        name = doc_type
+        name = display_doc_type
     else:
         name = os.path.splitext(filename)[0]
     return [{
@@ -1772,6 +1798,44 @@ def _backfill_national_tax_cert_misclassified():
         conn.close()
 
 
+def _backfill_tax_cert_name_and_date():
+    """이미 doc_type="납세증명서"로 제대로 분류된 서류라도, 서류명에
+    지방세/국세 구분이 없거나(예전엔 doc_type 이름 자체가 구분이었음)
+    발급일이 "증명서의 유효기간"(발급일과 다른 날짜)을 잘못 집은 채
+    저장돼 있을 수 있다(실제로 국세완납증명서가 261222로 찍힌 걸 확인함
+    - 진짜 발급일은 261122). 서류명/발급일 계산 로직을 고친 뒤, 이미
+    이 doc_type으로 등록된 서류 전부를 다시 계산해서 바로잡는다."""
+    conn = models.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, file_name, original_name, name, issue_date, extracted_text FROM documents "
+            "WHERE doc_type = '납세증명서' AND file_name != ''"
+        ).fetchall()
+        for row in rows:
+            path = os.path.join(models.UPLOAD_DIR, row["file_name"])
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception:
+                continue
+            fname = row["original_name"] or row["file_name"]
+            text = _get_or_extract_document_text(conn, row["id"], row["extracted_text"], fname, file_bytes)
+            if not text:
+                continue
+            detected_list = _classify_document(fname, text)
+            if not detected_list or detected_list[0]["doc_type"] != "납세증명서":
+                continue
+            d = detected_list[0]
+            if d["name"] != row["name"] or d["issue_date"] != row["issue_date"]:
+                conn.execute(
+                    "UPDATE documents SET name=?, issue_date=? WHERE id=?",
+                    (d["name"], d["issue_date"], row["id"]),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _merge_local_tax_cert_doc_type():
     """"지방세 납세증명서"를 "국세 납세증명서"랑 같은 카테고리로 묶어달라는
     요청으로 doc_type 이름을 "납세증명서"로 통일함 - 혹시 이름이 바뀌기
@@ -1790,6 +1854,7 @@ def _merge_local_tax_cert_doc_type():
 
 _backfill_national_tax_cert_misclassified()
 _merge_local_tax_cert_doc_type()
+_backfill_tax_cert_name_and_date()
 _reclassify_blank_documents()
 _backfill_income_breakdown()
 _backfill_wage_payers()
