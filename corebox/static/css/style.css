@@ -59,10 +59,11 @@ body { padding-bottom: 40px; }
   background: var(--bg);
 }
 
-.app-title { display: flex; align-items: center; gap: 8px; }
+.app-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .app-logo { height: 26px; width: auto; flex-shrink: 0; }
 .app-wordmark { height: 26px; width: auto; flex-shrink: 0; }
-.app-subtitle { font-size: 11px; color: var(--text-muted); }
+.app-subtitle { font-size: 11px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
+.app-updated-at { font-size: 10px; color: var(--text-muted); opacity: 0.7; white-space: nowrap; flex-shrink: 0; }
 
 .header-actions { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin: 4px 0; }
 .header-actions label { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; }

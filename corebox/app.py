@@ -18,6 +18,12 @@ import models
 app = Flask(__name__)
 models.init_db()
 
+# 서버 프로세스가 이 코드로 떠서 돌기 시작한 시각 - launcher.py의
+# self_update가 새 코드를 받으면 서버를 재시작시키므로, 사실상 "지금
+# 실행 중인 코드가 언제 적용됐는지"를 보여준다(CORESYNC와 같은 위치에
+# 같은 방식으로 표시).
+_SERVER_STARTED_AT = datetime.datetime.now()
+
 _IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic")
 _OCR_READER = None
 
@@ -867,6 +873,7 @@ def api_full():
             "documents": serialize_documents(conn),
             "aggregate": serialize_aggregate(conn),
             "salary": serialize_salary(conn),
+            "server_started_at": _SERVER_STARTED_AT.strftime("%m/%d %H:%M:%S"),
         })
     finally:
         conn.close()

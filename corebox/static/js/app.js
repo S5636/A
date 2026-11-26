@@ -120,7 +120,19 @@
     render();
   }
 
+  function renderLastUpdatedAt() {
+    const el = document.getElementById("last-updated-at");
+    if (!el) return;
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mm = String(now.getMinutes()).padStart(2, "0");
+    const ss = String(now.getSeconds()).padStart(2, "0");
+    const serverAt = state.server_started_at ? ` · 서버 코드 ${state.server_started_at}` : "";
+    el.textContent = `화면 갱신 ${hh}:${mm}:${ss}${serverAt}`;
+  }
+
   function render() {
+    renderLastUpdatedAt();
     renderAggregate();
     renderDocuments();
     renderSalary();
