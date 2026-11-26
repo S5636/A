@@ -151,6 +151,15 @@ def _get_or_extract_document_text(conn, doc_id, cached_text, filename, file_byte
 # (화면에 보여줄 이름, 집계/분류에 쓸 doc_type, 글자에서 찾을 키워드들) -
 # 사용자가 실제로 보관하려는 서류 종류가 늘어나면 여기 추가하면 된다.
 _DOC_TYPE_RULES = [
+    # "국세완납증명서"가 "부가가치세 신고서"로 잘못 분류돼 있던 걸 실제
+    # 등록된 서류로 직접 확인함(문서 id=66) - 납세증명서 본문에 세법
+    # 조항을 나열하며 "「부가가치세법」..."처럼 "부가가치세"란 단어가
+    # 그냥 섞여 들어가 있어서, "부가가치세 신고서" 규칙(["부가가치세",
+    # "부가세"])이 먼저 걸려버렸다. "납세증명서"는 실제 등록된 다른
+    # 모든 서류 종류(소득금액증명/부가가치세 신고서·과세표준증명/
+    # 종합소득세 신고서 등)의 원문에 전혀 안 나오는 특정적인 단어라,
+    # 다른 규칙과 절대 안 겹치도록 제일 먼저 확인한다.
+    ("납세증명서", ["지방세납세증명", "지방세남세증명", "납세증명서"]),
     # "소득금액증명" 안에도 "종합소득세 신고(결정·경정) 현황"이라는
     # 소제목이 들어있어서, 종합소득세 신고서보다 반드시 먼저 확인해야
     # 소득금액증명이 종합소득세 신고서로 잘못 분류되지 않는다.
@@ -166,14 +175,6 @@ _DOC_TYPE_RULES = [
     ("통신판매업 신고증", ["통신판매업"]),
     ("건강기능식품 영업 신고증", ["건강기능식품"]),
     ("의료기기 판매업 신고증", ["의료기기"]),
-    # "납세증명서" - 지자체 발급 지방세 납세증명(신청)서와 국세청/홈택스
-    # 발급 국세 납세증명서는 발급 주체만 다를 뿐 "세금 안 밀렸다"를
-    # 증명하는 같은 성격의 서류라, 구분 없이 같은 카테고리로 묶는다(요청
-    # 반영). 지방세 쪽은 OCR이 "납"을 "남"으로 잘못 읽는 경우가 실제로
-    # 확인돼("지방세 남세증명") 오독 철자도 같이 넣고, "납세증명서"는
-    # 두 서류 제목에 공통으로 들어가는 핵심 단어라 국세 쪽(아직 실제
-    # 샘플로 문구를 확인 못함)의 기본 인식 키워드로 쓴다.
-    ("납세증명서", ["지방세납세증명", "지방세남세증명", "납세증명서"]),
     # "통장사본"이라는 글자는 사람이 그 서류를 부르는 말일 뿐 실제
     # 통장 사진/스캔본 안에는 안 찍혀있다(실물 통장 사진으로 직접
     # 확인함) - 대신 어느 은행 통장이든 공통으로 있는 "예금주"/
@@ -1729,6 +1730,48 @@ def _backfill_business_cert_misclassified():
         conn.close()
 
 
+def _backfill_national_tax_cert_misclassified():
+    """국세완납증명서(납세증명서) 본문에 세법 조항을 나열하며 "부가가치세"
+    란 단어가 섞여 들어가 있어서, "납세증명서" 규칙을 제일 앞으로
+    옮기기 전까진 "부가가치세 신고서"/"부가가치세 과세표준증명"/
+    "종합소득세 신고서"(전부 느슨한 단어 하나로 찾는 규칙) 중 하나로
+    먼저 잘못 분류될 수 있었다(실제로 "2026 부가가치세 신고서"로
+    등록된 문서가 사실 국세완납증명서였음 - 문서 id=66). 이 세 가지로
+    분류된 서류만 다시 분류해서, 실제로는 납세증명서였던 것만
+    바로잡는다(진짜 그 서류들은 다시 돌려도 그대로라 안전)."""
+    conn = models.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, file_name, original_name, extracted_text FROM documents "
+            "WHERE doc_type IN ('부가가치세 신고서', '부가가치세 과세표준증명', '종합소득세 신고서') "
+            "AND file_name != ''"
+        ).fetchall()
+        for row in rows:
+            path = os.path.join(models.UPLOAD_DIR, row["file_name"])
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception:
+                continue
+            fname = row["original_name"] or row["file_name"]
+            text = _get_or_extract_document_text(conn, row["id"], row["extracted_text"], fname, file_bytes)
+            if not text:
+                continue
+            detected_list = _classify_document(fname, text)
+            if not detected_list or detected_list[0]["doc_type"] != "납세증명서":
+                continue
+            d = detected_list[0]
+            conn.execute(
+                "UPDATE documents SET name=?, category=?, year=?, doc_type=?, period=?, period_label=?, "
+                "amount=?, tax_amount=?, issue_date=? WHERE id=?",
+                (d["name"], d["category"], d["year"], d["doc_type"], d["period"], d["period_label"],
+                 d["amount"], d["tax_amount"], d["issue_date"], row["id"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _merge_local_tax_cert_doc_type():
     """"지방세 납세증명서"를 "국세 납세증명서"랑 같은 카테고리로 묶어달라는
     요청으로 doc_type 이름을 "납세증명서"로 통일함 - 혹시 이름이 바뀌기
@@ -1745,6 +1788,7 @@ def _merge_local_tax_cert_doc_type():
         conn.close()
 
 
+_backfill_national_tax_cert_misclassified()
 _merge_local_tax_cert_doc_type()
 _reclassify_blank_documents()
 _backfill_income_breakdown()
