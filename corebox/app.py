@@ -31,31 +31,85 @@ def _get_ocr_reader():
     return _OCR_READER
 
 
-def _extract_text_from_image(file_bytes):
-    from PIL import Image
+def _reraise_if_fatal(e):
+    """진짜 중단 신호(Ctrl+C, 인터프리터 종료)만 그대로 올리고 나머지는
+    여기서 처리한다. pypdf가 내부에서 쓰는 cryptography 패키지의 러스트
+    바인딩이 깨져 있으면(예: _cffi_backend 미설치) import만 해도 보통의
+    Exception이 아니라 BaseException만 상속한 pyo3_runtime.PanicException이
+    터지는 걸 card_benefit 쪽에서 실제로 겪어서 확인함 - 평범한 except
+    Exception으로는 못 잡혀서 전체 업로드가 그대로 죽는다. 여기도 같은
+    문제가 날 수 있어 처음부터 같이 막아둔다."""
+    if isinstance(e, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+        raise e
+
+
+def _ocr_pil_image(pil_img):
     import numpy as np
-    try:
-        pil_img = Image.open(BytesIO(file_bytes)).convert("RGB")
-        target_width = 1600
-        if pil_img.width < target_width:
-            scale = target_width / pil_img.width
-            resample = getattr(Image, "Resampling", Image).LANCZOS
-            pil_img = pil_img.resize((target_width, round(pil_img.height * scale)), resample)
-        ocr_input = np.array(pil_img)
-    except Exception:
-        ocr_input = file_bytes
+    from PIL import Image
+    target_width = 1600
+    if pil_img.width < target_width:
+        scale = target_width / pil_img.width
+        resample = getattr(Image, "Resampling", Image).LANCZOS
+        pil_img = pil_img.resize((target_width, round(pil_img.height * scale)), resample)
     reader = _get_ocr_reader()
-    detections = reader.readtext(ocr_input, paragraph=False)
+    detections = reader.readtext(np.array(pil_img), paragraph=False)
     return "\n".join(d[1] for d in detections)
 
 
+def _extract_text_from_image(file_bytes):
+    from PIL import Image
+    try:
+        pil_img = Image.open(BytesIO(file_bytes)).convert("RGB")
+        return _ocr_pil_image(pil_img)
+    except BaseException as e:
+        _reraise_if_fatal(e)
+        reader = _get_ocr_reader()
+        detections = reader.readtext(file_bytes, paragraph=False)
+        return "\n".join(d[1] for d in detections)
+
+
 def _extract_text_from_pdf(file_bytes):
-    """pypdf로 PDF 안에 글자정보가 있는 페이지의 텍스트를 뽑는다. 스캔해서
-    이미지로만 들어있는 PDF(글자정보 자체가 없음)는 이 방법으로 못 읽는다 -
-    그런 경우 빈 문자열이 나오고, 서류명/분류를 사용자가 직접 채워야 한다."""
-    from pypdf import PdfReader
-    reader = PdfReader(BytesIO(file_bytes))
-    return "\n".join((page.extract_text() or "") for page in reader.pages)
+    """pypdf로 먼저 글자정보를 뽑아보고(실제 글자가 들어있는 PDF), 하나도
+    안 나오면(국세청/지자체 발급 증명서처럼 스캔·이미지로만 들어있는
+    PDF가 실제로 많음 - "지방세 납세증명서"로 직접 확인됨) 페이지를
+    그림으로 바꿔서 OCR로 다시 읽는다. pypdf 시도와 OCR fallback을
+    서로 독립적인 try로 나눠서, 한쪽이 깨져도(페이지 하나가 pypdf 버전
+    문제로 예외를 내도) 다른 쪽은 계속 시도되게 한다(card_benefit에서
+    이미 겪은 구조적 버그와 같은 걸 처음부터 피함)."""
+    text = ""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(BytesIO(file_bytes))
+        parts = []
+        for page in reader.pages:
+            try:
+                parts.append(page.extract_text() or "")
+            except BaseException as e:
+                _reraise_if_fatal(e)
+                continue
+        text = "\n".join(parts)
+    except BaseException as e:
+        _reraise_if_fatal(e)
+        text = ""
+    if text.strip():
+        return text
+    try:
+        import fitz
+        from PIL import Image
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        parts = []
+        for page in doc:
+            try:
+                pix = page.get_pixmap(dpi=200)
+                pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                parts.append(_ocr_pil_image(pil_img))
+            except BaseException as e:
+                _reraise_if_fatal(e)
+                continue
+        return "\n".join(parts)
+    except BaseException as e:
+        _reraise_if_fatal(e)
+        return ""
 
 
 def _extract_text_from_file(filename, file_bytes):
