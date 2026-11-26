@@ -933,11 +933,20 @@ def create_document_auto():
         # 내용이 완전히 똑같은 파일이 이미 등록돼 있으면(같은 파일 실수로
         # 두 번 올림) 또 등록해서 집계가 중복으로 합산되는 걸 막는다.
         dup = conn.execute(
-            "SELECT name FROM documents WHERE file_hash = ? LIMIT 1", (file_hash,)
+            "SELECT name, original_name FROM documents WHERE file_hash = ? LIMIT 1", (file_hash,)
         ).fetchone()
         if dup:
+            # SHA-256으로 파일 내용 전체를 비교하는 거라(이름이나 분류
+            # 결과가 아니라) 이 메시지가 뜨면 두 파일이 바이트까지
+            # 완전히 같다는 뜻 - 분류가 이상해서가 아니라 실제로 똑같은
+            # 파일이 이미 등록돼 있다는 것. 등록된 파일이 "원래 어떤
+            # 파일명으로 올라왔었는지" 같이 보여줘서, 지금 올리려는
+            # 파일과 실제로 같은 파일인지 사용자가 바로 비교할 수 있게 한다.
+            dup_desc = f"\"{dup['name']}\""
+            if dup['original_name']:
+                dup_desc += f" / 등록 당시 파일명: {dup['original_name']}"
             return jsonify({
-                "error": f"이미 등록된 파일입니다 (\"{dup['name']}\"). 다른 파일이면 다시 확인해주세요."
+                "error": f"이미 등록된 파일입니다 ({dup_desc}). 다른 파일이면 다시 확인해주세요."
             }), 409
 
         text = _extract_text_from_file(uploaded.filename, file_bytes)
