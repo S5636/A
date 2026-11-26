@@ -1158,18 +1158,21 @@ def download_document(doc_id):
 @app.route("/api/diag/business-cert")
 def diag_business_cert():
     """"사업자등록증명원이 사업자등록증으로 잘못 분류되는 거 아직도 안
-    고쳐졌냐"는 지적에, 캡처로는 어느 서류가 실제로 증명원인지 알 수가
-    없어서(이름이 둘 다 "사업자등록증"으로만 보임) 직접 확인할 수 있게
-    만든 진단 - "사업자등록증"으로 분류된 서류 전부를 원본 파일에서 다시
-    글자를 뽑아, 그 미리보기와 지금 분류 로직이 실제로 뭘로 판단하는지를
-    그대로 보여준다. 코드가 맞는지 추측하지 않고 실제 저장된 파일로
-    바로 확인한다."""
+    고쳐졌냐"/"지방세납세증명서가 왜 자꾸 기타로 빠지냐" 같은 지적에,
+    캡처로는 서류 원문을 알 수가 없어서(이름이 같거나, 기타 그룹엔 분류
+    실패 이유가 전혀 안 보임) 직접 확인할 수 있게 만든 진단 - 사업자
+    등록증으로 분류된 서류(증명원 오분류 확인용) + doc_type이 아예 빈
+    서류(= "기타" 그룹에 빠진, 분류 자체가 실패한 서류) 전부를 원본
+    파일에서 다시 글자를 뽑아, 그 미리보기와 지금 분류 로직이 실제로
+    뭘로 판단하는지를 그대로 보여준다. 코드가 맞는지 추측하지 않고
+    실제 저장된 파일로 바로 확인한다."""
     conn = models.get_conn()
     try:
         rows = conn.execute(
-            "SELECT id, file_name, original_name, name FROM documents WHERE doc_type = '사업자등록증'"
+            "SELECT id, file_name, original_name, name FROM documents "
+            "WHERE doc_type = '사업자등록증' OR doc_type = '' OR doc_type IS NULL"
         ).fetchall()
-        lines = ["[사업자등록증 분류 진단]"]
+        lines = ["[서류 분류 진단 - 사업자등록증/미분류(기타) 전체]"]
         for row in rows:
             lines.append(f"문서 id={row['id']} 이름={row['name']} 파일={row['original_name'] or row['file_name']}")
             if not row["file_name"]:
@@ -1186,7 +1189,7 @@ def diag_business_cert():
             if not text:
                 lines.append("  -> 글자를 하나도 못 뽑음(스캔 품질 등)")
                 continue
-            preview = re.sub(r"\s+", " ", text).strip()[:300]
+            preview = re.sub(r"\s+", " ", text).strip()[:800]
             current = _classify_text(text)
             lines.append(f"  -> 글자 미리보기: {preview}")
             lines.append(f"  -> 지금 분류 로직 기준 판정: {current or '(분류 안 됨)'}")
