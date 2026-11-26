@@ -1925,7 +1925,19 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
     매칭. 이건 보험료 등 다른 계좌 자동이체랑 금액이 우연히 겹칠 위험이
     있어서, 호출하는 쪽에서 반드시 고정지출/보험 매칭을 먼저 시도해
     실패한 경우에만(더 구체적인 가맹점명 매칭이 없을 때만) 마지막
-    수단으로 불러야 한다."""
+    수단으로 불러야 한다.
+
+    금액 허용오차를 20%로 넓힌 뒤(만기일시상환 대출 실제 이자가 매달
+    변동하는 문제 때문), "메리츠화재 보험계약대출"(월상환액 7,000원)에서
+    실제로 재현된 사고: 날짜+금액만 보니 그 좁은 구간(5,600~8,400원) 안에
+    우연히 들어오는 전혀 무관한 거래(주유소 카드결제, 계좌간 이체, 저금통
+    자동이체)까지 "대출 상환"으로 잘못 기록됨 - 둘 다 "통장"/"잔액" 같은
+    계좌 알림 특유의 단어는 쓰지만 실제 대출 이자/상환과는 무관했다.
+    대출 상환 알림은 실제로는 거의 항상 "이자"/"원금"/"원리금"/"상환" 중
+    하나를 포함하므로(메리츠화재이자/흥국융자이자/대출이자납입/
+    대출이자결산/이자상환/원금·이자 자동이체 - 진단 텍스트로 전부 직접
+    확인함), 이 단어가 하나도 없으면 아무리 금액+날짜가 맞아도 매칭하지
+    않는다."""
     item = conn.execute(
         "SELECT * FROM inbox_items WHERE id = ? AND status = 'pending'", (inbox_id,)
     ).fetchone()
@@ -1933,6 +1945,8 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
         return False
     text = f"{item['merchant'] or ''} {item['raw_text'] or ''}"
     if not any(k in text for k in ("통장", "계좌", "출금", "잔액")):
+        return False
+    if not any(k in text for k in ("이자", "원금", "원리금", "상환")):
         return False
     if _is_loan_reminder_text(text):
         return False
