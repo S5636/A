@@ -1170,24 +1170,27 @@ def download_document(doc_id):
 
 @app.route("/api/diag/business-cert")
 def diag_business_cert():
-    """"사업자등록증명원이 사업자등록증으로 잘못 분류되는 거 아직도 안
-    고쳐졌냐"/"지방세납세증명서가 왜 자꾸 기타로 빠지냐" 같은 지적에,
-    캡처로는 서류 원문을 알 수가 없어서(이름이 같거나, 기타 그룹엔 분류
-    실패 이유가 전혀 안 보임) 직접 확인할 수 있게 만든 진단 - 사업자
-    등록증으로 분류된 서류(증명원 오분류 확인용) + doc_type이 아예 빈
-    서류(= "기타" 그룹에 빠진, 분류 자체가 실패한 서류) 전부를 원본
-    파일에서 다시 글자를 뽑아, 그 미리보기와 지금 분류 로직이 실제로
-    뭘로 판단하는지를 그대로 보여준다. 코드가 맞는지 추측하지 않고
-    실제 저장된 파일로 바로 확인한다."""
+    """분류 오류 지적(증명원이 등록증으로, 지방세납세증명서가 기타로,
+    국세완납증명서가 부가가치세 신고서로 등)이 나올 때마다 "이 doc_type만
+    더 보여줘야 했네"를 한 번씩 또 겪어서, 처음부터 전체 서류를 다
+    보여주는 걸로 바꾼다 - 등록된 doc_type이 뭐든, 실제로는 그 서류가
+    다른 종류를 가리키는 키워드를 같이 담고 있을 수 있어서(국세완납증명서
+    안에 "부가가치세"란 단어가 세목 나열하듯 들어있어 부가가치세 신고서로
+    잘못 분류된 경우가 실제로 있었음) 특정 doc_type만 봐서는 못 잡는다.
+    전부 원본 파일에서 다시 글자를 뽑아, 미리보기와 지금 분류 로직이
+    실제로 뭘로 판단하는지를 그대로 보여준다. 코드가 맞는지 추측하지
+    않고 실제 저장된 파일로 바로 확인한다."""
     conn = models.get_conn()
     try:
         rows = conn.execute(
-            "SELECT id, file_name, original_name, name FROM documents "
-            "WHERE doc_type = '사업자등록증' OR doc_type = '' OR doc_type IS NULL"
+            "SELECT id, file_name, original_name, name, doc_type FROM documents ORDER BY id"
         ).fetchall()
-        lines = ["[서류 분류 진단 - 사업자등록증/미분류(기타) 전체]"]
+        lines = ["[서류 분류 진단 - 등록된 서류 전체]"]
         for row in rows:
-            lines.append(f"문서 id={row['id']} 이름={row['name']} 파일={row['original_name'] or row['file_name']}")
+            lines.append(
+                f"문서 id={row['id']} 이름={row['name']} 등록된 doc_type={row['doc_type'] or '(없음)'} "
+                f"파일={row['original_name'] or row['file_name']}"
+            )
             if not row["file_name"]:
                 lines.append("  -> 원본 파일 없음(수기 입력 등) - 다시 분류 불가")
                 continue
