@@ -6270,12 +6270,29 @@ def _fix_online_japhwa_overcredit():
         conn.close()
 
 
+def _retry_auto_match_all_pending():
+    """대출/고정지출/보험 탭의 "자동 매칭" 버튼을 직접 눌러야만 매칭
+    로직이 고쳐진 뒤의 기존 큐가 다시 시도됐다 - 메리츠화재 이자 알림이
+    매칭 로직을 고친 뒤에도 "큐에 이미 들어있던 건"이라 버튼을 누르기
+    전까진 계속 그대로 남아있었음(실제로 재현된 문제). 서버 시작 시
+    자동으로 한 번 돌려서, 버튼을 누르지 않아도 코드 수정이 기존 큐에
+    바로 반영되게 한다."""
+    conn = get_conn()
+    try:
+        _auto_match_all_pending(conn)
+    except BaseException as e:
+        _reraise_if_fatal(e)
+    finally:
+        conn.close()
+
+
 init_db()
 apply_startup_data_fixes()
 _revalidate_loan_attachments()
 _retry_unassigned_loan_attachments()
 _retry_medical_no_benefit_items()
 _fix_online_japhwa_overcredit()
+_retry_auto_match_all_pending()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
