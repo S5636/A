@@ -107,6 +107,12 @@ def init_db():
         # 종합소득세 신고서의 근로소득 지급자(회사)별 내역 - 회사 수가
         # 사람마다 다르니 JSON 배열(문자열)로 저장: [{"name":..,"income":..,"taxable":..}, ...]
         _ensure_column(conn, "documents", "income_sources", "income_sources TEXT DEFAULT ''")
+        # 스캔본 OCR은 파일 하나당 몇 초~몇십 초씩 걸릴 수 있어서, "서류
+        # 분류 진단"이 등록된 서류 전체를 매번 다시 OCR 돌리면 응답이
+        # 느려져 브라우저 쪽 요청이 타임아웃난다(card_benefit의 "매칭
+        # 진단"에서 실제로 같은 원인으로 재현됨) - 한 번 뽑은 글자는
+        # 캐시해서 재사용한다.
+        _ensure_column(conn, "documents", "extracted_text", "extracted_text TEXT DEFAULT ''")
 
         # 2026-11: 자동분류 로직이 아직 "발급일자"보다 "과세기간"을 우선
         # 보게 고쳐지기 전에 올린 "22년1기" 부가세 과세표준증명이 발급일자

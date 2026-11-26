@@ -130,6 +130,24 @@ def _extract_text_from_file(filename, file_bytes):
     return ""
 
 
+def _get_or_extract_document_text(conn, doc_id, cached_text, filename, file_bytes):
+    """이미 뽑아둔 글자가 있으면 그걸 그대로 쓰고, 없을 때만 실제로
+    추출한다(스캔본 OCR은 파일 하나당 몇 초~몇십 초씩 걸릴 수 있어서,
+    "서류 분류 진단"/서버 시작 시 재분류가 등록된 서류 전부를 매번 다시
+    OCR 돌리면 응답이 느려져 브라우저 요청이 타임아웃난다 - 실제로
+    "서류 분류 진단"이 "불러오는 중"에서 안 넘어가는 걸로 재현됨.
+    card_benefit의 "매칭 진단"에서 겪은 것과 같은 원인). 추출 결과가
+    비어있으면(실패) 캐시에 저장하지 않고 매번 다시 시도한다 - 그래야
+    나중에 OCR 설치 문제를 고치면 다음 호출에서 바로 다시 시도됨."""
+    if cached_text:
+        return cached_text
+    text = _extract_text_from_file(filename, file_bytes)
+    if text:
+        conn.execute("UPDATE documents SET extracted_text = ? WHERE id = ?", (text, doc_id))
+        conn.commit()
+    return text
+
+
 # (화면에 보여줄 이름, 집계/분류에 쓸 doc_type, 글자에서 찾을 키워드들) -
 # 사용자가 실제로 보관하려는 서류 종류가 늘어나면 여기 추가하면 된다.
 _DOC_TYPE_RULES = [
@@ -1091,11 +1109,16 @@ def update_document(doc_id):
             file_name = f"{uuid.uuid4().hex}{ext}"
             uploaded.save(os.path.join(models.UPLOAD_DIR, file_name))
 
+        # 파일을 새로 올렸으면 캐시해둔 추출 글자(extracted_text)도 비워야
+        # 한다 - 안 비우면 "서류 분류 진단" 등이 옛 파일 글자를 그대로
+        # 재사용해서, 새로 올린 파일 내용과 다른 판정을 보여주게 된다.
+        extracted_text = "" if (uploaded and uploaded.filename) else item["extracted_text"]
         conn.execute(
             """UPDATE documents SET name=?, category=?, year=?, doc_type=?, income_amount=?,
                taxable_income_amount=?, income_business=?, income_wage=?, income_other=?,
                taxable_business=?, taxable_wage=?, taxable_other=?, amount=?, tax_amount=?,
-               issue_date=?, period=?, period_label=?, file_name=?, original_name=?, memo=?
+               issue_date=?, period=?, period_label=?, file_name=?, original_name=?, memo=?,
+               extracted_text=?
                WHERE id=?""",
             (
                 name,
@@ -1118,6 +1141,7 @@ def update_document(doc_id):
                 file_name,
                 original_name,
                 (request.form.get("memo", item["memo"]) or "").strip(),
+                extracted_text,
                 doc_id,
             ),
         )
@@ -1183,7 +1207,7 @@ def diag_business_cert():
     conn = models.get_conn()
     try:
         rows = conn.execute(
-            "SELECT id, file_name, original_name, name, doc_type FROM documents ORDER BY id"
+            "SELECT id, file_name, original_name, name, doc_type, extracted_text FROM documents ORDER BY id"
         ).fetchall()
         lines = ["[서류 분류 진단 - 등록된 서류 전체]"]
         for row in rows:
@@ -1201,7 +1225,9 @@ def diag_business_cert():
             except Exception as e:
                 lines.append(f"  -> 파일을 못 읽음: {e}")
                 continue
-            text = _extract_text_from_file(row["original_name"] or row["file_name"], file_bytes)
+            text = _get_or_extract_document_text(
+                conn, row["id"], row["extracted_text"], row["original_name"] or row["file_name"], file_bytes
+            )
             if not text:
                 lines.append("  -> 글자를 하나도 못 뽑음(스캔 품질 등)")
                 continue
@@ -1403,7 +1429,7 @@ def _reclassify_blank_documents():
     conn = models.get_conn()
     try:
         rows = conn.execute(
-            "SELECT id, file_name, original_name FROM documents "
+            "SELECT id, file_name, original_name, extracted_text FROM documents "
             "WHERE (doc_type IS NULL OR doc_type = '') AND file_name != ''"
         ).fetchall()
         for row in rows:
@@ -1414,7 +1440,7 @@ def _reclassify_blank_documents():
             except Exception:
                 continue
             fname = row["original_name"] or row["file_name"]
-            text = _extract_text_from_file(fname, file_bytes)
+            text = _get_or_extract_document_text(conn, row["id"], row["extracted_text"], fname, file_bytes)
             if not text:
                 continue
             detected_list = _classify_document(fname, text)
@@ -1673,7 +1699,7 @@ def _backfill_business_cert_misclassified():
     conn = models.get_conn()
     try:
         rows = conn.execute(
-            "SELECT id, file_name, original_name, name FROM documents "
+            "SELECT id, file_name, original_name, name, extracted_text FROM documents "
             "WHERE doc_type = '사업자등록증' AND file_name != ''"
         ).fetchall()
         for row in rows:
@@ -1684,7 +1710,7 @@ def _backfill_business_cert_misclassified():
             except Exception:
                 continue
             fname = row["original_name"] or row["file_name"]
-            text = _extract_text_from_file(fname, file_bytes)
+            text = _get_or_extract_document_text(conn, row["id"], row["extracted_text"], fname, file_bytes)
             if not text:
                 continue
             detected_list = _classify_document(fname, text)
