@@ -1134,15 +1134,12 @@
     const logsOpen = openLogPanels.has(logKey);
     const percent = loan.percent_paid != null ? loan.percent_paid : 0;
     const isBullet = (loan.repayment_type || "").includes("만기일시");
-    const ddayText = loan.days_left != null
-      ? (loan.days_left >= 0 ? ` (D-${loan.days_left})` : ` (${fmt(Math.abs(loan.days_left))}일 지남)`)
-      : "";
     const balancePercentLabel = (!isBullet && loan.principal > 0) ? `${percent}% 상환` : "";
     const balanceValue = `${fmt(loan.current_balance)}/${fmt(loan.principal)}원`;
+    const rateText = loan.interest_rate ? `${loan.interest_rate}%` : "";
     const infoLine = [
-      loan.interest_rate ? `${loan.interest_rate}%` : "",
       loan.repayment_type ? escapeHtml(shortRepayType(loan.repayment_type)) : "",
-      loan.end_date ? `만기 ${shortDate(loan.end_date)}${ddayText}` : "",
+      loan.end_date ? `만기 ${shortDate(loan.end_date)}` : "",
       loan.withdrawal_account ? escapeHtml(loan.withdrawal_account) : "",
     ].filter(Boolean).join(" / ");
     const dueText = loan.due_this_month
@@ -1176,9 +1173,10 @@
 
     const attachKey = `loan-attach-${loan.id}`;
     const attachments = loan.attachments || [];
-    // 파일이 1개뿐이면 접었다 펼 필요 없이 그냥 항상 보여준다(삭제
-    // 버튼 누르려고 토글까지 할 필요 없게).
-    const attachOpen = openLogPanels.has(attachKey) || attachments.length === 1;
+    // 파일이 1개뿐이어도 무조건 펼쳐서 보여주면 카드마다 파일명이 항상
+    // 떠서 지저분하다는 지적을 받아, 개수와 무관하게 📎 버튼을 눌러야만
+    // 보이게 통일한다.
+    const attachOpen = openLogPanels.has(attachKey);
     const attachmentsHtml = attachments.length
       ? attachments.map((a) => `
           <div class="log-item">
@@ -1208,11 +1206,14 @@
         </div>
       </div>
       <div class="benefit-top">
-        <span class="benefit-name">
-          ${loan.due_this_month ? `<input type="checkbox" class="loan-paid-check" data-id="${loan.id}" ${loan.paid_this_month ? "checked" : ""}>` : ""}
-          당월 상환 금액
+        <span class="loan-rate-big">${rateText}</span>
+        <span class="benefit-remaining-wrap">
+          <span class="benefit-name">
+            ${loan.due_this_month ? `<input type="checkbox" class="loan-paid-check" data-id="${loan.id}" ${loan.paid_this_month ? "checked" : ""}>` : ""}
+            당월 상환 금액
+          </span>
+          <span class="benefit-remaining amount-accent">${dueText}</span>
         </span>
-        <span class="benefit-remaining amount-accent">${dueText}</span>
       </div>
       <div class="benefit-top">
         <span class="benefit-name" style="${balancePercentLabel ? "color:var(--neon-green);" : ""}">${balancePercentLabel}</span>
@@ -1228,10 +1229,7 @@
           ${amortRows.length ? `<button class="btn small toggle-loan-amort" data-id="${loan.id}">예상 상환표</button>` : ""}
         </div>
         <div class="benefit-buttons">
-          ${attachments.length === 1
-            ? `<a class="icon-btn" href="/api/loan-attachments/${attachments[0].id}/download" target="_blank" title="첨부파일 보기">📎</a>`
-            : `<button class="icon-btn toggle-loan-attachments" data-id="${loan.id}" title="첨부파일${attachments.length ? ` (${attachments.length})` : ""}">📎</button>`
-          }
+          <button class="icon-btn toggle-loan-attachments" data-id="${loan.id}" title="첨부파일${attachments.length ? ` (${attachments.length})` : ""}">📎</button>
           <button class="icon-btn edit-loan" data-id="${loan.id}" title="대출 수정">✏️</button>
           <button class="icon-btn delete-loan" data-id="${loan.id}" title="대출 삭제">🗑️</button>
         </div>
