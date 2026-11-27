@@ -1363,6 +1363,9 @@
       seen.add(v);
       result.push(v);
     }
+    // 대출 등록 순서 그대로 나오던 걸 가나다순으로 정렬 - 계좌가 많아지니
+    // 순서가 뒤죽박죽이라 원하는 값을 찾기 어렵다는 지적을 반영.
+    result.sort((a, b) => a.localeCompare(b, "ko"));
     return result;
   }
 
