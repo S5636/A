@@ -1942,12 +1942,16 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
     대출 상환 알림은 실제로는 거의 항상 "이자"/"원금"/"원리금"/"상환" 중
     하나를 포함하므로(메리츠화재이자/흥국융자이자/대출이자납입/
     대출이자결산/이자상환/원금·이자 자동이체 - 진단 텍스트로 전부 직접
-    확인함), 이 단어가 하나도 없으면 매칭하지 않는다. 다만 "신한할부금융
-    428,170원"처럼 그 네 단어가 전혀 없어도(실제로 재현됨) 알림 문구에
-    그 대출 이름의 고유한 단어(예: "할부금융")가 그대로 들어있으면 매칭을
-    허용한다 - 이미 금액+날짜로 대출 하나만 특정된 뒤에 거는 추가 확인일
-    뿐이라(여러 대출 중에서 이름으로 고르는 게 아님), "대출"/"신용"/
-    "사업자" 같은 흔한 말은 여기서도 신호로 안 쓴다(_LOAN_NAME_GENERIC_WORDS)."""
+    확인함), 이 단어가 하나도 없으면 아무리 금액+날짜가 맞아도 매칭하지
+    않는다.
+
+    (한때 이 네 단어가 없어도 "대출 이름의 단어가 알림에 그대로
+    있으면" 매칭을 허용하는 예외를 넣었다가 되돌림 - "할부금융"처럼
+    상품 유형을 가리키는 흔한 말은 신한/KB/롯데 등 전혀 다른 회사가
+    다 같이 쓰는 말이라, 예를 들어 KB할부금융 알림도 신한 대출에
+    잘못 매칭될 수 있는 구멍이었다. 이런 경우는 금액 허용오차로 풀 게
+    아니라, 알림에 찍히는 출금계좌 번호를 그 대출의 "출금계좌" 필드에
+    등록해서 _try_auto_match_loan_account_text로 확실하게 잡아야 한다.)"""
     item = conn.execute(
         "SELECT * FROM inbox_items WHERE id = ? AND status = 'pending'", (inbox_id,)
     ).fetchone()
@@ -1955,6 +1959,8 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
         return False
     text = f"{item['merchant'] or ''} {item['raw_text'] or ''}"
     if not any(k in text for k in ("통장", "계좌", "출금", "잔액")):
+        return False
+    if not any(k in text for k in ("이자", "원금", "원리금", "상환")):
         return False
     if _is_loan_reminder_text(text):
         return False
@@ -1970,15 +1976,7 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
     ]
     if len(matches) != 1:
         return False
-    loan = matches[0]
-    has_generic_keyword = any(k in text for k in ("이자", "원금", "원리금", "상환"))
-    name_words = re.findall(r"[가-힣A-Za-z0-9]{4,}", loan["name"] or "")
-    has_loan_name_hint = any(
-        w in text for w in name_words if w not in _LOAN_NAME_GENERIC_WORDS
-    )
-    if not (has_generic_keyword or has_loan_name_hint):
-        return False
-    _mark_loan_paid_from_inbox(conn, loan["id"], inbox_id, item["amount"])
+    _mark_loan_paid_from_inbox(conn, matches[0]["id"], inbox_id, item["amount"])
     return True
 
 
