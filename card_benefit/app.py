@@ -1942,15 +1942,22 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
     대출 상환 알림은 실제로는 거의 항상 "이자"/"원금"/"원리금"/"상환" 중
     하나를 포함하므로(메리츠화재이자/흥국융자이자/대출이자납입/
     대출이자결산/이자상환/원금·이자 자동이체 - 진단 텍스트로 전부 직접
-    확인함), 이 단어가 하나도 없으면 매칭하지 않는다. 다만 "신한할부금융
-    428,170원"처럼 그 네 단어가 전혀 없어도(실제로 재현됨), 대출 이름의
-    기관명(앞 2글자 - "신한카드"면 "신한")이 알림 문구에 그대로 있으면
-    매칭을 허용한다 - "할부금융"(상품 유형, 회사마다 똑같이 쓰는 말이라
-    위험하다고 지적받음) 같은 상품명 단어가 아니라 기관명 앞 2글자만
-    본다. 이미 금액+날짜로 대출 하나만 특정된 뒤에 거는 추가 확인이라,
-    "KB할부금융" 알림이 이 "신한" 대출과 섞일 일은 없다(기관명 앞
-    2글자가 다르면 안 걸림) - "대출"/"신용"/"사업자" 같은 흔한 말은
-    기관명 후보에서 아예 제외한다(_LOAN_NAME_GENERIC_WORDS)."""
+    확인함), 이 단어가 하나도 없으면 매칭하지 않는다.
+
+    다만 "신한할부금융 428,170원"처럼 그 네 단어가 전혀 없어도(실제로
+    재현됨) 매칭을 허용해야 하는 경우가 있다 - 이때 "대출 이름의 기관명
+    (앞 2글자)만 알림에 있으면 허용"하는 식으로 한 번 짰다가 지적받고
+    바로 되돌림: 이 사용자가 실제로 "신한카드" 신용카드도 따로 쓰고
+    있어서(실제 카드결제 알림이 "신한카드(6982)승인..." 식으로 옴), 같은
+    기관명 "신한"이 이 대출이랑도 겹치고 그 신한카드의 "카드대금 결제
+    출금" 알림(이것도 "[출금] ...원 신한카드... 잔액..." 식으로 올 수
+    있음)이랑도 겹쳐서, 기관명 2글자 하나만으로는 전혀 무관한 신한카드
+    대금결제를 이 대출 상환으로 잘못 매칭시킬 위험이 그대로 있었다.
+    그래서 기관명 2글자만으론 안 되고, "할부금융"/"캐피탈"/"여신전문"/
+    "대부" 같은 - 카드결제·카드대금결제완 전혀 안 겹치는, 제2금융권
+    대출기관 특유의 업종명이 "같이" 있을 때만("신한" + "할부금융"처럼
+    둘 다 있어야) 허용한다. 일반 카드결제는 "할부"만 쓰지 이 업종명
+    자체는 절대 안 쓴다."""
     item = conn.execute(
         "SELECT * FROM inbox_items WHERE id = ? AND status = 'pending'", (inbox_id,)
     ).fetchone()
@@ -1979,7 +1986,11 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
         w for w in re.findall(r"[가-힣A-Za-z0-9]{4,}", loan["name"] or "")
         if w not in _LOAN_NAME_GENERIC_WORDS
     ]
-    has_institution_hint = bool(institution_tokens) and institution_tokens[0][:2] in text
+    has_institution_hint = (
+        bool(institution_tokens)
+        and institution_tokens[0][:2] in text
+        and any(k in text for k in ("할부금융", "캐피탈", "여신전문", "대부"))
+    )
     if not (has_generic_keyword or has_institution_hint):
         return False
     _mark_loan_paid_from_inbox(conn, loan["id"], inbox_id, item["amount"])
