@@ -1907,12 +1907,18 @@ def _loan_amount_matches(loan, amount):
     등록해둔 월상환액은 처음 등록할 때의 추정치일 뿐이다 - 1원까지
     맞아야 한다면 사실상 영원히 자동매칭이 안 되는 걸 실제로 확인함
     (메리츠화재 보험계약대출: 등록값 7,000원인데 실제 알림은 7,326원).
-    등록값의 20%까지는 같은 결제로 본다(그 이상 벌어지면 다른 대출과
-    헷갈릴 위험이 커서 더는 안 봐줌)."""
+    "거치식" 대출(거치식원금균등분할/거치식_원리금균등분할상환 등,
+    표기가 통일돼있지 않아 접두사로만 확인)도 같은 이유로 매달 금액이
+    달라질 수 있다고 사용자가 직접 확인해줌(신한카드(할부금융) 일반사업자
+    사업자금대출: 등록값 430,000원인데 실제 알림은 428,170원) - 거치
+    기간 종료 여부와 무관하게 항상 변동 가능하다고 봐서 구분 안 하고
+    같이 넓힌다. 등록값의 20%까지는 같은 결제로 본다(그 이상 벌어지면
+    다른 대출과 헷갈릴 위험이 커서 더는 안 봐줌)."""
     if not loan["monthly_payment"]:
         return False
     diff = abs(loan["monthly_payment"] - amount)
-    if (loan["repayment_type"] or "") == "만기일시상환":
+    rtype = loan["repayment_type"] or ""
+    if rtype == "만기일시상환" or rtype.startswith("거치식"):
         return diff <= max(1, loan["monthly_payment"] * 0.2)
     return diff < 1
 
@@ -1936,8 +1942,12 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
     대출 상환 알림은 실제로는 거의 항상 "이자"/"원금"/"원리금"/"상환" 중
     하나를 포함하므로(메리츠화재이자/흥국융자이자/대출이자납입/
     대출이자결산/이자상환/원금·이자 자동이체 - 진단 텍스트로 전부 직접
-    확인함), 이 단어가 하나도 없으면 아무리 금액+날짜가 맞아도 매칭하지
-    않는다."""
+    확인함), 이 단어가 하나도 없으면 매칭하지 않는다. 다만 "신한할부금융
+    428,170원"처럼 그 네 단어가 전혀 없어도(실제로 재현됨) 알림 문구에
+    그 대출 이름의 고유한 단어(예: "할부금융")가 그대로 들어있으면 매칭을
+    허용한다 - 이미 금액+날짜로 대출 하나만 특정된 뒤에 거는 추가 확인일
+    뿐이라(여러 대출 중에서 이름으로 고르는 게 아님), "대출"/"신용"/
+    "사업자" 같은 흔한 말은 여기서도 신호로 안 쓴다(_LOAN_NAME_GENERIC_WORDS)."""
     item = conn.execute(
         "SELECT * FROM inbox_items WHERE id = ? AND status = 'pending'", (inbox_id,)
     ).fetchone()
@@ -1945,8 +1955,6 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
         return False
     text = f"{item['merchant'] or ''} {item['raw_text'] or ''}"
     if not any(k in text for k in ("통장", "계좌", "출금", "잔액")):
-        return False
-    if not any(k in text for k in ("이자", "원금", "원리금", "상환")):
         return False
     if _is_loan_reminder_text(text):
         return False
@@ -1962,7 +1970,15 @@ def _try_auto_match_loan_amount_date(conn, inbox_id):
     ]
     if len(matches) != 1:
         return False
-    _mark_loan_paid_from_inbox(conn, matches[0]["id"], inbox_id, item["amount"])
+    loan = matches[0]
+    has_generic_keyword = any(k in text for k in ("이자", "원금", "원리금", "상환"))
+    name_words = re.findall(r"[가-힣A-Za-z0-9]{4,}", loan["name"] or "")
+    has_loan_name_hint = any(
+        w in text for w in name_words if w not in _LOAN_NAME_GENERIC_WORDS
+    )
+    if not (has_generic_keyword or has_loan_name_hint):
+        return False
+    _mark_loan_paid_from_inbox(conn, loan["id"], inbox_id, item["amount"])
     return True
 
 
