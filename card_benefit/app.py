@@ -1877,26 +1877,37 @@ def _try_auto_match_loan_account_text(conn, inbox_id):
     # 예: "KB국민은행") 아래 l["withdrawal_account"] in text가 그 은행명을
     # 언급하는 모든 알림과 매칭돼버려 금액/날짜 무관 오매칭이 난다. 숫자가
     # 있는 경우에만 매칭을 시도한다.
-    matches = [
-        l for l in loans
-        if _account_digits(l["withdrawal_account"])
-        and (
-            l["withdrawal_account"] in text
-            or _account_digits(l["withdrawal_account"]) in text_digits
-            # 계좌번호를 전체로 등록해도, 은행 알림 자체가 가운데를
-            # 마스킹하고 뒷자리만 보여주는 경우(실제로 케이뱅크/IBK 쪽
-            # 알림에서 확인됨: "듀얼K입출금통장(0042)", "395-******-01-018")
-            # 전체 번호로는 못 찾는다. 등록값이 충분히 긴 진짜 계좌번호일
-            # 때(4자리보다 길 때만 - 이미 짧은 라벨이면 위에서 처리됨)
-            # 뒷 4자리만으로도 찾아본다 - 은행마다 어디를 마스킹하는지
-            # 다 달라서(은행 하나하나 골라서 짧게/길게 등록값을 맞추는 게
-            # 아니라) 코드가 등록값 하나(전체 번호)로 양쪽 다 커버한다.
-            or (
-                len(_account_digits(l["withdrawal_account"])) > 4
-                and _account_digits(l["withdrawal_account"])[-4:] in text_digits
-            )
-        )
-    ]
+    # 계좌번호를 전체로 등록해도, 은행 알림 자체가 어디를 마스킹하는지가
+    # 은행마다 다르다(케이뱅크는 뒷 4자리만 보여주고, 하나은행/IBK는 뒷
+    # 5자리 이상을 보여줌). 고정된 한 길이로만 비교하면 둘 다를 동시에
+    # 만족시킬 수 없어서(4자리로 하면 케이뱅크는 맞지만 하나은행 알림의
+    # "(구)" 옛 계좌 뒷자리랑 다른 대출 계좌 뒷 4자리가 우연히 겹쳐
+    # 혼선이 남; 5자리로 하면 그 충돌은 없어지지만 케이뱅크는 아예 못
+    # 찾음 - 둘 다 실제로 재현해서 확인함), 대출마다 "그 알림에서 실제로
+    # 맞아떨어지는 가장 긴 뒷자리 수"를 구해서, 더 길게(더 구체적으로)
+    # 맞은 대출을 우선한다 - 같은 알림에서 어떤 대출은 뒷 5자리까지
+    # 맞고 다른 대출은 우연히 뒷 4자리만 맞았다면, 5자리까지 맞은 쪽만
+    # 진짜로 보고 4자리 우연의 일치는 무시한다.
+    def _account_match_score(registered, digits):
+        if registered in text or digits in text_digits:
+            return 100
+        for n in range(9, 3, -1):
+            if len(digits) > n and digits[-n:] in text_digits:
+                return n
+        return None
+
+    scored = []
+    for l in loans:
+        digits = _account_digits(l["withdrawal_account"])
+        if not digits:
+            continue
+        score = _account_match_score(l["withdrawal_account"], digits)
+        if score is not None:
+            scored.append((l, score))
+    matches = []
+    if scored:
+        best = max(s for _, s in scored)
+        matches = [l for l, s in scored if s == best]
     if len(matches) > 1:
         if "이자상환" in text:
             narrowed = [l for l in matches if (l["repayment_type"] or "") == "만기일시상환"]
@@ -6358,8 +6369,11 @@ def _merge_duplicate_loan_withdrawal_accounts():
     쪽에 "등록값이 충분히 길면 뒷 4자리만으로도 찾아본다"는 보완 로직을
     추가해서 코드 쪽에서 해결했다(대출마다 등록 형식을 다르게 가져가는
     게 아니라, 전체번호 하나로 통일해도 코드가 양쪽 다 커버하게 함).
-    "IBK개인"(5개 대출 공용)만 전체번호를 받은 적이 없어서(알림에
-    항상 마스킹된 채로만 옴) 그 마스킹된 형태 그대로 둔다."""
+    이어서 받은 전체번호로 "IBK개인"/"광주은행"/"KB사업자"/"하나은행"도
+    마저 통일한다. "하나은행"은 실제 알림에 신/구 계좌번호가 같이 찍힌
+    걸 직접 봤는데("106-******-24107(구)620****16681" - 구번호 끝자리가
+    예전에 등록했던 6681), 사용자가 불러준 새 번호(106-891584-24107)는
+    그 알림의 새 계좌번호 쪽과 일치해서 그대로 쓴다."""
     conn = get_conn()
     try:
         renames = [
@@ -6370,7 +6384,11 @@ def _merge_duplicate_loan_withdrawal_accounts():
             ("0042", "케이뱅크 100-134-550042"),
             ("케이뱅크 0042", "케이뱅크 100-134-550042"),
             ("토스뱅크", "토스뱅크 1000-0603-4545"),
-            ("IBK개인", "IBK개인 375-******-02-016"),
+            ("IBK개인", "IBK개인 375-050140-02-016"),
+            ("IBK개인 375-******-02-016", "IBK개인 375-050140-02-016"),
+            ("광주은행", "광주은행 1121-034-843545"),
+            ("KB사업자", "KB국민은행 사업 522301-01-395776"),
+            ("하나은행 6681", "하나은행 106-891584-24107"),
         ]
         for old, new in renames:
             conn.execute("UPDATE loans SET withdrawal_account = ? WHERE withdrawal_account = ?", (new, old))
