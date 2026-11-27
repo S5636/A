@@ -6331,12 +6331,33 @@ def _retry_auto_match_all_pending():
         conn.close()
 
 
+def _merge_duplicate_loan_withdrawal_accounts():
+    """"IBK사업자"(계좌번호 없는 라벨만)로 등록된 대출과 "IBK사업자
+    395-01-018"(계좌번호까지 있는 값)로 등록된 대출이 실제로는 같은
+    계좌인데 서로 다른 값으로 등록돼 있어서, 출금계좌 선택 목록에
+    둘 다 따로 보이고 있었다(실제로 지적받음). 계좌번호가 있는 값이
+    자동매칭(계좌번호 비교)에 더 쓸모 있으니, 계좌번호 없는 쪽을
+    있는 쪽으로 합친다."""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE loans SET withdrawal_account = 'IBK사업자 395-01-018' "
+            "WHERE withdrawal_account = 'IBK사업자'"
+        )
+        conn.commit()
+    except BaseException as e:
+        _reraise_if_fatal(e)
+    finally:
+        conn.close()
+
+
 init_db()
 apply_startup_data_fixes()
 _revalidate_loan_attachments()
 _retry_unassigned_loan_attachments()
 _retry_medical_no_benefit_items()
 _fix_online_japhwa_overcredit()
+_merge_duplicate_loan_withdrawal_accounts()
 _retry_auto_match_all_pending()
 
 if __name__ == "__main__":
