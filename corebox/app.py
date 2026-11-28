@@ -487,16 +487,53 @@ _SALARY_DEDUCT_FIELDS = [
     ("loan_repayment", "학자금대출상환"),
 ]
 
+# 회사마다 명세서 항목 순서가 다르고(지급/공제 칸 배치가 회사별로 다름),
+# 이름도 조금씩 다르다(예: "갑근세"↔"소득세", "건강보험"에 "요양보험"이
+# 따로 찍히는 경우) - 2019년식 옛 양식에서 실제로 확인됨. 회사 하나
+# 기준의 고정 순서로만 맞추면 그 회사 양식이 아닌 모든 명세서가 깨지니,
+# 이름이 알려진 동의어 중 하나만 걸리면 그 항목으로 인정하고, 순서는
+# 전혀 안 본다(어느 항목이 몇 번째 줄에 있든 상관없이 전부 찾아낸다).
+_SALARY_PAY_ALIASES = {
+    "base_pay": ["기본급"],
+    "overtime_pay": ["연장수당"],
+    "position_pay": ["직책수당"],
+    "night_pay": ["야근수당"],
+    "overnight_pay": ["철야수당"],
+    "special_pay": ["특근수당"],
+    "aiming_pay": ["에이밍"],
+    # "기타"는 너무 짧아서 "기타공제"(공제 쪽 항목, 받을 칸이 따로 없어
+    # 추적 안 함)까지 걸려버릴 수 있다 - 매칭할 때 줄에 "공제"가 같이
+    # 있으면 "기타"로 인정하지 않는다.
+    "other_pay": ["기타수당", "주휴수당", "기타"],
+}
+_SALARY_DEDUCT_ALIASES = {
+    "income_tax": ["갑근세", "소득세"],
+    "local_tax": ["주민세"],
+    "national_pension": ["국민연금"],
+    # "요양보험"(장기요양보험료)은 건강보험과 따로 찍히기도 하는데, 받을
+    # 칸이 따로 없어서 건강보험에 합산한다(실제로 대부분 회사가 건강보험
+    # 고지서에도 둘을 합쳐서 보여줌).
+    "health_insurance": ["건강보험", "요양보험"],
+    "employment_insurance": ["고용보험"],
+    "loan_repayment": ["학자금대출상환"],
+}
+_SALARY_GROSS_PAY_LABELS = ["총지급액", "지급총액"]
+_SALARY_DEDUCT_TOTAL_LABELS = ["공제총액", "총공제액"]
+_SALARY_NET_PAY_LABELS = ["실지급액"]
 
-def _salary_label_match(line, label):
+
+def _salary_label_ratio(line, label):
     """OCR이 "연장"을 "면장", "건강"을 "건감"처럼 한 글자씩 틀리게
     읽는 경우가 많아서, 글자가 정확히 같은지 대신 비슷한 정도(문자열
     유사도)로 판단한다."""
     cleaned = re.sub(r"[()\s]", "", line)
     if not cleaned:
-        return False
-    ratio = difflib.SequenceMatcher(None, cleaned[: len(label) + 2], label).ratio()
-    return ratio > 0.55
+        return 0.0
+    return difflib.SequenceMatcher(None, cleaned[: len(label) + 2], label).ratio()
+
+
+def _salary_label_match(line, label):
+    return _salary_label_ratio(line, label) > 0.55
 
 
 def _salary_parse_number(line):
@@ -579,40 +616,78 @@ def _extract_salary_slip(text):
     표인데, 지급 항목과 공제 항목이 나란히 두 칸으로 인쇄돼 있어서 OCR이
     왼쪽 한 줄, 오른쪽 한 줄 순서로 번갈아 읽어온다. 값이 없는 항목(예:
     이번 달에 야근수당이 없으면 "야근수당()" 바로 다음 줄이 숫자가
-    아니라 다음 항목명)은 건너뛴다. 항목 순서는 고정이라고 보고
-    (_SALARY_PAY_FIELDS/_SALARY_DEDUCT_FIELDS), 그 순서대로 하나씩
-    맞춰나간다."""
+    아니라 다음 항목명)은 건너뛴다.
+
+    항목이 몇 번째 줄에 있는지(순서)는 전혀 안 보고, 알려진 이름(동의어
+    포함 - _SALARY_PAY_ALIASES/_SALARY_DEDUCT_ALIASES)이 줄에 있는지만
+    본다 - 예전엔 "정해진 순서대로 하나씩" 맞춰나갔는데, 회사마다 항목
+    순서/이름이 달라서(2019년식 옛 양식: "갑근세" 대신 "소득세", 공제
+    항목이 지급 항목보다 먼저 나옴) 그 회사 양식이 아니면 전부 깨지는
+    문제가 실제로 있었다. 어느 회사 양식이든 같은 항목이 어디에 있든
+    찾아낼 수 있게 순서 의존성을 없앴다."""
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     result = {}
-    pay_fields = list(_SALARY_PAY_FIELDS)
-    deduct_fields = list(_SALARY_DEDUCT_FIELDS)
-    subtotal_seen = 0
+    assigned = set()
+    gross_seen = False
+    deduct_total_seen = False
+
+    def find_key(line):
+        for key, labels in _SALARY_PAY_ALIASES.items():
+            if key in assigned:
+                continue
+            for label in sorted(labels, key=len, reverse=True):
+                if label == "기타" and "공제" in line:
+                    continue
+                if _salary_label_match(line, label):
+                    return key
+        for key, labels in _SALARY_DEDUCT_ALIASES.items():
+            if key in assigned and key != "health_insurance":
+                continue
+            for label in sorted(labels, key=len, reverse=True):
+                if _salary_label_match(line, label):
+                    return key
+        # "총지급액"/"실지급액"/"공제총액"은 서로 3글자가 겹쳐서("지급액"/
+        # "제총액") 퍼지 비교만으로는 서로 헷갈린다(실제로 "총지급액"이
+        # "실지급액"으로 잘못 인식돼 실지급액 칸에 지급총액이 들어가는
+        # 사고가 재현됨) - 하나라도 걸리면 바로 쓰지 않고, 셋 중 제일
+        # 비슷한 것 하나만 고른다.
+        total_candidates = (
+            [("net_pay", lbl) for lbl in _SALARY_NET_PAY_LABELS]
+            + [("gross_pay", lbl) for lbl in _SALARY_GROSS_PAY_LABELS]
+            + [("total_deduction", lbl) for lbl in _SALARY_DEDUCT_TOTAL_LABELS]
+        )
+        best_key, best_ratio = None, 0.55
+        for key, label in total_candidates:
+            ratio = _salary_label_ratio(line, label)
+            if ratio > best_ratio:
+                best_key, best_ratio = key, ratio
+        if best_key:
+            return best_key
+        if _salary_label_match(line, "소계"):
+            # 지급/공제 구분 단어 없이 그냥 "소계"만 찍힌 모던 양식은
+            # 처음 나오는 게 지급소계, 그다음이 공제소계다.
+            return "gross_pay" if not gross_seen else ("total_deduction" if not deduct_total_seen else None)
+        return None
+
     i = 0
     while i < len(lines):
         line = lines[i]
-        matched = False
-        if pay_fields and _salary_label_match(line, pay_fields[0][1]):
-            key, _ = pay_fields.pop(0)
-            matched = True
-        elif deduct_fields and _salary_label_match(line, deduct_fields[0][1]):
-            key, _ = deduct_fields.pop(0)
-            matched = True
-        elif _salary_label_match(line, "소계"):
-            key = "gross_pay" if subtotal_seen == 0 else "total_deduction"
-            subtotal_seen += 1
-            matched = True
-        elif _salary_label_match(line, "실지급액"):
-            key = "net_pay"
-            matched = True
-        if matched:
+        key = find_key(line)
+        if key:
             next_val, consumed = _salary_collect_number(lines, i + 1)
             if next_val is not None:
-                result[key] = next_val
+                if key == "health_insurance" and key in assigned:
+                    result[key] = (result.get(key) or 0) + next_val
+                else:
+                    result[key] = next_val
+                assigned.add(key)
+                if key == "gross_pay":
+                    gross_seen = True
+                elif key == "total_deduction":
+                    deduct_total_seen = True
                 i += 1 + consumed
-            else:
-                i += 1
-        else:
-            i += 1
+                continue
+        i += 1
     # "실지급액"은 하이라이트 배경 때문에 OCR이 제일 잘 틀리는 칸이다 -
     # 반면 지급소계/공제소계는 배경이 없어서 거의 항상 정확하게 읽힌다.
     # 실지급액 = 지급소계 - 공제소계가 항상 성립하므로, 둘 다 읽혔으면
@@ -1679,12 +1754,19 @@ def _backfill_salary_future_year():
     기록을 재검사하고 다시 계산한 연/월이 등록값과 다르면 고친다(재추출
     자체가 실패하면 손대지 않고 그대로 둠 - OCR이 숫자를 아예 못 읽는
     경우는 사용자가 직접 수정해야 함). 한 번 뽑은 글자는 캐시해서, 이미
-    맞게 등록된 기록들을 재시작마다 다시 OCR 돌리지 않게 한다."""
+    맞게 등록된 기록들을 재시작마다 다시 OCR 돌리지 않게 한다.
+
+    같은 파일을 다시 읽는 김에 항목 금액(_extract_salary_slip)도 같이
+    다시 계산한다 - "항목 순서가 정해져 있다"고 보던 예전 로직으로
+    회사별 양식이 다른 옛 명세서는 금액이 아예 다 틀리게 들어갔을 수
+    있다(실제로 확인됨). 새 로직(동의어/순서 무관 매칭)으로 다시 계산한
+    값이 있으면(None이 아니면) 등록값을 덮어쓴다."""
     conn = models.get_conn()
     try:
         rows = conn.execute(
-            "SELECT id, year, month, file_name, original_name, extracted_text FROM salary_records "
-            "WHERE file_name != ''"
+            "SELECT id, year, month, file_name, original_name, extracted_text, "
+            + ", ".join(_SALARY_FIELD_NAMES) +
+            " FROM salary_records WHERE file_name != ''"
         ).fetchall()
         for row in rows:
             path = os.path.join(models.UPLOAD_DIR, row["file_name"])
@@ -1704,6 +1786,17 @@ def _backfill_salary_future_year():
                 conn.execute(
                     "UPDATE salary_records SET year=?, month=? WHERE id=?",
                     (fixed_year, fixed_month, row["id"]),
+                )
+            reparsed = _extract_salary_slip(text)
+            changed_fields = {
+                f: reparsed[f] for f in _SALARY_FIELD_NAMES
+                if reparsed.get(f) is not None and reparsed[f] != row[f]
+            }
+            if changed_fields:
+                set_clause = ", ".join(f"{f}=?" for f in changed_fields)
+                conn.execute(
+                    f"UPDATE salary_records SET {set_clause} WHERE id=?",
+                    (*changed_fields.values(), row["id"]),
                 )
         conn.commit()
     finally:
