@@ -1317,12 +1317,17 @@ def diag_salary():
             recalced_year, recalced_month = _extract_salary_period(text)
             if (recalced_year, recalced_month) != (row["year"], row["month"]):
                 mismatch_found = True
-                preview = re.sub(r"\s+", " ", text).strip()[:500]
                 lines.append(
                     f"기록 id={row['id']} 파일={fname} 등록값={row['year']}년 {row['month']}월 "
                     f"-> 재계산값={recalced_year}년 {recalced_month}월"
                 )
-                lines.append(f"  글자 미리보기: {preview}")
+                # 항목(기본급/공제 등) 파싱은 줄바꿈 기준으로 순서대로
+                # 맞춰나가는 로직이라, 공백으로 뭉개버리면 실제 줄 구조를
+                # 볼 수 없어 왜 항목이 안 맞는지 확인이 안 된다 - 원본
+                # 줄바꿈을 그대로 보여준다(이 진단 textarea는 white-space:
+                # pre라 줄바꿈이 그대로 보임).
+                lines.append("  글자 원문(줄바꿈 그대로):")
+                lines.append(text[:1500])
         if not mismatch_found:
             lines.append("(등록값과 재계산값이 다른 기록 없음)")
         text = "\n".join(lines)

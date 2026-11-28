@@ -608,6 +608,11 @@
     const method = editingSalaryId ? "PUT" : "POST";
     state = { ...state, ...await api(url, { method, body: formData }) };
     salaryModal.classList.remove("open");
+    // 연도를 다른 해로 고쳐 저장해도 보던 화면(salaryYear)이 그대로라
+    // 그 해로 넘어가서 보기 전까진 바뀐 게 안 보인다 - 저장한 연도로
+    // 바로 넘어가서 보여준다(실제로 "수정해도 그 연도가 안 보인다"는
+    // 지적을 받음).
+    salaryYear = Number(document.getElementById("salary-year").value) || salaryYear;
     renderSalary();
   });
 
