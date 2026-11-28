@@ -50,6 +50,35 @@
     }
   });
 
+  const salaryDiagModal = document.getElementById("salary-diag-modal");
+  const salaryDiagStatus = document.getElementById("salary-diag-status");
+  const salaryDiagText = document.getElementById("salary-diag-text");
+  document.getElementById("btn-salary-diag").addEventListener("click", async () => {
+    salaryDiagText.value = "";
+    salaryDiagStatus.textContent = "불러오는 중...";
+    salaryDiagModal.classList.add("open");
+    try {
+      const resp = await fetch("/api/diag/salary");
+      const data = await resp.json();
+      salaryDiagText.value = data.text || "";
+      salaryDiagStatus.textContent = resp.ok ? "" : `불러오기 실패 (status ${resp.status})`;
+    } catch (e) {
+      salaryDiagStatus.textContent = `불러오기 실패: ${e}`;
+    }
+  });
+  document.getElementById("salary-diag-close").addEventListener("click", () => {
+    salaryDiagModal.classList.remove("open");
+  });
+  document.getElementById("salary-diag-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(salaryDiagText.value);
+      salaryDiagStatus.textContent = "복사했습니다.";
+    } catch (e) {
+      salaryDiagText.select();
+      salaryDiagStatus.textContent = "자동 복사가 안 돼서 텍스트를 선택해뒀습니다 - 직접 복사해주세요.";
+    }
+  });
+
   // 문서 종류마다 실제로 있는 항목만 표/목록에 보여준다 - 부가세에는
   // 수입금액/소득금액 자체가 없고, 소득금액증명에는 "과세표준액" 같은
   // 게 없다. 목록에 없는 종류는 기본값(금액 하나)으로 처리.

@@ -1279,6 +1279,58 @@ def diag_business_cert():
     return jsonify({"text": text})
 
 
+@app.route("/api/diag/salary")
+def diag_salary():
+    """"2019년 7월 명세서가 2026년 12월로 잘못 등록됐다" 같은 지적에,
+    캡처로는 OCR이 실제로 뭘 읽었는지 알 수가 없어서 직접 확인할 수
+    있게 만든 진단 - 등록된 급여기록 전부를 원본 파일에서 다시 글자를
+    뽑아(캐시돼있으면 그대로 재사용), 지금 등록된 연/월과 그 글자로
+    다시 계산한 연/월이 다른 것만 짚어서 보여준다. 코드가 맞는지
+    추측하지 않고 실제 저장된 파일로 바로 확인한다."""
+    conn = models.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, year, month, file_name, original_name, extracted_text FROM salary_records ORDER BY id"
+        ).fetchall()
+        lines = ["[급여명세서 연/월 진단 - 등록값과 재계산값이 다른 것만 표시]"]
+        mismatch_found = False
+        for row in rows:
+            if not row["file_name"]:
+                continue
+            path = os.path.join(models.UPLOAD_DIR, row["file_name"])
+            try:
+                with open(path, "rb") as f:
+                    file_bytes = f.read()
+            except Exception as e:
+                lines.append(f"기록 id={row['id']} 파일={row['original_name']} -> 파일을 못 읽음: {e}")
+                mismatch_found = True
+                continue
+            fname = row["original_name"] or row["file_name"]
+            text = row["extracted_text"] or _extract_text_from_file(fname, file_bytes)
+            if not text:
+                lines.append(
+                    f"기록 id={row['id']} 파일={fname} 등록값={row['year']}년 {row['month']}월 "
+                    f"-> 글자를 하나도 못 뽑음(스캔 품질 등)"
+                )
+                mismatch_found = True
+                continue
+            recalced_year, recalced_month = _extract_salary_period(text)
+            if (recalced_year, recalced_month) != (row["year"], row["month"]):
+                mismatch_found = True
+                preview = re.sub(r"\s+", " ", text).strip()[:500]
+                lines.append(
+                    f"기록 id={row['id']} 파일={fname} 등록값={row['year']}년 {row['month']}월 "
+                    f"-> 재계산값={recalced_year}년 {recalced_month}월"
+                )
+                lines.append(f"  글자 미리보기: {preview}")
+        if not mismatch_found:
+            lines.append("(등록값과 재계산값이 다른 기록 없음)")
+        text = "\n".join(lines)
+    finally:
+        conn.close()
+    return jsonify({"text": text})
+
+
 _SALARY_FIELD_NAMES = [
     "base_pay", "overtime_pay", "position_pay", "night_pay", "overnight_pay",
     "special_pay", "aiming_pay", "other_pay", "gross_pay", "income_tax", "local_tax",

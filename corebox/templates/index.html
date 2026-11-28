@@ -54,6 +54,7 @@
         <label class="btn small" for="salary-upload-file" style="margin:0;">📄 올리기</label>
         <input type="file" id="salary-upload-file" accept="image/*,application/pdf" multiple style="display:none;">
         <button class="btn secondary small" id="btn-add-salary">+ 입력</button>
+        <button class="btn secondary small" id="btn-salary-diag">연/월 진단</button>
       </div>
       <div id="salary-upload-log"></div>
 
@@ -74,6 +75,18 @@
       <div class="modal-actions">
         <button class="btn secondary" id="biz-cert-diag-copy">전체 복사</button>
         <button class="btn" id="biz-cert-diag-close">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="salary-diag-modal">
+    <div class="modal">
+      <h3>급여 연/월 진단</h3>
+      <p id="salary-diag-status" style="color:var(--text-muted); font-size:12px;"></p>
+      <textarea id="salary-diag-text" readonly style="width:100%; height:55vh; font-size:12px; white-space:pre;"></textarea>
+      <div class="modal-actions">
+        <button class="btn secondary" id="salary-diag-copy">전체 복사</button>
+        <button class="btn" id="salary-diag-close">닫기</button>
       </div>
     </div>
   </div>
