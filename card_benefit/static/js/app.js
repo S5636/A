@@ -1686,6 +1686,35 @@
     }
   });
 
+  const dsrDiagModal = document.getElementById("dsr-diag-modal");
+  const dsrDiagStatus = document.getElementById("dsr-diag-status");
+  const dsrDiagText = document.getElementById("dsr-diag-text");
+  document.getElementById("btn-dsr-diag").addEventListener("click", async () => {
+    dsrDiagText.value = "";
+    dsrDiagStatus.textContent = "불러오는 중...";
+    dsrDiagModal.classList.add("open");
+    try {
+      const resp = await fetch("/api/loans/dsr-diag");
+      const data = await resp.json();
+      dsrDiagText.value = data.text || "";
+      dsrDiagStatus.textContent = resp.ok ? "" : `불러오기 실패 (status ${resp.status})`;
+    } catch (e) {
+      dsrDiagStatus.textContent = `불러오기 실패: ${e}`;
+    }
+  });
+  document.getElementById("dsr-diag-close").addEventListener("click", () => {
+    dsrDiagModal.classList.remove("open");
+  });
+  document.getElementById("dsr-diag-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(dsrDiagText.value);
+      dsrDiagStatus.textContent = "복사했습니다.";
+    } catch (e) {
+      dsrDiagText.select();
+      dsrDiagStatus.textContent = "자동 복사가 안 돼서 텍스트를 선택해뒀습니다 - 직접 복사해주세요.";
+    }
+  });
+
   const matchConfirmBtn = document.getElementById("match-modal-confirm-selected");
   async function openMatchModal(entityType, item, label) {
     document.getElementById("match-modal-title").textContent = `"${label}" 결제 확인`;

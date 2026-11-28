@@ -5396,6 +5396,108 @@ def loan_diag_json():
     return jsonify({"text": _build_loan_diag_text()})
 
 
+def _dsr_annual_amount(loan):
+    """DSR(총부채원리금상환비율) 산정 시 금융기관이 쓰는 표준 환산 방식을
+    그대로 따른다 - 등록해둔 "월상환액"을 그냥 ×12 하면 안 되는 대출
+    종류가 있다:
+    - 만기일시상환(이자만 내는 신용대출류): 실제 내는 이자가 아니라
+      "잔액 ÷ 10년"으로 환산(신용대출 일시상환의 표준 환산 방식).
+    - 마이너스통장(한도대출): 실제 쓴 금액이 아니라 "한도(원금) ÷ 10년"
+      으로 환산 - 당장 안 쓰고 있어도 한도 전체를 기준으로 봄.
+    - 거치식(거치기간 중엔 이자만, 종료 후 원리금분할): 아직 거치
+      기간이면 "잔액×금리"(연이자), 끝났으면 등록된 월상환액×12.
+    - 취업후상환(학자금): 소득 기준 상환이라 지금 상환 의무가 있는지
+      알 수 없어 0으로 보고 따로 표시한다(실제 상환 중이면 직접 확인
+      필요).
+    - 그 외(원리금균등/원금균등 등 실제 분할상환 중인 대출): 등록된
+      월상환액×12를 그대로 쓴다.
+    반환값은 (연환산액 또는 None(계산 불가), 계산식 설명 문자열)."""
+    principal = loan["principal"] or 0
+    balance = loan["current_balance"] or 0
+    rate = loan["interest_rate"] or 0
+    monthly = loan["monthly_payment"] or 0
+    rtype = loan["repayment_type"] or ""
+
+    if rtype == "만기일시상환":
+        if balance <= 0:
+            return None, "잔액 미입력으로 계산 불가"
+        annual = balance / 10
+        return annual, f"잔액÷10년 = {balance:,.0f}÷10"
+
+    if rtype == "마이너스통장(수시)":
+        if principal <= 0:
+            return None, "한도(원금) 미입력으로 계산 불가"
+        annual = principal / 10
+        return annual, f"한도÷10년 = {principal:,.0f}÷10"
+
+    if rtype.startswith("거치식"):
+        in_grace = True
+        if loan["repayment_start_date"]:
+            try:
+                in_grace = date.today() < date.fromisoformat(loan["repayment_start_date"])
+            except ValueError:
+                pass
+        if in_grace:
+            if balance <= 0 or rate <= 0:
+                return None, "거치 중으로 추정되나 잔액/금리 미입력으로 계산 불가"
+            annual = balance * rate / 100
+            return annual, f"거치 중(이자만) = 잔액×금리 = {balance:,.0f}×{rate}%"
+        annual = monthly * 12
+        return annual, f"거치 종료, 월상환액×12 = {monthly:,.0f}×12"
+
+    if rtype == "취업후상환":
+        return 0, "취업후상환(소득연계) - 지금 실제 상환 중인지 알 수 없어 0으로 집계함, 직접 확인 필요"
+
+    if monthly <= 0:
+        return None, "월상환액 미입력으로 계산 불가"
+    annual = monthly * 12
+    return annual, f"월상환액×12 = {monthly:,.0f}×12"
+
+
+def _build_dsr_diag_text():
+    """DSR 계산에 필요한 대출별 원금/잔액/금리/상환방식/대출일/만기일을
+    한 번에 보여주고, 대출 종류별 표준 환산 방식(_dsr_annual_amount)으로
+    연환산 상환액까지 계산해서 보여준다 - "DSR 계산해줘"라는 요청에
+    캡처/수기 입력 없이 바로 쓸 수 있게."""
+    conn = get_conn()
+    try:
+        loans = conn.execute("SELECT * FROM loans ORDER BY sort_order ASC, id ASC").fetchall()
+        lines = ["[DSR 계산용 대출 전체 진단]"]
+        total_annual = 0
+        incomplete = []
+        for l in loans:
+            principal = l["principal"] or 0
+            balance = l["current_balance"] or 0
+            rate = l["interest_rate"] or 0
+            monthly = l["monthly_payment"] or 0
+            lines.append(f"- {l['name']} (id={l['id']})")
+            lines.append(
+                f"  상환방식: {l['repayment_type'] or '(미입력)'} / 원금: {principal:,.0f}원 / "
+                f"현재잔액: {balance:,.0f}원 / 금리: {rate}% / 대출일: {l['start_date'] or '(미입력)'} / "
+                f"만기일: {l['end_date'] or '(미입력)'} / 등록된 월상환액: {monthly:,.0f}원"
+            )
+            annual, formula = _dsr_annual_amount(l)
+            if annual is None:
+                incomplete.append(l["name"])
+                lines.append(f"  -> 연환산 상환액: 계산 불가 ({formula})")
+            else:
+                lines.append(f"  -> 연환산 상환액(추정): {annual:,.0f}원 ({formula})")
+                total_annual += annual
+        lines.append("")
+        lines.append(f"[전체 대출 연환산 상환액 합계(추정)]: {total_annual:,.0f}원")
+        if incomplete:
+            lines.append(f"[데이터 부족으로 합계에서 빠진 대출]: {', '.join(incomplete)}")
+        text = "\n".join(lines)
+    finally:
+        conn.close()
+    return text
+
+
+@app.route("/api/loans/dsr-diag")
+def dsr_diag_json():
+    return jsonify({"text": _build_dsr_diag_text()})
+
+
 @app.route("/api/export/usage.xlsx")
 def export_usage():
     conn = get_conn()
