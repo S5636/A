@@ -113,6 +113,9 @@ def init_db():
         # 진단"에서 실제로 같은 원인으로 재현됨) - 한 번 뽑은 글자는
         # 캐시해서 재사용한다.
         _ensure_column(conn, "documents", "extracted_text", "extracted_text TEXT DEFAULT ''")
+        # 급여명세서 연도 재검사(_backfill_salary_future_year)도 같은
+        # 이유로 재추출 결과를 캐시해서 재시작마다 다시 OCR 돌리지 않게 함.
+        _ensure_column(conn, "salary_records", "extracted_text", "extracted_text TEXT DEFAULT ''")
 
         # 2026-11: 자동분류 로직이 아직 "발급일자"보다 "과세기간"을 우선
         # 보게 고쳐지기 전에 올린 "22년1기" 부가세 과세표준증명이 발급일자

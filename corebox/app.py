@@ -544,7 +544,14 @@ def _extract_salary_period(text):
     하이픈으로 찍힌 "2026-05-08" 같은 날짜가 그 급여를 받은 지급일이다
     (이름 옆 "2025,10,13,"처럼 쉼표로 된 날짜는 다른 용도라 안 씀).
     지급일의 연도를 기준으로 일한 연도를 구하되, 12월에 일하고 다음 해
-    1월에 받는 경우만 한 해 앞당긴다."""
+    1월에 받는 경우만 한 해 앞당긴다.
+
+    "2019년 4월 급여명세서"처럼 제목에 연도까지 바로 찍혀 나오는 옛날
+    양식은 하이픈 지급일 자체가 없어서 위 방식으론 연도를 못 구하고,
+    업로드 화면에서 고른 연도(보통 기본값=올해)로 조용히 잘못 떨어진다
+    (실제로 2019년 명세서가 2026년으로 등록된 걸 확인함). 하이픈 지급일이
+    없으면, "월 급여" 바로 앞쪽에 붙어있는 "20XX년"을 제목의 연도로 보고
+    대신 쓴다."""
     m_month = _SALARY_WORK_MONTH_RE.search(text)
     worked_month = int(m_month.group(1)) if m_month else None
     if worked_month is not None and not (1 <= worked_month <= 12):
@@ -555,6 +562,10 @@ def _extract_salary_period(text):
     if worked_month and m_date:
         pay_year, pay_month = int(m_date.group(1)), int(m_date.group(2))
         worked_year = pay_year - 1 if (worked_month == 12 and pay_month == 1) else pay_year
+    if worked_year is None and worked_month and m_month:
+        title_year_m = re.search(r"(20\d{2})\s*년", text[max(0, m_month.start() - 20):m_month.start()])
+        if title_year_m:
+            worked_year = int(title_year_m.group(1))
     # 이미 지난 달 월급명세서가 미래 연도로 읽힐 수는 없다(OCR이 숫자
     # 하나를 잘못 읽은 것) - 그런 값은 버리고 업로드할 때 고른 연도를
     # 대신 쓰게 한다.
@@ -1318,11 +1329,11 @@ def create_salary_auto():
         placeholders = ", ".join("?" for _ in _SALARY_FIELD_NAMES)
         cur = conn.execute(
             f"""INSERT INTO salary_records (year, month, {columns}, file_name, original_name,
-               file_hash) VALUES (?, ?, {placeholders}, ?, ?, ?)""",
+               file_hash, extracted_text) VALUES (?, ?, {placeholders}, ?, ?, ?, ?)""",
             (
                 year, month,
                 *[parsed.get(f) for f in _SALARY_FIELD_NAMES],
-                file_name, uploaded.filename, file_hash,
+                file_name, uploaded.filename, file_hash, text or "",
             ),
         )
         conn.commit()
@@ -1395,16 +1406,20 @@ def update_salary(record_id):
             file_name = f"{uuid.uuid4().hex}{ext}"
             uploaded.save(os.path.join(models.UPLOAD_DIR, file_name))
 
+        # 파일을 새로 올렸으면 캐시해둔 추출 글자도 비워야 한다 - 안
+        # 비우면 연도 재검사 등이 옛 파일 글자를 그대로 재사용한다.
+        extracted_text = "" if (uploaded and uploaded.filename) else item["extracted_text"]
         set_clause = ", ".join(f"{f}=?" for f in _SALARY_FIELD_NAMES)
         conn.execute(
             f"""UPDATE salary_records SET year=?, month=?, {set_clause}, file_name=?,
-               original_name=?, memo=? WHERE id=?""",
+               original_name=?, memo=?, extracted_text=? WHERE id=?""",
             (
                 _parse_year(request.form.get("year", item["year"])),
                 _parse_year(request.form.get("month", item["month"])),
                 *[_parse_float(request.form.get(f, item[f])) for f in _SALARY_FIELD_NAMES],
                 file_name, original_name,
                 (request.form.get("memo", item["memo"]) or "").strip(),
+                extracted_text,
                 record_id,
             ),
         )
@@ -1597,13 +1612,21 @@ def _backfill_salary_future_year():
     """미래 연도 방어 코드를 넣기 전에 올라간 급여명세서는 이미 틀린
     연도로 저장돼 있다. 아직 오지 않은 연도로 찍힌 기록만 실제 원본
     파일을 다시 읽어서 올바른 연/월로 고친다 - 못 읽으면 그대로 두고
-    사용자가 직접 수정 버튼으로 고치게 한다."""
+    사용자가 직접 수정 버튼으로 고치게 한다.
+
+    "2019년 4월 급여명세서"처럼 제목에 연도가 바로 찍힌 옛날 양식은
+    하이픈 지급일이 없어서 연도 추출이 실패하고, 실패하면 업로드 화면의
+    기본값(보통 올해)으로 조용히 떨어진다 - 즉 "미래 연도"가 아니라
+    "올해로 잘못 찍힘"이 된다(실제로 2019년 명세서가 2026년으로 등록된
+    걸 확인함). 그래서 올해로 찍힌 기록까지 같이 재검사한다(기존엔
+    "올해보다 큰 연도"만 봤음). 한 번 뽑은 글자는 캐시해서, 이미
+    맞게 등록된 진짜 올해 기록들을 재시작마다 다시 OCR 돌리지 않게 한다."""
     conn = models.get_conn()
     try:
         this_year = datetime.date.today().year
         rows = conn.execute(
-            "SELECT id, year, month, file_name, original_name FROM salary_records "
-            "WHERE year > ? AND file_name != ''", (this_year,),
+            "SELECT id, year, month, file_name, original_name, extracted_text FROM salary_records "
+            "WHERE year >= ? AND file_name != ''", (this_year,),
         ).fetchall()
         for row in rows:
             path = os.path.join(models.UPLOAD_DIR, row["file_name"])
@@ -1613,11 +1636,13 @@ def _backfill_salary_future_year():
             except Exception:
                 continue
             fname = row["original_name"] or row["file_name"]
-            text = _extract_text_from_file(fname, file_bytes)
+            text = row["extracted_text"] or _extract_text_from_file(fname, file_bytes)
             if not text:
                 continue
+            if not row["extracted_text"]:
+                conn.execute("UPDATE salary_records SET extracted_text = ? WHERE id = ?", (text, row["id"]))
             fixed_year, fixed_month = _extract_salary_period(text)
-            if fixed_year and fixed_month:
+            if fixed_year and fixed_month and (fixed_year != row["year"] or fixed_month != row["month"]):
                 conn.execute(
                     "UPDATE salary_records SET year=?, month=? WHERE id=?",
                     (fixed_year, fixed_month, row["id"]),
