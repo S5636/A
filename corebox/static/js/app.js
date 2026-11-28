@@ -483,23 +483,24 @@
     }
   }
   const today = new Date();
-  {
+  // 업로드 기본 연도 선택지를 "최근 3년치"처럼 고정된 범위로 두면
+  // 2019년 같은 오래된 명세서를 올릴 때 고를 수가 없다(실제로 지적받음:
+  // "등록된 연도만 띄워도 되잖아") - 실제 등록된 기록들의 연도 + 올해를
+  // 합쳐서 선택지를 만든다. 기록이 느는 만큼 자동으로 넓어진다.
+  function refreshSalaryUploadYearOptions() {
     const sel = document.getElementById("salary-upload-year");
+    const prevValue = sel.value;
     const thisYear = today.getFullYear();
-    // 최근 3년치만 있어서 2019년처럼 오래된 명세서를 올릴 때 연도를
-    // 고를 수가 없었다(실제로 지적받음) - 20년 전까지 넓힌다.
-    for (let y = thisYear - 20; y <= thisYear; y++) {
-      const opt = document.createElement("option");
-      opt.value = String(y);
-      opt.textContent = `${y}년`;
-      sel.appendChild(opt);
-    }
-    sel.value = String(thisYear);
+    const years = [...new Set([...(state.salary || []).map((s) => s.year), thisYear])].sort((a, b) => a - b);
+    sel.innerHTML = years.map((y) => `<option value="${y}">${y}년</option>`).join("");
+    sel.value = years.includes(Number(prevValue)) ? prevValue : String(thisYear);
   }
+  refreshSalaryUploadYearOptions();
   document.getElementById("salary-upload-month").value = String(today.getMonth() + 1);
 
   let salaryYear = null;
   function renderSalary() {
+    refreshSalaryUploadYearOptions();
     const label = document.getElementById("salary-year-label");
     const area = document.getElementById("salary-table-area");
     if (!state.salary.length) {
@@ -509,7 +510,14 @@
       return;
     }
     const years = [...new Set(state.salary.map((s) => s.year))];
-    if (salaryYear === null || !years.includes(salaryYear)) {
+    // 예전엔 "지금 보는 연도에 기록이 하나도 없으면" 매번 기록 있는
+    // 연도로 강제로 되돌렸다 - 그래서 ◀/▶로 아무리 눌러도 기록 없는
+    // 연도(예: 수정 전 2019년)로는 절대 못 넘어갔다(실제로 지적받음 -
+    // 수정이 제대로 됐는지 확인하려고 그 연도로 가려 해도 안 갔음).
+    // 맨 처음 들어왔을 때(salaryYear가 아직 한 번도 안 정해졌을 때)만
+    // 기록 있는 연도로 자동으로 맞추고, 그 다음부턴 사용자가 ◀/▶나
+    // 수정 저장으로 직접 고른 연도를 그대로 존중한다.
+    if (salaryYear === null) {
       salaryYear = Math.max(...years);
     }
     label.textContent = `${salaryYear}년 급여`;
