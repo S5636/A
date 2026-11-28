@@ -486,7 +486,9 @@
   {
     const sel = document.getElementById("salary-upload-year");
     const thisYear = today.getFullYear();
-    for (let y = thisYear - 3; y <= thisYear; y++) {
+    // 최근 3년치만 있어서 2019년처럼 오래된 명세서를 올릴 때 연도를
+    // 고를 수가 없었다(실제로 지적받음) - 20년 전까지 넓힌다.
+    for (let y = thisYear - 20; y <= thisYear; y++) {
       const opt = document.createElement("option");
       opt.value = String(y);
       opt.textContent = `${y}년`;
